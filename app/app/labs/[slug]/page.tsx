@@ -3,10 +3,9 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { LABS, getLab } from "@/lib/labs";
 import { LabPanel } from "@/components/lab-panel";
+import { LabGuide } from "@/components/lab-guide";
 
 type Objective = { id: string; description: string };
 
@@ -69,9 +68,7 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
         {/* guide */}
         <div className="lg:col-span-2">
           {lab.ready && instructions ? (
-            <article className="lab-md rounded-2xl border border-line bg-surface p-6 sm:p-7">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{instructions}</ReactMarkdown>
-            </article>
+            <LabGuide slug={lab.slug} instructions={instructions} />
           ) : (
             <div className="rounded-2xl border border-line bg-canvas p-6 text-base text-ink-soft">
               {lab.ready ? "Guide loading…" : "This lab is coming soon."}

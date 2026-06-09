@@ -27,6 +27,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [rated, setRated] = useState<"up" | "down" | null>(null);
   const [busy, setBusy] = useState(false);
   const expiryFired = useRef(false);
+  const consoleWindowRef = useRef<Window | null>(null);
   const lab = getLab(slug);
 
   function clearSession() {
@@ -34,6 +35,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     setSession(null);
     setRated(null);
     expiryFired.current = false;
+    consoleWindowRef.current = null;
     try { sessionStorage.removeItem(key); } catch {}
   }
 
@@ -110,6 +112,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     // open the tab synchronously (popup-blocker safe), then redirect it to the fresh URL
     const w = window.open("", "_blank");
     if (w) w.document.write("<p style='font-family:sans-serif;padding:2rem;color:#334155'>Opening your AWS lab…</p>");
+    consoleWindowRef.current = w; // keep ref so we can log out on wipe
     try {
       const r = await fetch("/api/console", {
         method: "POST",
@@ -118,12 +121,19 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       });
       const d = await r.json();
       if (d.consoleUrl) { if (w) w.location.href = d.consoleUrl; else window.open(d.consoleUrl, "_blank"); }
-      else if (w) w.close();
-    } catch { if (w) w.close(); }
+      else { if (w) w.close(); consoleWindowRef.current = null; }
+    } catch { if (w) w.close(); consoleWindowRef.current = null; }
   }
 
   function endLab() {
     if (!sessionId) return;
+    // Immediately log out and close the AWS console tab
+    const cw = consoleWindowRef.current;
+    if (cw && !cw.closed) {
+      try { cw.location.href = "https://console.aws.amazon.com/console/logout!doLogout"; } catch {}
+      setTimeout(() => { try { cw.close(); } catch {} }, 2000);
+    }
+    consoleWindowRef.current = null;
     setSession((s) => (s ? { ...s, status: "ending" } : s)); // instant UI feedback
     fetch("/api/end-lab", {
       method: "POST",
