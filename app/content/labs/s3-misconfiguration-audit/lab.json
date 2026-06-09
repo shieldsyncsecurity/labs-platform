@@ -1,0 +1,55 @@
+{
+  "slug": "s3-misconfiguration-audit",
+  "title": "S3 misconfiguration & data exposure",
+  "level": "Beginner",
+  "free": true,
+  "track": "aws",
+  "tags": ["S3", "IAM", "Encryption", "CloudTrail"],
+  "estimatedActiveMinutes": 30,
+  "accessWindowHours": 24,
+  "idleAutoStopMinutes": 30,
+
+  "summary": "Find and fix common S3 misconfigurations — public buckets, missing encryption, over-broad IAM — in a realistic mini-account, then verify your fixes.",
+
+  "learningObjectives": [
+    "Identify public S3 buckets via both bucket-level ACLs and bucket policies.",
+    "Enable Block Public Access at the account and bucket level — and understand why both matter.",
+    "Replace bucket ACLs with a single auditable bucket policy.",
+    "Enforce encryption at rest (SSE-S3 or SSE-KMS) on all object writes.",
+    "Deny insecure (non-TLS) requests via aws:SecureTransport.",
+    "Recognise over-broad S3 IAM permissions and replace them with least-privilege."
+  ],
+
+  "successCriteria": [
+    {
+      "id": "no-public-buckets",
+      "description": "No bucket in the account allows anonymous public read.",
+      "verify": "aws s3api get-public-access-block + bucket policy review on every Lab-tagged bucket."
+    },
+    {
+      "id": "encryption-required",
+      "description": "Every Lab bucket has a bucket policy denying unencrypted PutObject.",
+      "verify": "Bucket policy contains s3:PutObject Deny with s3:x-amz-server-side-encryption condition."
+    },
+    {
+      "id": "tls-only",
+      "description": "Every Lab bucket denies non-TLS requests.",
+      "verify": "Bucket policy contains aws:SecureTransport=false Deny."
+    },
+    {
+      "id": "least-privilege-iam",
+      "description": "The lab IAM user no longer has s3:* on Resource '*'.",
+      "verify": "Inline policy on /lab/auditor scoped to the lab buckets only."
+    }
+  ],
+
+  "hints": [
+    "Start with `aws s3api get-bucket-policy-status --bucket <name>` on each bucket — it tells you immediately which are public.",
+    "Block Public Access at the account level (PutPublicAccessBlock on the account, not the bucket) catches future mistakes too.",
+    "Encryption-at-rest by default isn't the same as *requiring* it — add a bucket policy denying unencrypted PutObject to force the issue.",
+    "Don't delete the buckets — the lab grades you on fixing them in place."
+  ],
+
+  "estimatedAwsCostInr": 1,
+  "deploysToRegion": "us-east-1"
+}

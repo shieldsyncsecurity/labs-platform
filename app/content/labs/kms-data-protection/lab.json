@@ -1,0 +1,43 @@
+{
+  "slug": "kms-data-protection",
+  "title": "KMS & data protection",
+  "level": "Beginner",
+  "free": false,
+  "track": "aws",
+  "tags": ["KMS", "Encryption", "Key Policy", "S3"],
+  "estimatedActiveMinutes": 30,
+  "accessWindowHours": 24,
+  "idleAutoStopMinutes": 30,
+
+  "summary": "A team set up an \"encrypted\" S3 export bucket — but the protection is theatre. Scope an over-privileged analyst off the key and enforce encryption so the data is actually protected.",
+
+  "learningObjectives": [
+    "Understand that KMS access is governed by BOTH the key policy and IAM — and why kms:* on Resource '*' is dangerous (it includes ScheduleKeyDeletion and DisableKey).",
+    "Scope a principal to least privilege on a specific key (kms:Decrypt on one key ARN, not kms:* on every key).",
+    "Enforce encryption at rest by denying S3 uploads that don't use the intended KMS key.",
+    "Enforce encryption in transit by denying non-TLS (aws:SecureTransport=false) requests."
+  ],
+
+  "successCriteria": [
+    {
+      "id": "scope-key-access",
+      "description": "The /lab/data-analyst user no longer has kms:* on Resource '*' — scoped to kms:Decrypt on the lab key only.",
+      "verify": "No policy on /lab/data-analyst grants kms:* (or kms:ScheduleKeyDeletion / kms:DisableKey / kms:PutKeyPolicy) on Resource '*'."
+    },
+    {
+      "id": "enforce-encryption",
+      "description": "The exports bucket denies PutObject that isn't SSE-KMS with the lab key, and denies non-TLS requests.",
+      "verify": "Bucket policy on sslab-kms-exports-<acct> Denies s3:PutObject when s3:x-amz-server-side-encryption != aws:kms (or the wrong key), AND Denies requests where aws:SecureTransport = false."
+    }
+  ],
+
+  "hints": [
+    "KMS authorization is the key policy AND IAM together. The key policy here is the safe root-admin default — the problem is the analyst's IAM policy granting kms:* on every key.",
+    "kms:* includes kms:ScheduleKeyDeletion and kms:DisableKey — an 'analyst' should never hold those. Replace it with kms:Decrypt scoped to the single lab key ARN.",
+    "Default bucket encryption is not ENFORCED encryption — a client can override it on upload. Add a bucket policy that Denies s3:PutObject unless s3:x-amz-server-side-encryption equals aws:kms.",
+    "Add the classic Deny on aws:SecureTransport=false so nothing moves in plaintext over the wire."
+  ],
+
+  "estimatedAwsCostInr": 1,
+  "deploysToRegion": "us-east-1"
+}

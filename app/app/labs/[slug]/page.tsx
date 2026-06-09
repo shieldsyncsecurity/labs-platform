@@ -23,11 +23,19 @@ export async function generateMetadata({
   return { title: lab ? lab.title : "Lab" };
 }
 
-// The guide + objectives live next to the lab template (single source of truth).
+// Content is in app/content/labs/<slug>/ so it's always within the Next.js
+// project root and accessible on any build host. Falls back to the sibling
+// labs/ directory for local development without the copy.
 function labFile(slug: string, name: string): string | null {
   try {
-    const p = join(process.cwd(), "..", "labs", slug, name);
-    return existsSync(p) ? readFileSync(p, "utf8") : null;
+    const candidates = [
+      join(process.cwd(), "content", "labs", slug, name),  // within app/ (CI-safe)
+      join(process.cwd(), "..", "labs", slug, name),         // sibling labs/ (local)
+    ];
+    for (const p of candidates) {
+      if (existsSync(p)) return readFileSync(p, "utf8");
+    }
+    return null;
   } catch {
     return null;
   }
