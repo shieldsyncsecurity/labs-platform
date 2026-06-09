@@ -436,7 +436,10 @@ export async function teardown(sessionId) {
     console.log(`  (revoke note: ${e.name})`);
   }
 
-  const nukeExe = join(__dirname, "bin", process.platform === "win32" ? "aws-nuke.exe" : "aws-nuke-linux");
+  // In Lambda, binary is downloaded to /tmp at init; locally use the bundled exe.
+  const nukeExe = process.env.AWS_LAMBDA_FUNCTION_NAME
+    ? "/tmp/aws-nuke"
+    : join(__dirname, "bin", process.platform === "win32" ? "aws-nuke.exe" : "aws-nuke-linux");
   const nukeCfg = join(tmpdir(), `nuke-${accountId}-${rid(6)}.yaml`);
   writeFileSync(nukeCfg, nukeConfigFor(accountId));
   console.log(`  running aws-nuke (full wipe) on ${accountId} ...`);

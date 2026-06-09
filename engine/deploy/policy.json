@@ -18,6 +18,12 @@
       ]
     },
     {
+      "Sid": "S3DeployBucket",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::shieldsync-engine-deploy-750294427884/*"
+    },
+    {
       "Sid": "AssumeLabRoles",
       "Effect": "Allow",
       "Action": "sts:AssumeRole",

@@ -5,8 +5,30 @@
 // Long-running work (deploy, teardown, warm) is kicked off by invoking THIS
 // function asynchronously with {_worker:true, action:...} so the HTTP response
 // is returned immediately and the heavy work completes in its own invocation.
+//
+// aws-nuke binary: too large to bundle (287 MB). Stored in S3; downloaded to
+// /tmp at container init so teardown workers have it ready.
 
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { createWriteStream } from "node:fs";
+import { chmod } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
+
+const DEPLOY_BUCKET = "shieldsync-engine-deploy-750294427884";
+const NUKE_TMP      = "/tmp/aws-nuke";
+
+// Download the binary once per Lambda container (module-level, runs at cold start).
+const nukeReady = process.env.AWS_LAMBDA_FUNCTION_NAME
+  ? (async () => {
+      const s3 = new S3Client({ region: "us-east-1" });
+      const { Body } = await s3.send(new GetObjectCommand({ Bucket: DEPLOY_BUCKET, Key: "aws-nuke-linux" }));
+      const ws = createWriteStream(NUKE_TMP);
+      await pipeline(Body, ws);
+      await chmod(NUKE_TMP, 0o755);
+      console.log("[init] aws-nuke downloaded to /tmp");
+    })().catch(e => { console.error("[init] aws-nuke download failed:", e.message); throw e; })
+  : Promise.resolve();
 import {
   lease,
   deployLab,
@@ -54,6 +76,7 @@ export async function handler(event) {
   // ── Worker path (invoked async by invokeWorker) ──────────────────────────
   if (event._worker) {
     const { action } = event;
+    await nukeReady; // ensure binary is in /tmp before any work that needs it
 
     if (action === "deploy") {
       const { sessionId, accountId, execRoleArn, labSlug } = event;
