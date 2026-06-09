@@ -17,7 +17,7 @@ const ENGINE_URL = process.env.ENGINE_URL ?? "http://localhost:4000";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  if (!COGNITO_ENABLED) return NextResponse.redirect(new URL("/sign-in?error=not_configured", url.origin));
+  if (!COGNITO_ENABLED()) return NextResponse.redirect(new URL("/sign-in?error=not_configured", url.origin));
 
   const err = url.searchParams.get("error");
   if (err) {
