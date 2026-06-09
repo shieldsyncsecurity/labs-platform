@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  ShieldSync Lab - vpc-network-exposure (Intermediate). A VPC whose security
+  groups are wide open to the internet: the web tier leaves SSH (22) and RDP
+  (3389) open to 0.0.0.0/0, and the DATABASE tier exposes MySQL (3306) to the
+  whole internet. No instances run - the security groups themselves are the
+  misconfiguration to find and fix - so there is no compute cost. The learner
+  removes the public management-port exposure and isolates the database to the
+  web tier. ~0 cost. us-east-1.
+
+Parameters:
+  LabSlug:
+    Type: String
+    Default: vpc-network-exposure
+    Description: Tag value stamped on taggable resources for aws-nuke targeting.
+
+Resources:
+
+  LabVpc:
+    Type: AWS::EC2::VPC
+    DeletionPolicy: Delete
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: shieldsync-lab-vpc
+        - Key: ShieldSyncLab
+          Value: !Ref LabSlug
+
+  # Web tier - SHOULD be public HTTPS only. Instead it also leaves the admin
+  # ports SSH(22) and RDP(3389) open to 0.0.0.0/0: anyone on the internet can
+  # reach (and brute-force) them.
+  WebSg:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    Properties:
+      GroupDescription: "Web tier - intended public HTTPS, but admin ports are exposed"
+      VpcId: !Ref LabVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: "HTTPS from the internet (intended)"
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: "SSH from anywhere (FLAW - lock this down)"
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 0.0.0.0/0
+          Description: "RDP from anywhere (FLAW - lock this down)"
+      Tags:
+        - Key: Name
+          Value: web-sg
+        - Key: ShieldSyncLab
+          Value: !Ref LabSlug
+
+  # Database tier - SHOULD accept 3306 ONLY from the web tier. Instead MySQL is
+  # open to the entire internet: a public database waiting to be scraped.
+  DbSg:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    Properties:
+      GroupDescription: "Database tier - MySQL should be private to the web tier"
+      VpcId: !Ref LabVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0
+          Description: "MySQL from anywhere (FLAW - restrict to the web tier)"
+      Tags:
+        - Key: Name
+          Value: db-sg
+        - Key: ShieldSyncLab
+          Value: !Ref LabSlug
+
+Outputs:
+  VpcId:
+    Description: The lab VPC.
+    Value: !Ref LabVpc
+  WebSecurityGroupId:
+    Description: Web tier SG - remove the public SSH/RDP rules, keep 443.
+    Value: !Ref WebSg
+  DbSecurityGroupId:
+    Description: Database tier SG - restrict 3306 to the web SG.
+    Value: !Ref DbSg
+  SecurityGroupsConsoleUrl:
+    Description: Jump to Security Groups in the EC2 console.
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/ec2/home?region=${AWS::Region}#SecurityGroups:"
+  VpcConsoleUrl:
+    Description: Jump to the VPC console.
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/vpcconsole/home?region=${AWS::Region}#vpcs:"

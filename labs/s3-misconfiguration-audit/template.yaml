@@ -1,0 +1,249 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  ShieldSync Lab - s3-misconfiguration-audit (Beginner, FREE).
+  Deploys a deliberately MISCONFIGURED mini-environment for the learner to audit
+  and fix: one S3 bucket public via a BUCKET POLICY, one public via an ACL, neither
+  enforcing encryption or TLS, plus an over-privileged IAM user (s3:* on *).
+  Region-agnostic (us-east-1 default). No compute beyond a tiny seeding Lambda.
+  Per-lab contract: every taggable resource carries ShieldSyncLab=<slug>;
+  DeletionPolicy: Delete on everything; outputs feed the Session Engine.
+
+Parameters:
+  LabSlug:
+    Type: String
+    Default: s3-misconfiguration-audit
+    Description: Tag value stamped on every resource so aws-nuke can target the lab.
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # 1) DataBucket - PUBLIC via BUCKET POLICY. Block Public Access fully OFF.
+  #    No encryption enforcement, no TLS-only policy. (all intentional flaws)
+  # ---------------------------------------------------------------------------
+  DataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketName: !Sub "sslab-data-${AWS::AccountId}"
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced   # ACLs disabled -> this bucket is public via POLICY only
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      Tags:
+        - Key: ShieldSyncLab
+          Value: !Ref LabSlug
+
+  DataBucketPublicPolicy:
+    Type: AWS::S3::BucketPolicy
+    DeletionPolicy: Delete
+    Properties:
+      Bucket: !Ref DataBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PublicReadGetObject               # <-- FLAW: anonymous world-read. Learner must remove.
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${DataBucket.Arn}/*"
+
+  # ---------------------------------------------------------------------------
+  # 2) AssetsBucket - PUBLIC via a second BUCKET POLICY. (Was ACL-based, but
+  #    public ACLs in CloudFormation are fragile and AWS is deprecating ACLs,
+  #    so both buckets use the policy path - the modern, common misconfig.)
+  # ---------------------------------------------------------------------------
+  AssetsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketName: !Sub "sslab-assets-${AWS::AccountId}"
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      Tags:
+        - Key: ShieldSyncLab
+          Value: !Ref LabSlug
+
+  AssetsBucketPublicPolicy:
+    Type: AWS::S3::BucketPolicy
+    DeletionPolicy: Delete
+    Properties:
+      Bucket: !Ref AssetsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PublicReadGetObject               # <-- FLAW: anonymous world-read
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${AssetsBucket.Arn}/*"
+
+  # ---------------------------------------------------------------------------
+  # 3) Seeder - Lambda-backed custom resource. On CREATE it drops a few
+  #    (obviously FAKE) "sensitive" objects so the exposure is tangible; on
+  #    DELETE it EMPTIES the buckets so they delete cleanly (no orphans -> the
+  #    DeletionPolicy: Delete contract actually works for non-empty buckets).
+  # ---------------------------------------------------------------------------
+  SeederRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    Properties:
+      RoleName: !Sub "sslab-s3audit-seeder-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: seed-and-empty
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt DataBucket.Arn
+                  - !Sub "${DataBucket.Arn}/*"
+                  - !GetAtt AssetsBucket.Arn
+                  - !Sub "${AssetsBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+      Tags:
+        - Key: ShieldSyncLab
+          Value: !Ref LabSlug
+
+  SeederFunction:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    Properties:
+      FunctionName: !Sub "sslab-s3audit-seeder-${AWS::Region}"
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 120
+      MemorySize: 128
+      Role: !GetAtt SeederRole.Arn
+      Tags:
+        - Key: ShieldSyncLab
+          Value: !Ref LabSlug
+      Code:
+        ZipFile: |
+          import boto3, json, urllib.request
+          s3 = boto3.client("s3")
+
+          SEED = {
+            "customers.csv": "id,name,email,card_last4\n1,Jane Demo,jane@example.com,4242\n2,John Sample,john@example.com,1111\n# FAKE TEST DATA - not real people\n",
+            "db-backup.sql": "-- FAKE backup for the ShieldSync lab\nCREATE TABLE secrets(k TEXT, v TEXT);\nINSERT INTO secrets VALUES('note','if you can read this anonymously, the bucket is public');\n",
+            "README.txt": "Reading this without credentials means the bucket is world-readable. Fix it.\n",
+          }
+
+          def send(event, status, data=None):
+            body = json.dumps({
+              "Status": status,
+              "Reason": "see CloudWatch logs: " + str(data or ""),
+              "PhysicalResourceId": event.get("LogicalResourceId", "seed"),
+              "StackId": event["StackId"],
+              "RequestId": event["RequestId"],
+              "LogicalResourceId": event["LogicalResourceId"],
+              "Data": {},
+            }).encode()
+            req = urllib.request.Request(event["ResponseURL"], data=body, method="PUT")
+            req.add_header("content-type", "")
+            urllib.request.urlopen(req)
+
+          def empty(bucket):
+            paginator = s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket):
+              objs = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+              if objs:
+                s3.delete_objects(Bucket=bucket, Delete={"Objects": objs})
+
+          def handler(event, context):
+            buckets = event["ResourceProperties"].get("Buckets", [])
+            try:
+              if event["RequestType"] == "Delete":
+                for b in buckets:
+                  empty(b)
+              else:
+                for b in buckets:
+                  for key, val in SEED.items():
+                    s3.put_object(Bucket=b, Key=key, Body=val.encode())
+              send(event, "SUCCESS")
+            except Exception as e:
+              print("ERROR:", e)
+              # Never let a teardown wedge the stack - the account-level nuke is the backstop.
+              send(event, "SUCCESS" if event["RequestType"] == "Delete" else "FAILED", e)
+
+  SeedData:
+    Type: AWS::CloudFormation::CustomResource
+    DeletionPolicy: Delete
+    DependsOn:
+      - DataBucketPublicPolicy
+      - AssetsBucketPublicPolicy
+    Properties:
+      ServiceToken: !GetAtt SeederFunction.Arn
+      Buckets:
+        - !Ref DataBucket
+        - !Ref AssetsBucket
+
+  # ---------------------------------------------------------------------------
+  # 4) OverPrivilegedUser - an app/service identity with s3:* on * (way too
+  #    broad). Path /lab/, name 'auditor' -> arn .../user/lab/auditor.
+  #    Learner replaces the inline policy with least privilege.
+  # ---------------------------------------------------------------------------
+  OverPrivilegedUser:
+    Type: AWS::IAM::User
+    DeletionPolicy: Delete
+    Properties:
+      UserName: auditor
+      Path: /lab/
+      Policies:
+        - PolicyName: s3-full-access-everywhere     # <-- FLAW: s3:* on Resource "*"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:*
+                Resource: "*"
+      Tags:
+        - Key: ShieldSyncLab
+          Value: !Ref LabSlug
+
+Outputs:
+  DataBucketName:
+    Description: Bucket made public via a BUCKET POLICY.
+    Value: !Ref DataBucket
+  AssetsBucketName:
+    Description: Bucket made public via an ACL.
+    Value: !Ref AssetsBucket
+  OverPrivilegedUserName:
+    Description: IAM user (path /lab/) whose over-broad policy must be scoped down.
+    Value: !Ref OverPrivilegedUser
+  S3ConsoleUrl:
+    Description: Jump straight to the S3 console.
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/s3/buckets?region=${AWS::Region}"
+  IamUserConsoleUrl:
+    Description: Jump to the over-privileged user in the IAM console.
+    Value: "https://console.aws.amazon.com/iam/home#/users/details/auditor"
+  Region:
+    Value: !Ref AWS::Region

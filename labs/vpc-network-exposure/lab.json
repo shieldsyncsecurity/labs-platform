@@ -1,0 +1,43 @@
+{
+  "slug": "vpc-network-exposure",
+  "title": "VPC network exposure",
+  "level": "Intermediate",
+  "free": false,
+  "track": "aws",
+  "tags": ["VPC", "Security Groups", "Networking"],
+  "estimatedActiveMinutes": 40,
+  "accessWindowHours": 24,
+  "idleAutoStopMinutes": 30,
+
+  "summary": "A VPC's security groups are wide open to the internet — SSH and RDP on the web tier, and MySQL on the database tier. Find the exposure and lock it down to least-access.",
+
+  "learningObjectives": [
+    "Read security-group ingress as an attacker would: which ports are reachable from 0.0.0.0/0?",
+    "Understand why management ports (SSH 22, RDP 3389) must never be open to the whole internet.",
+    "Use security-group references (not CIDRs) to keep a database private to its application tier.",
+    "Apply least-access at the network layer the same way you would in IAM."
+  ],
+
+  "successCriteria": [
+    {
+      "id": "lock-down-admin-ports",
+      "description": "No lab security group allows SSH (22) or RDP (3389) ingress from 0.0.0.0/0 or ::/0.",
+      "verify": "web-sg (and any lab SG) has no ingress rule for tcp/22 or tcp/3389 with source 0.0.0.0/0 or ::/0. The intended tcp/443 from 0.0.0.0/0 may remain."
+    },
+    {
+      "id": "isolate-database",
+      "description": "The database SG no longer exposes MySQL (3306) to the internet — it's restricted to the web tier.",
+      "verify": "db-sg has no ingress for tcp/3306 from 0.0.0.0/0; the only 3306 source is the web-sg security group id (or a private CIDR)."
+    }
+  ],
+
+  "hints": [
+    "In the EC2 console → Security Groups, sort by inbound rules. Anything with a 0.0.0.0/0 source on a port that isn't 80/443 deserves suspicion.",
+    "SSH (22) and RDP (3389) from 0.0.0.0/0 are the classic findings — remove those two rules from web-sg but keep 443.",
+    "For the database, don't swap one CIDR for another. Set the 3306 source to the web-sg's security-group id, so only the app tier can reach MySQL.",
+    "Security groups are stateful and deny-by-default — you only need to remove the bad allow rules, not add explicit denies."
+  ],
+
+  "estimatedAwsCostInr": 0,
+  "deploysToRegion": "us-east-1"
+}

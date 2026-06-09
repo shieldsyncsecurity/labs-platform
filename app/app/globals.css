@@ -1,0 +1,152 @@
+@import "tailwindcss";
+
+/*
+ * ShieldSync Labs — design tokens (mirrors the marketing site: light theme,
+ * indigo -> blue accent, Manrope). Tailwind v4 @theme generates the utilities
+ * (bg-brand, text-ink, border-line, font-mono, ...).
+ */
+@theme {
+  --color-brand: #4f46e5;
+  --color-brand-strong: #4338ca;
+  --color-cyan: #2563eb;
+  --color-ink: #0f172a;
+  --color-ink-soft: #334155;
+  --color-muted: #64748b;
+  --color-line: #e2e8f0;
+  --color-line-strong: #cbd5e1;
+  --color-surface: #ffffff;
+  --color-canvas: #f8fafc;
+
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  /* baseline: never ship sub-16px body copy */
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+}
+
+/* level badge colours */
+.badge-beginner {
+  background: #dcfce7;
+  color: #166534;
+}
+.badge-intermediate {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.badge-advanced {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* rendered lab-guide markdown */
+.lab-md {
+  color: var(--color-ink-soft);
+  font-size: 16px;
+  line-height: 1.7;
+}
+.lab-md h1 {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--color-ink);
+  margin: 0 0 12px;
+}
+.lab-md h2 {
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--color-ink);
+  margin: 26px 0 8px;
+}
+.lab-md h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-ink);
+  margin: 18px 0 6px;
+}
+.lab-md p {
+  margin: 10px 0;
+}
+.lab-md ul,
+.lab-md ol {
+  margin: 10px 0;
+  padding-left: 22px;
+}
+.lab-md li {
+  margin: 5px 0;
+}
+.lab-md a {
+  color: var(--color-brand);
+  text-decoration: underline;
+}
+.lab-md strong {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+.lab-md code {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  background: var(--color-canvas);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+.lab-md pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+.lab-md pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: 13px;
+}
+.lab-md table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 14px 0;
+  font-size: 14.5px;
+}
+.lab-md th,
+.lab-md td {
+  border: 1px solid var(--color-line);
+  padding: 8px 12px;
+  text-align: left;
+}
+.lab-md th {
+  background: var(--color-canvas);
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.lab-md blockquote {
+  border-left: 3px solid var(--color-line-strong);
+  padding-left: 14px;
+  color: var(--color-muted);
+  margin: 12px 0;
+}
+.lab-md hr {
+  border: none;
+  border-top: 1px solid var(--color-line);
+  margin: 20px 0;
+}

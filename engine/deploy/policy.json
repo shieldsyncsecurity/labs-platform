@@ -1,0 +1,36 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:us-east-1:750294427884:log-group:/aws/lambda/ShieldSyncEngine:*"
+    },
+    {
+      "Sid": "DynamoDB",
+      "Effect": "Allow",
+      "Action": "dynamodb:*",
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabAccounts",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabSessions",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabUsers"
+      ]
+    },
+    {
+      "Sid": "AssumeLabRoles",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": [
+        "arn:aws:iam::*:role/ShieldSyncLabExec",
+        "arn:aws:iam::*:role/ShieldSyncLabUser"
+      ]
+    },
+    {
+      "Sid": "SelfInvoke",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": "arn:aws:lambda:us-east-1:750294427884:function:ShieldSyncEngine"
+    }
+  ]
+}

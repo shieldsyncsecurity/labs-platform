@@ -1,0 +1,50 @@
+{
+  "slug": "iam-privilege-escalation",
+  "title": "IAM privilege escalation",
+  "level": "Intermediate",
+  "free": false,
+  "track": "aws",
+  "tags": ["IAM", "Privilege Escalation", "Least Privilege", "Policy Analysis"],
+  "estimatedActiveMinutes": 75,
+  "accessWindowHours": 24,
+  "idleAutoStopMinutes": 30,
+
+  "summary": "You've found leaked CI/CD credentials for a 'limited' deploy user. Discover how its policy lets it escalate to full admin, prove it by capturing a flag only an admin can read, then remediate so the path is closed.",
+
+  "learningObjectives": [
+    "Enumerate an unknown identity's effective permissions from leaked access keys.",
+    "Recognise iam:AttachUserPolicy (and friends) on Resource '*' as a privilege-escalation primitive.",
+    "Exploit the path to attach AdministratorAccess and confirm the blast radius.",
+    "Remediate by removing the dangerous permission and detaching admin — without breaking the user's legitimate function.",
+    "Use aws iam simulate-principal-policy to prove the hole is closed."
+  ],
+
+  "successCriteria": [
+    {
+      "id": "admin-detached",
+      "description": "AdministratorAccess (or any admin-equivalent managed/inline policy) is no longer attached to pipeline-deployer.",
+      "verify": "aws iam list-attached-user-policies --user-name pipeline-deployer shows no AdministratorAccess; list-user-policies shows no admin inline policy."
+    },
+    {
+      "id": "escalation-primitive-removed",
+      "description": "The LabDeployerPolicy default version no longer grants iam:AttachUserPolicy (or other IAM write actions) on Resource '*'.",
+      "verify": "get-policy-version of the default version contains no iam:Attach*/Put*/Create* on Resource '*'."
+    },
+    {
+      "id": "deployer-still-works",
+      "description": "The user keeps its legitimate read permissions (it shouldn't be lobotomised to nothing).",
+      "verify": "simulate-principal-policy for s3:GetObject still returns allowed."
+    }
+  ],
+
+  "hints": [
+    "Start with `aws sts get-caller-identity --profile attacker` to confirm who the leaked keys belong to.",
+    "List the user's attached managed policies, then `get-policy-version` the default version and read every Action carefully.",
+    "iam:AttachUserPolicy lets an identity attach ANY managed policy to itself — including arn:aws:iam::aws:policy/AdministratorAccess.",
+    "After escalating, `aws ssm get-parameter --name /shieldsync/lab/flag` proves you reached admin.",
+    "To remediate without breaking the user, edit the policy to drop the IAM-write statement rather than deleting the whole policy."
+  ],
+
+  "estimatedAwsCostInr": 1,
+  "deploysToRegion": "us-east-1"
+}

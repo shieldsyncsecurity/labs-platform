@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Environment files — never commit secrets
+.env.local
+.env*.local
+app/.env.local
+
+# Build artifacts
+engine/deploy/engine.zip
+engine/bin/aws-nuke-linux
+engine/bin/aws-nuke.exe
+engine/bin/aws-nuke-v3.65.0-windows-amd64.zip
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+*.swp

@@ -1,0 +1,72 @@
+# ShieldSync Labs - aws-nuke config for SANDBOX teardown
+# =======================================================
+# Tool:    ekristen/aws-nuke (the maintained fork), v3+.   github.com/ekristen/aws-nuke
+# Purpose: between learners, FULLY wipe a leased sandbox account back to its clean
+#          baseline - catching anything a learner created OUTSIDE the lab's
+#          CloudFormation stack (rogue IAM users/keys, stray buckets, lambdas,
+#          backdoors). This is the security gap that plain delete-stack misses.
+#
+# WORKFLOW (always): dry-run first (default) -> review the "would delete" list ->
+#          confirm it PRESERVES the control roles -> only then re-run with
+#          --no-dry-run to actually wipe. Never arm it blind.
+#
+# SAFETY DESIGN
+#   blocklist : accounts aws-nuke must NEVER touch. aws-nuke refuses to run
+#               without a blocklist - a deliberate guardrail. Mgmt + platform here.
+#   accounts  : the ONLY accounts it may target (allowlist). The sandbox pool.
+#   presets   : reusable filter groups. "control-plane" lists what to PRESERVE.
+#   regions   : us-east-1 + global only - matches the RegionLock SCP, so there is
+#               nothing for a learner to have created in any other region.
+#
+# NOTE: validate the exact filter syntax against the installed aws-nuke version
+# during the first dry-run (the SCP ProtectGovernance already blocks deleting
+# ShieldSyncLabExec + OrganizationAccountAccessRole even if a filter is wrong -
+# but ShieldSyncLabUser is NOT SCP-protected, so the filter below is its only
+# guard; get that one right).
+
+regions:
+  - global # IAM, etc. (region-agnostic resources)
+  - us-east-1
+
+# Accounts that must NEVER be nuked. aws-nuke aborts if it can't find this.
+blocklist:
+  - "851236938541" # ShieldSync Labs  - MANAGEMENT / org root account
+  - "750294427884" # ShieldSync Platform - the engine's own account
+
+# The ONLY accounts aws-nuke is allowed to target. Add each sandbox account here
+# (or generate this block from the account-baseline automation).
+accounts:
+  "244686897857": # ShieldSync Sandbox 001
+    presets:
+      - control-plane
+
+presets:
+  # Everything NOT matched here gets wiped. We preserve only what the engine
+  # needs to keep managing + recycling the account.
+  control-plane:
+    filters:
+      # The cross-account roles. Without these the engine can't get back in.
+      IAMRole:
+        - "OrganizationAccountAccessRole" # how the org reaches the account
+        - "ShieldSyncLabExec" # engine's deploy/teardown role
+        - "ShieldSyncLabUser" # learner console role (NOT SCP-protected -> must filter)
+      # Keep those roles' managed-policy attachments (e.g. AdministratorAccess).
+      IAMRolePolicyAttachment:
+        - property: RoleName
+          value: "OrganizationAccountAccessRole"
+        - property: RoleName
+          value: "ShieldSyncLabExec"
+        - property: RoleName
+          value: "ShieldSyncLabUser"
+      # When the baseline automation adds a CloudTrail trail + its log bucket,
+      # preserve them here too, e.g.:
+      # CloudTrailTrail:
+      #   - "shieldsync-baseline-trail"
+      # S3Bucket:
+      #   - type: glob
+      #     value: "shieldsync-baseline-logs-*"
+
+# Account alias: set each sandbox account's IAM account alias during baseline
+# (e.g. "shieldsync-sandbox-001"). aws-nuke's default alias check then confirms
+# you're targeting a real, intended account. Run non-interactively with
+# --no-prompt; the alias presence is the safety gate.

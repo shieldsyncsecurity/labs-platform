@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  ShieldSync Lab - iam-privilege-escalation (Intermediate).
+  Creates a low-privileged IAM user 'pipeline-deployer' whose attached customer-
+  managed policy contains a privilege-escalation primitive (iam:AttachUserPolicy
+  on Resource '*'). Leaked access keys are surfaced as stack outputs. A flag in
+  SSM is readable only after escalating to admin. The learner exploits to confirm,
+  then remediates. No compute, ~0 cost. Region-agnostic (us-east-1 default).
+  NOTE on the contract: IAM::ManagedPolicy and IAM::AccessKey do not support tags
+  in CloudFormation, so the ShieldSyncLab tag is applied where supported (User,
+  SSM Parameter) and aws-nuke targets the rest by the /lab/ path + name prefix,
+  with the account-level nuke as the backstop.
+
+Parameters:
+  LabSlug:
+    Type: String
+    Default: iam-privilege-escalation
+    Description: Tag value stamped on taggable resources for aws-nuke targeting.
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # The vulnerable customer-managed policy. Reads like a tidy, limited CI/CD
+  # deploy policy - but the 'BuildHelpers' statement grants iam:AttachUserPolicy
+  # on Resource '*', which is a full privilege-escalation primitive.
+  # ---------------------------------------------------------------------------
+  DeployerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    Properties:
+      ManagedPolicyName: LabDeployerPolicy
+      Description: "Intended-limited deploy policy. Contains a privilege-escalation flaw."
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LooksLikeANormalDeployer
+            Effect: Allow
+            Action:
+              - s3:ListAllMyBuckets
+              - s3:GetObject
+              - s3:ListBucket
+              - cloudwatch:GetMetricData
+              - logs:DescribeLogGroups
+              - logs:GetLogEvents
+            Resource: "*"
+          - Sid: BuildHelpers                       # <-- THE FLAW: self-escalation primitive
+            Effect: Allow
+            Action:
+              - iam:AttachUserPolicy
+              - iam:ListAttachedUserPolicies
+              - iam:ListPolicies
+              - iam:GetUser
+            Resource: "*"
+
+  # Low-priv identity the attacker (learner) operates as.
+  PipelineDeployer:
+    Type: AWS::IAM::User
+    DeletionPolicy: Delete
+    Properties:
+      UserName: pipeline-deployer
+      Path: /lab/
+      ManagedPolicyArns:
+        - !Ref DeployerPolicy
+      Tags:
+        - Key: ShieldSyncLab
+          Value: !Ref LabSlug
+
+  # "Leaked CI credentials." The secret is surfaced in Outputs - acceptable in a
+  # single-use throwaway sandbox; it IS the scenario (don't do this in real life).
+  DeployerAccessKey:
+    Type: AWS::IAM::AccessKey
+    DeletionPolicy: Delete
+    Properties:
+      UserName: !Ref PipelineDeployer
+
+  # The 'treasure'. The deployer policy grants NO ssm:GetParameter, so only an
+  # admin identity can read this - retrieving it proves the escalation worked.
+  Flag:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: /shieldsync/lab/flag
+      Type: String
+      Value: "SHIELDSYNC{priv-esc-via-iam-AttachUserPolicy}"
+      Description: "Readable only by an admin identity - capturing it confirms escalation."
+      Tags:                                          # SSM Parameter tags are a JSON map, not a list
+        ShieldSyncLab: !Ref LabSlug
+
+Outputs:
+  AttackerAccessKeyId:
+    Description: Access key id for the low-priv 'pipeline-deployer' (the leaked CI creds).
+    Value: !Ref DeployerAccessKey
+  AttackerSecretAccessKey:
+    Description: Secret access key for 'pipeline-deployer'. Configure a CLI profile with these.
+    Value: !GetAtt DeployerAccessKey.SecretAccessKey
+  TargetUserName:
+    Description: The IAM user to escalate, then remediate.
+    Value: !Ref PipelineDeployer
+  VulnerablePolicyArn:
+    Description: The customer-managed policy that must be fixed.
+    Value: !Ref DeployerPolicy
+  FlagParameterName:
+    Description: Read this after escalating to prove admin.
+    Value: /shieldsync/lab/flag
+  IamConsoleUrl:
+    Description: Jump to the target user in the IAM console.
+    Value: "https://console.aws.amazon.com/iam/home#/users/details/pipeline-deployer"
