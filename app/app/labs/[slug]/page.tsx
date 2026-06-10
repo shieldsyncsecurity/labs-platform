@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 import { LABS, getLab } from "@/lib/labs";
+import { labInstructions, labObjectives } from "@/lib/lab-content";
 import { LabPanel } from "@/components/lab-panel";
 import { LabGuide } from "@/components/lab-guide";
 
@@ -23,40 +22,13 @@ export async function generateMetadata({
   return { title: lab ? lab.title : "Lab" };
 }
 
-// Content is in app/content/labs/<slug>/ so it's always within the Next.js
-// project root and accessible on any build host. Falls back to the sibling
-// labs/ directory for local development without the copy.
-function labFile(slug: string, name: string): string | null {
-  try {
-    const candidates = [
-      join(process.cwd(), "content", "labs", slug, name),  // within app/ (CI-safe)
-      join(process.cwd(), "..", "labs", slug, name),         // sibling labs/ (local)
-    ];
-    for (const p of candidates) {
-      if (existsSync(p)) return readFileSync(p, "utf8");
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-function loadObjectives(slug: string): Objective[] {
-  const raw = labFile(slug, "lab.json");
-  if (!raw) return [];
-  try {
-    const data = JSON.parse(raw) as { successCriteria?: Objective[] };
-    return (data.successCriteria ?? []).map((c) => ({ id: c.id, description: c.description }));
-  } catch {
-    return [];
-  }
-}
-
 export default async function LabPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const lab = getLab(slug);
   if (!lab) notFound();
-  const instructions = lab.ready ? labFile(slug, "instructions.md") : null;
-  const objectives = lab.ready ? loadObjectives(slug) : [];
+
+  const instructions = lab.ready ? (labInstructions[slug] ?? null) : null;
+  const objectives: Objective[] = lab.ready ? (labObjectives[slug] ?? []) : [];
 
   return (
     <div className="mx-auto max-w-6xl px-5 py-8">
@@ -79,7 +51,7 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
             <LabGuide slug={lab.slug} instructions={instructions} />
           ) : (
             <div className="rounded-2xl border border-line bg-canvas p-6 text-base text-ink-soft">
-              {lab.ready ? "Guide loading…" : "This lab is coming soon."}
+              {lab.ready ? "Guide not available yet." : "This lab is coming soon."}
             </div>
           )}
         </div>
