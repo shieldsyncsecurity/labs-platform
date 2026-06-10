@@ -253,7 +253,7 @@ export async function markSession(sessionId, status, error) {
 
 /** deployStack(): assume ShieldSyncLabExec and create a lab's CloudFormation. */
 async function deployStack(execRoleArn, labSlug, stackName, tags = []) {
-  const templatePath = join(__dirname, "..", "labs", labSlug, "template.yaml");
+  const templatePath = join(__dirname, "labs", labSlug, "template.yaml");
   const templateBody = readFileSync(templatePath, "utf8");
   const c = await assumeInSandbox(execRoleArn, "engine-deploy");
   const cfn = new CloudFormationClient({
