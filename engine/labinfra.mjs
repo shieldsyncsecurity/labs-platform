@@ -229,6 +229,24 @@ export async function getSession(sessionId) {
   };
 }
 
+/**
+ * releaseAccount(): return an account to the available pool without running
+ * aws-nuke. Use after a FAILED deploy (nothing was provisioned, so there is
+ * nothing to destroy) so the account isn't stranded in "leased" forever.
+ */
+export async function releaseAccount(accountId) {
+  const db = await ddb();
+  await db.send(
+    new UpdateItemCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { accountId: { S: accountId } },
+      UpdateExpression: "SET #s = :avail REMOVE currentSessionId, warmLab, warmStackName, warmReady",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: { ":avail": { S: "available" } },
+    })
+  );
+}
+
 /** markSession(): set a session's status (+ optional error message). */
 export async function markSession(sessionId, status, error) {
   const db = await ddb();

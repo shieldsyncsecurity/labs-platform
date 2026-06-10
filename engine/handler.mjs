@@ -37,6 +37,7 @@ import {
   findActiveSession,
   getSession,
   markSession,
+  releaseAccount,
   ensureWarm,
   upsertUser,
 } from "./labinfra.mjs";
@@ -86,6 +87,9 @@ export async function handler(event) {
       } catch (e) {
         console.error(`[worker] deploy failed ${sessionId}: ${e.message}`);
         await markSession(sessionId, "error", e.message).catch(() => {});
+        // Release the account back to the pool — deploy failed before anything
+        // was provisioned, so there is nothing to nuke.
+        await releaseAccount(accountId).catch(() => {});
       }
       await invokeWorker("warm").catch(() => {});
       return;
