@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   const signature =
     req.headers.get("x-razorpay-signature") ?? req.headers.get("x-signature") ?? "";
 
-  const result = verifyAndFulfill(raw, signature);
+  const result = await verifyAndFulfill(raw, signature);
   if (!result.ok) {
     return NextResponse.json({ ok: false, reason: result.reason }, { status: 400 });
   }

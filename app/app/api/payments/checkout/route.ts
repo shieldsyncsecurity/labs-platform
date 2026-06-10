@@ -1,30 +1,37 @@
 import { NextResponse } from "next/server";
-import { saveOrder } from "@/lib/server/store";
+import { sign } from "@/lib/payments/signature";
 import { priceFor } from "@/lib/payments/pricing";
-import type { CheckoutRequest, Order } from "@/lib/payments/types";
+import { getServerUser } from "@/lib/auth/session";
+import type { CheckoutRequest } from "@/lib/payments/types";
 
-// Creates a server-side order (price computed here, never trusted from the
-// client). In prod this also creates the Razorpay/Stripe order and returns its
-// id + key for the client checkout widget.
+// Creates a server-side signed order. The order details are embedded in a
+// signed payload returned to the client — no in-memory store needed, so the
+// mock-pay route can verify + fulfill on any Worker instance.
 export async function POST(req: Request) {
   const body = (await req.json()) as CheckoutRequest;
-  if (!body.userId || !body.plan) {
+  const sessionUser = await getServerUser();
+  // Always use the verified server-side user id, never trust the client-supplied one.
+  const userId = sessionUser?.id ?? body.userId;
+
+  if (!userId || !body.plan) {
     return NextResponse.json({ error: "missing userId or plan" }, { status: 400 });
   }
   const currency = body.currency ?? "INR";
   const amountMinor = priceFor(body.labSlug ?? null, body.plan, currency);
+  const accessUntil = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
 
-  const order: Order = {
-    id: "order_" + Math.random().toString(36).slice(2, 12),
-    userId: body.userId,
+  // Embed all the grant-relevant data in the signed payload.
+  const orderId = "order_" + Math.random().toString(36).slice(2, 12);
+  const payload = JSON.stringify({
+    orderId,
+    userId,
     labSlug: body.labSlug ?? null,
     plan: body.plan,
     amountMinor,
     currency,
-    status: "created",
-    createdAt: new Date().toISOString(),
-  };
-  saveOrder(order);
+    accessUntil,
+  });
+  const signature = sign(payload);
 
-  return NextResponse.json({ orderId: order.id, amountMinor, currency });
+  return NextResponse.json({ orderId, signedPayload: payload, signature, amountMinor, currency });
 }

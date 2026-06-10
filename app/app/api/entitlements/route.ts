@@ -9,5 +9,5 @@ export async function GET(req: Request) {
   const sessionUser = await getServerUser();
   const userId = sessionUser?.id ?? new URL(req.url).searchParams.get("userId");
   if (!userId) return NextResponse.json({ entitlements: [] });
-  return NextResponse.json({ entitlements: listEntitlements(userId) });
+  return NextResponse.json({ entitlements: await listEntitlements(userId) });
 }

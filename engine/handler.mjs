@@ -40,6 +40,8 @@ import {
   releaseAccount,
   ensureWarm,
   upsertUser,
+  grantEntitlement,
+  listEntitlements,
 } from "./labinfra.mjs";
 
 const PRIMARY_LAB = "s3-misconfiguration-audit";
@@ -204,6 +206,21 @@ export async function handler(event) {
       if (!id) return resp(400, { error: "id required" });
       await upsertUser({ id, email, name, provider });
       return resp(200, { ok: true });
+    }
+
+    // ── Entitlements (persistent, DynamoDB-backed) ───────────────────────────
+    if (method === "POST" && path === "/entitlements") {
+      const { userId, labSlug, kind, accessUntil } = parsed;
+      if (!userId || !labSlug) return resp(400, { error: "userId and labSlug required" });
+      await grantEntitlement(userId, { labSlug, kind, accessUntil });
+      return resp(200, { ok: true });
+    }
+
+    if (method === "GET" && path === "/entitlements") {
+      const userId = event.queryStringParameters?.userId ?? null;
+      if (!userId) return resp(400, { error: "userId required" });
+      const items = await listEntitlements(userId);
+      return resp(200, { entitlements: items });
     }
 
     return resp(404, { error: "not found" });

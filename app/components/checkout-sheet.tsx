@@ -40,7 +40,7 @@ export function CheckoutSheet({
   async function pay(outcome: "success" | "failure") {
     if (!info) return;
     setPhase("processing");
-    const res = await mockPaymentClient.pay(info.orderId, outcome);
+    const res = await mockPaymentClient.pay(info, outcome);
     setPhase(res.status === "paid" ? "done" : "failed");
   }
 

@@ -10,6 +10,7 @@ import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import {
   DynamoDBClient,
   ScanCommand,
+  QueryCommand,
   GetItemCommand,
   UpdateItemCommand,
   PutItemCommand,
@@ -34,6 +35,7 @@ const PLATFORM_ACCOUNT = "750294427884";
 const ACCOUNTS_TABLE = "ShieldSyncLabAccounts";
 const SESSIONS_TABLE = "ShieldSyncLabSessions";
 const USERS_TABLE = "ShieldSyncLabUsers";
+const ENTITLEMENTS_TABLE = "ShieldSyncLabEntitlements";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
 
@@ -532,6 +534,52 @@ export async function reap() {
     }
   }
   return { activeChecked: active.length, expired: expired.length, reaped };
+}
+
+/**
+ * grantEntitlement(): idempotently write an entitlement row.
+ * labSlug "*" means all-access (monthly plan).
+ */
+export async function grantEntitlement(userId, { labSlug, kind, accessUntil }) {
+  const db = await ddb();
+  const now = new Date().toISOString();
+  const expr = ["SET grantedAt = if_not_exists(grantedAt, :t)", "kind = :k"];
+  const vals = { ":t": { S: now }, ":k": { S: String(kind ?? "per-lab") } };
+  const names = {};
+  if (accessUntil) {
+    expr.push("accessUntil = :au");
+    vals[":au"] = { S: String(accessUntil) };
+  }
+  await db.send(
+    new UpdateItemCommand({
+      TableName: ENTITLEMENTS_TABLE,
+      Key: { userId: { S: String(userId) }, labSlug: { S: String(labSlug) } },
+      UpdateExpression: expr.join(", "),
+      ExpressionAttributeNames: Object.keys(names).length ? names : undefined,
+      ExpressionAttributeValues: vals,
+    })
+  );
+}
+
+/**
+ * listEntitlements(): return all entitlement rows for a user.
+ */
+export async function listEntitlements(userId) {
+  if (!userId) return [];
+  const db = await ddb();
+  const { Items } = await db.send(
+    new QueryCommand({
+      TableName: ENTITLEMENTS_TABLE,
+      KeyConditionExpression: "userId = :u",
+      ExpressionAttributeValues: { ":u": { S: String(userId) } },
+    })
+  );
+  return (Items ?? []).map((it) => ({
+    labSlug: it.labSlug?.S,
+    kind: it.kind?.S,
+    accessUntil: it.accessUntil?.S ?? null,
+    grantedAt: it.grantedAt?.S,
+  }));
 }
 
 /**

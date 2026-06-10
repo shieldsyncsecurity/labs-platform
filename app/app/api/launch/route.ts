@@ -20,7 +20,8 @@ export async function POST(req: Request) {
 
   // entitlement check (server-authoritative): free lab, or a non-expired grant.
   const now = Date.now();
-  const entitled = listEntitlements(userId ?? "").some(
+  const grants = await listEntitlements(userId ?? "");
+  const entitled = grants.some(
     (e) => (e.labSlug === labSlug || e.labSlug === "*") && (!e.accessUntil || new Date(e.accessUntil).getTime() > now)
   );
   if (!lab.free && !entitled) {
