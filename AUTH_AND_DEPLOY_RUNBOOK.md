@@ -362,6 +362,9 @@ Read live Worker logs: `npx wrangler tail --format pretty` (from `app/`).
   ✅/⬜). Graders exist for **s3 + iam** (the launchable labs); add a `gradeXxx()` per new
   lab. **Gotcha:** a new grader file must be added to `deploy.ps1`'s `Compress-Archive`
   line or it won't ship. Verified: fresh lab → 0/4; after remediation → criteria flip to PASS.
+  **📐 RULE (standing):** EVERY new lab MUST ship with an auto-grader (its
+  `successCriteria` + a working `gradeXxx()`) — a lab without one is not "done". Verify
+  against the real deployed lab (fresh fails, remediated passes) before marking it `ready`.
 - ✅ **Role-trust tightening DONE** (2026-06-11) — lab roles `:root` →
   `[ShieldSyncEngineRole, OrganizationAccountAccessRole]`. `provision.mjs` sets it for
   future accounts (in the Root OU, before the SCP applies); `ShieldSyncLabUser` updated
