@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth/context";
 import { mockPaymentClient, type CheckoutInfo } from "@/lib/payments/client";
 import { formatMoney } from "@/lib/payments/pricing";
+import { getLab } from "@/lib/labs";
+import { rulesSummary } from "@/lib/access-rules";
 import type { Plan } from "@/lib/payments/types";
 
 // A simulated payment sheet that mirrors a real gateway (Razorpay/Stripe):
@@ -65,7 +67,11 @@ export function CheckoutSheet({
           {plan === "monthly" ? "Monthly — all AWS labs" : labTitle}
         </h2>
         <p className="mt-1 text-base text-ink-soft">
-          {plan === "monthly" ? "Unlimited launches while subscribed." : "One-time — 24h access window."}
+          {plan === "monthly"
+            ? "Unlimited launches while subscribed."
+            : labSlug
+              ? rulesSummary(getLab(labSlug)?.level ?? "Beginner", getLab(labSlug)?.free ?? false)
+              : "One-time access."}
         </p>
 
         <div className="mt-5 flex items-baseline justify-between border-y border-line py-4">

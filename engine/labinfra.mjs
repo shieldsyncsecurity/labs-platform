@@ -39,6 +39,36 @@ const ENTITLEMENTS_TABLE = "ShieldSyncLabEntitlements";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
 
+// Per-level access rules — SINGLE SOURCE for the engine (authoritative).
+// The APP mirrors these in app/lib/access-rules.ts — keep the two in sync.
+//   sessionMinutes: how long ONE live run lasts before the reaper tears it down.
+//   maxLaunches / windowHours: how many runs a user gets in a rolling window.
+const LEVEL_RULES = {
+  Beginner: { sessionMinutes: 30, maxLaunches: 3, windowHours: 72 },
+  Intermediate: { sessionMinutes: 60, maxLaunches: 2, windowHours: 48 },
+  Advanced: { sessionMinutes: 120, maxLaunches: 2, windowHours: 48 },
+};
+
+// The FREE lab is a lead magnet: ONE run per user / 48h (tighter than paid
+// Beginner's 3/72h). Session length stays Beginner's 30 min.
+const FREE_RULE = { sessionMinutes: 30, maxLaunches: 1, windowHours: 48 };
+
+// A lab's { level, free }, read from its bundled lab.json (safe defaults if missing).
+function labMeta(labSlug) {
+  try {
+    const j = JSON.parse(readFileSync(join(__dirname, "labs", labSlug, "lab.json"), "utf8"));
+    return { level: j.level && LEVEL_RULES[j.level] ? j.level : "Beginner", free: j.free === true };
+  } catch {
+    return { level: "Beginner", free: false };
+  }
+}
+
+/** rulesFor(): access rules for a lab — free labs use FREE_RULE, else the level rule. */
+export function rulesFor(labSlug) {
+  const { level, free } = labMeta(labSlug);
+  return free ? FREE_RULE : LEVEL_RULES[level] ?? LEVEL_RULES.Beginner;
+}
+
 // Per-account aws-nuke config, generated at teardown so it works for ANY pool
 // account. Preserves the control roles; blocklists mgmt + platform; allowlists
 // only the one account being torn down (extra safety).
@@ -213,6 +243,26 @@ export async function findActiveSession(userId) {
   if (!live.length) return null;
   const it = live[0];
   return { sessionId: it.sessionId.S, accountId: it.accountId.S, labSlug: it.labSlug.S, expiresAt: it.expiresAt.S };
+}
+
+/**
+ * launchCount(): how many times this user has launched this lab within the last
+ * `windowHours`. Excludes failed (status "error") launches so a broken deploy
+ * doesn't burn one of the user's allotted runs. Used to enforce per-level limits.
+ */
+export async function launchCount(userId, labSlug, windowHours) {
+  const db = await ddb();
+  const sinceMs = Date.now() - windowHours * 3600 * 1000;
+  const scan = await db.send(
+    new ScanCommand({
+      TableName: SESSIONS_TABLE,
+      FilterExpression: "userId = :u AND labSlug = :l AND attribute_exists(startedAt)",
+      ExpressionAttributeValues: { ":u": { S: userId }, ":l": { S: labSlug } },
+    })
+  );
+  return (scan.Items ?? []).filter(
+    (s) => new Date(s.startedAt.S).getTime() >= sinceMs && s.status?.S !== "error"
+  ).length;
 }
 
 /** getSession(): the session record — the single source of truth the UI polls. */

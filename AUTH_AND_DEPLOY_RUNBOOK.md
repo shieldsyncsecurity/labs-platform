@@ -27,6 +27,7 @@ STALE — THIS file is the source of truth.**
 | Lab account pool | 🟢 **CLEAN** | 3 sandboxes `available`, 0 stacks |
 | Marketing user-persist (`after()` fix) | 🟢 **VERIFIED** | a real login wrote through: `logins` 2→3, `lastSeen` → today |
 | Lab launch / teardown / warmer | 🟢 **VERIFIED** | test launch reached `active` in 72s, torn down clean; pool auto-warms (2 accts `warmReady`) |
+| Access rules (session length + launch caps) | 🟢 **LIVE** | per-tier durations + launch limits; free = 1/48h; verified (429 + durations). See §6b |
 | Real Razorpay | 🟡 deferred | mock gateway works; real blocked on GST (~1 mo) |
 | 4 lab CFNs (kms/guardduty/cloudtrail/vpc) · auto-grader · role-trust tightening | 🔴 todo | feature work, not blocking |
 
@@ -197,6 +198,32 @@ Engine DynamoDB tables (acct 750294427884): `ShieldSyncLabAccounts`,
 
 ---
 
+## 6b. Access rules — session length & launch limits (set 2026-06-11)
+
+**Single source:** `app/lib/access-rules.ts` (app) + `engine/labinfra.mjs`
+`LEVEL_RULES`/`FREE_RULE` (engine, authoritative). Keep the two in sync.
+
+| Tier | Session length | Launches | Window | Verified |
+|---|---|---|---|---|
+| **Free lab** (`free:true`, e.g. `s3`) | 30 min | **1×** | 48 h | ✅ 429 on 2nd |
+| **Beginner** (paid) | 30 min | 3× | 72 h | — |
+| **Intermediate** | 60 min | 2× | 48 h | ✅ 60 min |
+| **Advanced** | 120 min | 2× | 48 h | — |
+| **Monthly** sub | per-lab length | unlimited | 30-day entitlement | — |
+
+- **Session length** = how long one live run lasts before the reaper kills it. Set by
+  `handler.mjs /launch` → `lease(uid, slug, rules.sessionMinutes)`.
+- **Launch limit** = rolling count of a user's runs for that lab (`launchCount()`),
+  excluding failed deploys. Over the cap → engine returns **429 `LIMIT_REACHED`**
+  (app `/api/launch` relays it). Reconnecting to an *active* session doesn't count.
+- **Entitlement window** (`accessUntil`, paid only) is set per-lab in
+  `checkout/route.ts` to match the launch window. The free lab has no entitlement —
+  the engine cap is the only gate.
+- Level/free come from each lab's `lab.json` (bundled into the Lambda); `rulesFor()`
+  reads it.
+
+---
+
 ## 7. Launch-hardening incident log (June 2026)
 
 What broke and how it was fixed, in order:
@@ -312,7 +339,11 @@ Read live Worker logs: `npx wrangler tail --format pretty` (from `app/`).
 - **App changes DEPLOYED** (2026-06-11, Worker `9b162d59`): the `after()` callback fix
   (incident #6) **+** the animated terminal UX (`lab-panel.tsx` + `globals.css`
   `ss-bar`). Built with webpack, smoke-tested 8/8. Committed in `715ac2c`.
-- **4 lab CloudFormation templates** still to author: **kms, guardduty, cloudtrail, vpc**.
+- **2 labs still need CFN templates** (have content, can't launch): `cloudtrail-forensics`,
+  `guardduty-security-hub-triage`. The other 4 (iam/s3/kms/vpc) have `template.yaml` and
+  are launchable.
+- **Leftover `FORCE_REFRESH=1` env var** on the engine Lambda (acct 750) — harmless, set
+  in an old session to force a cold start; remove it (`aws lambda update-function-configuration --environment "Variables={}"`).
 - **Auto-grader** — a `/grade` engine endpoint + a "Check my work" button in the lab panel.
 - **Tighten role trusts** — narrow the lab role trust policy from `:root` to the
   specific Lambda exec role.

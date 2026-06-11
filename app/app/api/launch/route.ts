@@ -41,6 +41,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "engine unreachable" }, { status: 502 });
   }
   if (r.status === 503) return NextResponse.json({ error: "NO_CAPACITY" }, { status: 503 });
+  if (r.status === 429) {
+    // Per-level launch limit hit (e.g. Beginner = 3 runs / 72h) — relay the detail.
+    const detail = await r.json().catch(() => ({}));
+    return NextResponse.json({ error: "LIMIT_REACHED", ...detail }, { status: 429 });
+  }
   if (!r.ok) return NextResponse.json({ error: "engine error" }, { status: 502 });
 
   return NextResponse.json(await r.json());

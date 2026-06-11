@@ -43,6 +43,8 @@ import {
   grantEntitlement,
   listEntitlements,
   reap,
+  rulesFor,
+  launchCount,
 } from "./labinfra.mjs";
 
 const PRIMARY_LAB = "s3-misconfiguration-audit";
@@ -169,9 +171,23 @@ export async function handler(event) {
         return resp(200, { sessionId: existing.sessionId, expiresAt: existing.expiresAt, resumed: true });
       }
 
+      // Per-level launch limit (e.g. Beginner = 3 runs / 72h). Reconnects above
+      // don't count — only genuinely new runs do. Session length is also per-level.
+      const rules = rulesFor(labSlug);
+      const used = await launchCount(uid, labSlug, rules.windowHours);
+      if (used >= rules.maxLaunches) {
+        console.log(`[launch] LIMIT_REACHED ${uid} ${labSlug}: ${used}/${rules.maxLaunches} in ${rules.windowHours}h`);
+        return resp(429, {
+          error: "LIMIT_REACHED",
+          maxLaunches: rules.maxLaunches,
+          windowHours: rules.windowHours,
+          used,
+        });
+      }
+
       let leased;
       try {
-        leased = await lease(uid, labSlug);
+        leased = await lease(uid, labSlug, rules.sessionMinutes);
       } catch (e) {
         if (e.message === "NO_CAPACITY") return resp(503, { error: "NO_CAPACITY" });
         throw e;
