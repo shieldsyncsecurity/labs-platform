@@ -19,22 +19,24 @@ STALE — THIS file is the source of truth.**
 
 | Component | Status | Detail |
 |---|---|---|
-| App — Cloudflare Worker `labs-platform` | 🟢 **LIVE** | version `9b162d59`; pages + auth + lab UI all 200 (smoke 8/8) |
+| App — Cloudflare Worker `labs-platform` | 🟢 **LIVE** | version `0dca9229`; pages + auth + lab UI all 200 |
 | Cognito + Google sign-in | 🟢 **LIVE** | Google OAuth app **In Production**; full login round-trip works |
 | App → Engine wiring | 🟢 **WIRED** | `ENGINE_URL` set in `wrangler.jsonc` (NOT localhost); App→Engine→DDB verified |
-| Engine Lambda `ShieldSyncEngine` (acct 750) | 🟢 **DEPLOYED** | redeployed 2026-06-11 with the reaper; `/health` 200 |
-| Reaper (sweeps abandoned labs) | 🟢 **LIVE** | EventBridge `ShieldSyncReaper` = `rate(3 min)`; verified clean |
+| Engine Lambda `ShieldSyncEngine` (acct 750) | 🟢 **DEPLOYED** | redeployed 2026-06-11; `/health` 200 |
+| Reaper + Warmer crons | 🟢 **LIVE** | EventBridge `ShieldSyncReaper rate(3 min)` (sweep abandoned) + `ShieldSyncWarmer rate(10 min)` (pre-stage); verified |
 | Lab account pool | 🟢 **CLEAN** | 3 sandboxes `available`, 0 stacks |
 | Marketing user-persist (`after()` fix) | 🟢 **VERIFIED** | a real login wrote through: `logins` 2→3, `lastSeen` → today |
-| Lab launch / teardown / warmer | 🟢 **VERIFIED** | test launch reached `active` in 72s, torn down clean; pool auto-warms (2 accts `warmReady`) |
+| Lab launch / teardown | 🟢 **VERIFIED** | test launch → `active` in 72s, torn down clean |
 | Access rules (session length + launch caps) | 🟢 **LIVE** | per-tier durations + launch limits; free = 1/48h **+ free-pool cap ≤30%**; verified (429, durations, 503 FREE_AT_CAPACITY). See §6b |
+| UX polish | 🟢 **LIVE** | sign-out ends lab (instant `/api/end-lab`); 👍/👎 → `ShieldSyncLabRatings`; <5 min low-time warning |
+| Pool scaling past 5 accounts | 🔴 **BLOCKED** | AWS org account cap = **5** (at limit); needs a Support quota increase (your action). See §9 |
 | Real Razorpay | 🟡 deferred | mock gateway works; real blocked on GST (~1 mo) |
-| 4 lab CFNs (kms/guardduty/cloudtrail/vpc) · auto-grader · role-trust tightening | 🔴 todo | feature work, not blocking |
+| 2 lab CFNs (cloudtrail, guardduty) · auto-grader · role-trust tightening | 🔴 todo | feature work, not blocking |
 
 > **Cross-session note:** this file + the auto-memory (`project_shieldsync_labs.md`)
 > are the source of truth. A *running* Claude session loaded its memory at its own
 > start, so it won't see later updates until it re-reads this file or restarts —
-> point stale sessions here. The deployed state is committed (`715ac2c`); 3 sessions
+> point stale sessions here. The deployed state is committed + pushed (latest `b26789b`); 3 sessions
 > share the tree, so commit path-scoped, never blanket `git add -A`.
 
 ---
