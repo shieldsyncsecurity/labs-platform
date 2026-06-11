@@ -18,6 +18,23 @@ import { pipeline } from "node:stream/promises";
 const DEPLOY_BUCKET = "shieldsync-engine-deploy-750294427884";
 const NUKE_TMP      = "/tmp/aws-nuke";
 
+// Shared-secret guard for the public HTTP surface (set via Lambda env). The app
+// (labs.shieldsyncsecurity.com on Cloudflare) sends this in the X-Engine-Token
+// header; without it the engine refuses non-health requests. Worker invocations
+// (event._worker=true) come from Lambda InvokeCommand and bypass the HTTP layer,
+// so they don't need it. Empty string in local dev = guard disabled.
+const ENGINE_SHARED_SECRET = process.env.ENGINE_SHARED_SECRET || "";
+
+// Constant-time string compare so a missing header / wrong token can't be
+// length-distinguished from a correct one.
+function timingSafeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 // Download the binary once per Lambda container (module-level, runs at cold start).
 const nukeReady = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? (async () => {
@@ -149,6 +166,21 @@ export async function handler(event) {
   ).toUpperCase();
   const path = event.rawPath ?? event.path ?? "/";
 
+  // Shared-secret check (skipped for /health and when no secret is configured,
+  // i.e. local dev). API GW header names arrive lower-cased on v2 events.
+  if (ENGINE_SHARED_SECRET && !(method === "GET" && path === "/health")) {
+    const h = event.headers ?? {};
+    const supplied = h["x-engine-token"] ?? h["X-Engine-Token"] ?? "";
+    if (!timingSafeEqual(supplied, ENGINE_SHARED_SECRET)) {
+      return resp(401, { error: "unauthorized" });
+    }
+  }
+
+  // Trusted caller identity from the app. The app puts this in X-User-Id from
+  // its Cognito session; the engine uses it for ownership checks below.
+  const callerUserId =
+    event.headers?.["x-user-id"] ?? event.headers?.["X-User-Id"] ?? null;
+
   let parsed = {};
   try {
     if (event.body) {
@@ -166,7 +198,10 @@ export async function handler(event) {
 
     if (method === "POST" && path === "/launch") {
       const { userId, labSlug } = parsed;
-      const uid = userId || "anon";
+      // Trust the header (set by the app from the verified Cognito session) over
+      // the body when both are present; falls back to body for local-dev callers
+      // without auth, and finally to "anon" so the smoke /health flow still works.
+      const uid = callerUserId || userId || "anon";
 
       const existing = await findActiveSession(uid);
       if (existing) {
@@ -226,6 +261,11 @@ export async function handler(event) {
       const id = path.slice("/session/".length);
       const s = await getSession(id);
       if (!s) return resp(404, { error: "not found" });
+      // Ownership: when the caller is identified, only return THEIR session.
+      // (Anonymous local-dev callers see anything, matching prior behaviour.)
+      if (callerUserId && s.userId && s.userId !== callerUserId) {
+        return resp(404, { error: "not found" });
+      }
       return resp(200, s);
     }
 
@@ -233,6 +273,9 @@ export async function handler(event) {
       const { sessionId } = parsed;
       const s = await getSession(sessionId);
       if (!s) return resp(404, { error: "not found" });
+      if (callerUserId && s.userId && s.userId !== callerUserId) {
+        return resp(403, { error: "forbidden" });
+      }
       if (s.status !== "active") return resp(409, { error: "not ready", status: s.status });
       const url = await mintConsoleUrl({ accountId: s.accountId });
       return resp(200, { consoleUrl: url.consoleUrl, expiresInSeconds: url.expiresInSeconds });
@@ -242,6 +285,9 @@ export async function handler(event) {
       const { sessionId } = parsed;
       const s = await getSession(sessionId);
       if (!s) return resp(404, { error: "not found" });
+      if (callerUserId && s.userId && s.userId !== callerUserId) {
+        return resp(403, { error: "forbidden" });
+      }
       await markSession(sessionId, "ending").catch(() => {});
       await invokeWorker("teardown", { sessionId });
       console.log(`[teardown] ${sessionId} — async worker launched`);
@@ -266,6 +312,9 @@ export async function handler(event) {
       const { sessionId } = parsed;
       const s = await getSession(sessionId);
       if (!s) return resp(404, { error: "not found" });
+      if (callerUserId && s.userId && s.userId !== callerUserId) {
+        return resp(403, { error: "forbidden" });
+      }
       if (s.status !== "active") return resp(409, { error: "not ready", status: s.status });
       try {
         const execRoleArn = `arn:aws:iam::${s.accountId}:role/ShieldSyncLabExec`;

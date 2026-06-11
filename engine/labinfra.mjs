@@ -54,8 +54,16 @@ const LEVEL_RULES = {
 // Beginner's 3/72h). Session length stays Beginner's 30 min.
 const FREE_RULE = { sessionMinutes: 30, maxLaunches: 1, windowHours: 48 };
 
+// Whitelist for lab slugs to block path traversal — labSlug is interpolated into
+// fs paths (lab.json, template.yaml) and a CFN stack name, so it must be safe.
+const SAFE_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
+function isSafeSlug(s) {
+  return typeof s === "string" && SAFE_SLUG.test(s);
+}
+
 // A lab's { level, free }, read from its bundled lab.json (safe defaults if missing).
 function labMeta(labSlug) {
+  if (!isSafeSlug(labSlug)) return { level: "Beginner", free: false };
   try {
     const j = JSON.parse(readFileSync(join(__dirname, "labs", labSlug, "lab.json"), "utf8"));
     return { level: j.level && LEVEL_RULES[j.level] ? j.level : "Beginner", free: j.free === true };
@@ -319,6 +327,9 @@ export async function getSession(sessionId) {
     accountId: it.accountId?.S,
     expiresAt: it.expiresAt?.S,
     error: it.error?.S,
+    // Owner of this session — used by the engine's HTTP layer for ownership
+    // checks on /teardown, /console, /grade, GET /session/<id>.
+    userId: it.userId?.S,
   };
 }
 
@@ -364,6 +375,10 @@ export async function markSession(sessionId, status, error) {
 
 /** deployStack(): assume ShieldSyncLabExec and create a lab's CloudFormation. */
 async function deployStack(execRoleArn, labSlug, stackName, tags = []) {
+  // Hard sanity check: labSlug controls a filesystem path, so it must match the
+  // whitelist. Any caller that already validated (labMeta/rulesFor) is fine; this
+  // is the last-line defence against path traversal making it into a deploy.
+  if (!isSafeSlug(labSlug)) throw new Error("invalid labSlug");
   const templatePath = join(__dirname, "labs", labSlug, "template.yaml");
   const templateBody = readFileSync(templatePath, "utf8");
   const c = await assumeInSandbox(execRoleArn, "engine-deploy");
@@ -491,10 +506,20 @@ export async function mintConsoleUrl({ accountId, destination, durationSeconds =
     sessionKey: c.SecretAccessKey,
     sessionToken: c.SessionToken,
   });
-  const tokenResp = await fetch(
-    `https://signin.aws.amazon.com/federation?Action=getSigninToken&Session=${encodeURIComponent(session)}`
-  );
-  const { SigninToken } = await tokenResp.json();
+  // Hard timeout so a stuck AWS federation endpoint can't hang the Lambda.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  let SigninToken;
+  try {
+    const tokenResp = await fetch(
+      `https://signin.aws.amazon.com/federation?Action=getSigninToken&Session=${encodeURIComponent(session)}`,
+      { signal: ctrl.signal }
+    );
+    if (!tokenResp.ok) throw new Error(`federation HTTP ${tokenResp.status}`);
+    ({ SigninToken } = await tokenResp.json());
+  } finally {
+    clearTimeout(timer);
+  }
   const dest = destination || `https://${REGION}.console.aws.amazon.com/s3/home?region=${REGION}`;
   const consoleUrl =
     `https://signin.aws.amazon.com/federation?Action=login` +
@@ -570,7 +595,16 @@ export async function teardown(sessionId) {
       }
     );
   } catch (e) {
-    const detail = ((e.stderr || "") + (e.stdout || "")).slice(-3000) || e.message;
+    // aws-nuke can echo its env (or stack traces that include it). Scrub anything
+    // resembling an AWS credential before we put it in an Error message that will
+    // be logged. Token leak via logs would be a real cross-tenant risk.
+    const rawDetail = ((e.stderr || "") + (e.stdout || "")).slice(-3000) || e.message || "";
+    const detail = String(rawDetail)
+      .replace(/AKIA[0-9A-Z]{16}/g, "AKIA<redacted>")
+      .replace(/ASIA[0-9A-Z]{16}/g, "ASIA<redacted>")
+      .replace(/(AWS_SESSION_TOKEN|AWS_SECRET_ACCESS_KEY|aws_session_token|aws_secret_access_key)\s*[:=]\s*\S+/g, "$1=<redacted>")
+      // generic long base64-ish blob (session tokens are usually >100 chars)
+      .replace(/[A-Za-z0-9+/=_-]{60,}/g, "<redacted-token>");
     throw new Error(`aws-nuke failed: ${detail}`);
   }
 
