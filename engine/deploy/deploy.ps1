@@ -57,8 +57,15 @@ Compress-Archive -Path "$SCRIPT_DIR\handler.mjs","$SCRIPT_DIR\labinfra.mjs" -Des
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open($ZIP_PATH, "Update")
 
-Get-ChildItem "$SCRIPT_DIR\..\labs" -Recurse -File | ForEach-Object {
-    $rel = $_.FullName.Substring(("$SCRIPT_DIR\..\").Length).Replace("\","/")
+# Entry path MUST be labs/<slug>/<file> so it unzips to /var/task/labs/... where
+# labinfra.mjs reads it (join(__dirname,"labs",slug,"template.yaml")). Compute the
+# relative path from the RESOLVED labs root and prepend "labs/" — the old
+# Substring(("$SCRIPT_DIR\..\").Length) math ate 10 chars because Get-ChildItem
+# resolves the `..`, producing mangled entries like "sconfiguration-audit/template.yaml"
+# → ENOENT in the Lambda.
+$LABS_ROOT = (Resolve-Path "$SCRIPT_DIR\..\labs").Path
+Get-ChildItem $LABS_ROOT -Recurse -File | ForEach-Object {
+    $rel = "labs/" + $_.FullName.Substring($LABS_ROOT.Length + 1).Replace("\","/")
     $e = $zip.CreateEntry($rel); $s = $e.Open()
     $b = [System.IO.File]::ReadAllBytes($_.FullName); $s.Write($b,0,$b.Length); $s.Close()
 }

@@ -23,3 +23,11 @@ Thumbs.db
 # Editor
 .vscode/settings.json
 *.swp
+
+# Local tooling / caches (per-machine, not project source)
+.wrangler/
+app/.wrangler/
+.claude/
+app/.claude/
+.open-next/
+app/.open-next/

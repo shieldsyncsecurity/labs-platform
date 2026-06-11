@@ -150,3 +150,26 @@ a {
   border-top: 1px solid var(--color-line);
   margin: 20px 0;
 }
+
+/* Scanning indeterminate progress bar (lab build / wipe states) */
+@keyframes ss-scan {
+  0%   { left: -38%; }
+  100% { left: 105%; }
+}
+.ss-bar-track {
+  position: relative;
+  height: 3px;
+  background: var(--color-canvas);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+.ss-bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 38%;
+  border-radius: 9999px;
+  animation: ss-scan 1.8s ease-in-out infinite;
+}
+.ss-bar-brand { background: var(--color-brand); }
+.ss-bar-red   { background: #ef4444; }

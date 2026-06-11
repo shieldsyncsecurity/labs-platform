@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { cookies } from "next/headers";
 import {
   exchangeCode,
@@ -57,13 +57,20 @@ export async function GET(req: Request) {
 
   const session = await makeSession(user);
 
-  // Persist for marketing (fire-and-forget; never blocks login). The engine
-  // holds AWS creds and writes to the ShieldSyncLabUsers table.
-  fetch(`${ENGINE_URL}/user`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(user),
-  }).catch(() => {});
+  // Persist for marketing (never blocks login). The engine holds AWS creds and
+  // writes to the ShieldSyncLabUsers table. Must run inside after(): on
+  // Cloudflare Workers a plain fire-and-forget fetch is cancelled as soon as
+  // the response returns — after() maps to ctx.waitUntil so it completes.
+  // (Verified live 2026-06-11: two successful logins, zero table writes.)
+  after(async () => {
+    try {
+      await fetch(`${ENGINE_URL}/user`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(user),
+      });
+    } catch {}
+  });
 
   const res = NextResponse.redirect(new URL(returnTo, url.origin));
   res.cookies.set(SESSION_COOKIE, session, {

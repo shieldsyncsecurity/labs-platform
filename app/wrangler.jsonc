@@ -1,11 +1,20 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "main": ".open-next/worker.js",
-  "name": "shieldsync-labs",
+  "name": "labs-platform",
   "compatibility_date": "2024-12-30",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
+  },
+  "vars": {
+    "ENGINE_URL": "https://lewssnjjhi.execute-api.us-east-1.amazonaws.com",
+    "NEXT_PUBLIC_AUTH_MODE": "cognito",
+    "COGNITO_REGION": "us-east-1",
+    "COGNITO_DOMAIN": "shieldsync-labs.auth.us-east-1.amazoncognito.com",
+    "COGNITO_USER_POOL_ID": "us-east-1_5Hu20LAi8",
+    "COGNITO_CLIENT_ID": "36s7i98jnt0mj8n5m8h0s711kn",
+    "APP_URL": "https://labs.shieldsyncsecurity.com"
   }
 }

@@ -35,9 +35,11 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  // Pin Turbopack's workspace root to THIS app. Without this, a sibling
-  // package-lock.json higher up (the unified dev runner) gets inferred as the
-  // root and breaks module/manifest resolution.
+  // Pin Turbopack's workspace root to THIS app. Without this, the sibling
+  // package-lock.json at labs-platform/ gets inferred as root and breaks
+  // module/manifest resolution in dev.
+  // NOTE: production builds use `next build --webpack` (see package.json)
+  // so Turbopack is never active in the CF deploy — no ChunkLoadError.
   turbopack: { root: process.cwd() },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

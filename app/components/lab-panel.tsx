@@ -6,6 +6,67 @@ import { useAuth } from "@/lib/auth/context";
 import { getLab } from "@/lib/labs";
 import { CheckoutSheet } from "@/components/checkout-sheet";
 
+// ── animated terminal log lines ──────────────────────────────────────────────
+
+const BUILD_LOG: { ms: number; text: string }[] = [
+  { ms: 0,     text: "locating available sandbox account…" },
+  { ms: 1300,  text: "account acquired · us-east-1" },
+  { ms: 2500,  text: "guardrails verified  region-lock ✓  cost-cap ✓" },
+  { ms: 3700,  text: "deploying lab scenario (CloudFormation)…" },
+  { ms: 5400,  text: "stack → CREATE_IN_PROGRESS" },
+  { ms: 11500, text: "resources creating  S3 · IAM · Lambda…" },
+  { ms: 17500, text: "stack → CREATE_COMPLETE ✓" },
+  { ms: 19000, text: "minting time-boxed console access…" },
+];
+
+const WIPE_LOG: { ms: number; text: string }[] = [
+  { ms: 0,    text: "revoking learner console session…" },
+  { ms: 1300, text: "running full account wipe (aws-nuke)…" },
+  { ms: 3000, text: "scanning all resource types…" },
+];
+
+function TerminalLog({
+  lines,
+  shown,
+  color,
+}: {
+  lines: typeof BUILD_LOG;
+  shown: number;
+  color: "green" | "orange";
+}) {
+  const textClass = color === "green" ? "text-emerald-400" : "text-orange-400";
+  const cursorClass = color === "green" ? "bg-emerald-400" : "bg-orange-400";
+  return (
+    <div className="mt-3 min-h-[80px] rounded-xl bg-[#0f172a] px-4 py-3 font-mono text-xs">
+      {lines.slice(0, shown).map((line, i) => (
+        <div
+          key={i}
+          className={`leading-6 ${textClass}`}
+          style={{ opacity: i < shown - 1 ? 0.55 : 1 }}
+        >
+          <span className="mr-2 text-slate-600">$</span>
+          {line.text}
+        </div>
+      ))}
+      <span
+        className={`inline-block h-3.5 w-1.5 align-middle animate-pulse ${cursorClass}`}
+      />
+    </div>
+  );
+}
+
+function useStaggeredLog(log: typeof BUILD_LOG) {
+  const [shown, setShown] = useState(1);
+  useEffect(() => {
+    const timers = log.slice(1).map((line, i) =>
+      setTimeout(() => setShown(i + 2), line.ms)
+    );
+    return () => timers.forEach(clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return shown;
+}
+
 type Objective = { id: string; description: string };
 type Session = { status: string; expiresAt?: string | null; accountId?: string; error?: string };
 
@@ -15,6 +76,44 @@ function fmt(total: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 const card = "rounded-2xl border border-line bg-surface p-5";
+
+function LeasingCard() {
+  const shown = useStaggeredLog(BUILD_LOG);
+  return (
+    <div className={card}>
+      <div className="flex items-center gap-2.5">
+        <span className="h-2 w-2 flex-none rounded-full bg-brand animate-pulse" />
+        <span className="text-sm font-bold text-ink">Building your lab</span>
+      </div>
+      <TerminalLog lines={BUILD_LOG} shown={shown} color="green" />
+      <div className="ss-bar-track mt-3">
+        <div className="ss-bar-fill ss-bar-brand" />
+      </div>
+      <p className="mt-2.5 text-xs text-muted">
+        us-east-1 · isolated AWS account · you can leave this tab — it&apos;ll be ready when you&apos;re back
+      </p>
+    </div>
+  );
+}
+
+function EndingCard() {
+  const shown = useStaggeredLog(WIPE_LOG);
+  return (
+    <div className={card}>
+      <div className="flex items-center gap-2.5">
+        <span className="h-2 w-2 flex-none rounded-full bg-[#ef4444] animate-pulse" />
+        <span className="text-sm font-bold text-ink">Wiping your lab clean</span>
+      </div>
+      <TerminalLog lines={WIPE_LOG} shown={shown} color="orange" />
+      <div className="ss-bar-track mt-3">
+        <div className="ss-bar-fill ss-bar-red" />
+      </div>
+      <p className="mt-2.5 text-xs text-muted">
+        Full account wipe in progress · this usually takes a minute
+      </p>
+    </div>
+  );
+}
 
 export function LabPanel({ slug, objectives, ready }: { slug: string; objectives: Objective[]; ready: boolean }) {
   const { user, hasAccess, refreshEntitlements } = useAuth();
@@ -201,19 +300,11 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const status = session?.status;
 
   if (status === "leasing") {
-    return (
-      <div className={card}>
-        <p className="font-mono text-sm text-brand">▸ Building your lab…</p>
-        <p className="mt-1 text-sm text-muted">Leasing a clean account and deploying the scenario. This runs on our side — you can even leave this tab; it&apos;ll be ready when you&apos;re back.</p>
-        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-canvas">
-          <div className="h-full w-1/3 animate-pulse rounded-full bg-brand" />
-        </div>
-      </div>
-    );
+    return <LeasingCard />;
   }
 
   if (status === "ending") {
-    return <div className={`${card} font-mono text-sm text-brand`}>▸ Wiping your lab clean…</div>;
+    return <EndingCard />;
   }
 
   if (status === "error") {

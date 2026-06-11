@@ -42,6 +42,7 @@ import {
   upsertUser,
   grantEntitlement,
   listEntitlements,
+  reap,
 } from "./labinfra.mjs";
 
 const PRIMARY_LAB = "s3-misconfiguration-audit";
@@ -111,6 +112,23 @@ export async function handler(event) {
 
     if (action === "warm") {
       await runWarmer();
+      return;
+    }
+
+    if (action === "reap") {
+      // Scheduled sweep (EventBridge): tear down expired active/leasing sessions
+      // that were abandoned (sign-out / tab-close never called /end-lab). This is
+      // what keeps the pool from drifting (DDB says available while AWS still holds
+      // a CREATE_COMPLETE stack) and causing CREATE_FAILED collisions on next launch.
+      try {
+        const r = await reap();
+        console.log(
+          `[worker] reap: checked ${r.activeChecked}, expired ${r.expired}, reaped ${r.reaped.length}` +
+            (r.reaped.length ? ` (${r.reaped.join(", ")})` : "")
+        );
+      } catch (e) {
+        console.error(`[worker] reap failed: ${e.message}`);
+      }
       return;
     }
 

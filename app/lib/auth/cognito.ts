@@ -42,6 +42,17 @@ function normDomain(d: string): string {
   return d.startsWith("http") ? d.replace(/\/$/, "") : `https://${d}`;
 }
 
+// UTF-8-safe base64 for the HTTP Basic header. Plain btoa() throws on any
+// character > U+00FF, so a stray non-ASCII byte in a secret would crash the
+// token exchange ("btoa can only operate on Latin1") instead of failing auth
+// cleanly. Encode to bytes first, then base64 the binary string.
+function basicAuth(user: string, pass: string): string {
+  const bytes = new TextEncoder().encode(`${user}:${pass}`);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
 export function authorizeUrl(provider: string, state: string): string {
   const { DOMAIN, CLIENT_ID } = cfg();
   const p = new URLSearchParams({
@@ -64,7 +75,7 @@ export function logoutUrl(): string {
 
 export async function exchangeCode(code: string): Promise<{ id_token: string; access_token: string }> {
   const { DOMAIN, CLIENT_ID, CLIENT_SECRET } = cfg();
-  const basic = btoa(`${CLIENT_ID}:${CLIENT_SECRET}`);
+  const basic = basicAuth(CLIENT_ID, CLIENT_SECRET);
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: CLIENT_ID,
@@ -80,12 +91,15 @@ export async function exchangeCode(code: string): Promise<{ id_token: string; ac
   return (await r.json()) as { id_token: string; access_token: string };
 }
 
-let _jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 function jwks() {
   const { REGION, USER_POOL_ID } = cfg();
   const issuerUrl = `https://cognito-idp.${REGION}.amazonaws.com/${USER_POOL_ID}`;
-  if (!_jwks) _jwks = createRemoteJWKSet(new URL(`${issuerUrl}/.well-known/jwks.json`));
-  return { jwks: _jwks, issuerUrl };
+  // Create per-call — do NOT cache at module scope. In Cloudflare Workers a
+  // module-scoped jose remote JWKS set reused across requests throws
+  // "Cannot perform I/O on behalf of a different request" when it refetches the
+  // signing keys. jose caches the keys internally for the life of this object.
+  const set = createRemoteJWKSet(new URL(`${issuerUrl}/.well-known/jwks.json`));
+  return { jwks: set, issuerUrl };
 }
 
 export async function verifyIdToken(idToken: string): Promise<JWTPayload> {

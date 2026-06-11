@@ -17,6 +17,7 @@ import {
   markSession,
   ensureWarm,
   upsertUser,
+  reap,
 } from "./labinfra.mjs";
 
 const PORT = Number(process.env.ENGINE_PORT || 4000);
@@ -44,6 +45,27 @@ async function runWarmer() {
     console.error("[warm] error:", e.message);
   } finally {
     warmingNow = false;
+  }
+}
+
+// Background reaper — auto-teardown sessions whose window has expired. This is
+// the server-side safety net for learners who close the tab without clicking
+// End. WITHOUT it, abandoned sessions (and their stacks) leak and clog the
+// per-account resource names, so every later launch collides ("already exists").
+let reapingNow = false;
+async function runReaper() {
+  if (reapingNow) return;
+  reapingNow = true;
+  try {
+    const reaped = await reap();
+    if (reaped.length) {
+      console.log(`[reap] tore down ${reaped.length} expired session(s): ${reaped.join(", ")}`);
+      runWarmer(); // freed accounts -> top the warm pool back up
+    }
+  } catch (e) {
+    console.error("[reap] error:", e.message);
+  } finally {
+    reapingNow = false;
   }
 }
 
@@ -148,4 +170,6 @@ server.listen(PORT, () => {
   console.log(`engine listening on http://localhost:${PORT}`);
   runWarmer(); // warm the pool on startup
   setInterval(runWarmer, 60000); // keep it topped up
+  runReaper(); // sweep anything already expired on startup
+  setInterval(runReaper, 60000); // and auto-teardown expired sessions every minute
 });
