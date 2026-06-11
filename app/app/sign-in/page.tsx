@@ -4,6 +4,13 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth/context";
 
+// Only honour a same-origin path as the post-sign-in destination — never an
+// absolute/external or protocol-relative URL (open-redirect). Mirrors the
+// server-side guard in /api/auth/login + /api/auth/callback.
+function safeReturnTo(raw: string | null): string {
+  return raw && /^\/[^/\\]/.test(raw) ? raw : "/dashboard";
+}
+
 export default function SignInPage() {
   const { signIn } = useAuth();
   const router = useRouter();
@@ -11,8 +18,12 @@ export default function SignInPage() {
 
   async function go(provider: "google" | "linkedin") {
     setBusy(provider);
-    await signIn(provider);
-    router.push("/dashboard");
+    // Read at click time (client-only) so we don't need a Suspense boundary for
+    // useSearchParams. Cognito does a full-page redirect and returns to this path
+    // via the server; the mock resolves and we push to it below.
+    const returnTo = safeReturnTo(new URLSearchParams(window.location.search).get("returnTo"));
+    await signIn(provider, returnTo);
+    router.push(returnTo);
   }
 
   return (

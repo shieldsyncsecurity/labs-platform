@@ -36,7 +36,7 @@ type AuthState = {
   user: AuthUser | null;
   loading: boolean;
   entitlements: Entitlement[];
-  signIn: (provider: "google" | "linkedin") => Promise<void>;
+  signIn: (provider: "google" | "linkedin", returnTo?: string) => Promise<void>;
   signOut: () => Promise<void>;
   hasAccess: (slug: string) => boolean;
   refreshEntitlements: (u?: AuthUser | null) => Promise<void>;
@@ -78,9 +78,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signIn = useCallback(
-    async (provider: "google" | "linkedin") => {
+    async (provider: "google" | "linkedin", returnTo = "/dashboard") => {
       if (COGNITO_ENABLED) {
-        cognitoSignIn(provider); // full-page redirect to Cognito
+        cognitoSignIn(provider, returnTo); // full-page redirect to Cognito, then back to returnTo
         return NEVER;
       }
       // Mock (offline): mint a demo user.

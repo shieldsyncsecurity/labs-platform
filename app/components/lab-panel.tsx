@@ -337,7 +337,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       <div className={card}>
         <p className="text-base font-extrabold text-ink">Start this lab</p>
         <p className="mt-1 text-sm text-ink-soft">Sign in to spin up your own isolated AWS lab.</p>
-        <Link href="/sign-in" className="mt-4 block rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong">Sign in to start</Link>
+        <Link href={`/sign-in?returnTo=${encodeURIComponent(`/labs/${slug}`)}`} className="mt-4 block rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong">Sign in to start</Link>
       </div>
     );
   }

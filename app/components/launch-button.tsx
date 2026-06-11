@@ -23,7 +23,7 @@ export function LaunchButton({ slug }: { slug: string }) {
 
   if (!user) {
     return (
-      <Link href="/sign-in" className="rounded-xl bg-brand px-6 py-3 text-base font-semibold text-white hover:bg-brand-strong">
+      <Link href={`/sign-in?returnTo=${encodeURIComponent(`/labs/${slug}`)}`} className="rounded-xl bg-brand px-6 py-3 text-base font-semibold text-white hover:bg-brand-strong">
         Sign in to start
       </Link>
     );
