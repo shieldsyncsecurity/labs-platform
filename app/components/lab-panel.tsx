@@ -127,6 +127,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [busy, setBusy] = useState(false);
   const [grade, setGrade] = useState<{ gradable: boolean; passed: boolean; criteria: { id: string; description: string; passed: boolean }[] } | null>(null);
   const [grading, setGrading] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "loading" | "copied" | "error">("idle");
   const expiryFired = useRef(false);
   const consoleWindowRef = useRef<Window | null>(null);
   const lab = getLab(slug);
@@ -230,6 +231,30 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       if (d.consoleUrl) { if (w) w.location.href = d.consoleUrl; else window.open(d.consoleUrl, "_blank"); }
       else { if (w) w.close(); consoleWindowRef.current = null; }
     } catch { if (w) w.close(); consoleWindowRef.current = null; }
+  }
+
+  // Mint a FRESH console URL and copy it to the clipboard so the user can paste
+  // it into an incognito window (avoids the "you must log out first" error when
+  // their browser already holds an AWS session). The URL is time-boxed by STS,
+  // so we mint it on-demand rather than caching one.
+  async function copyConsoleUrl() {
+    if (!sessionId || copyStatus === "loading") return;
+    setCopyStatus("loading");
+    try {
+      const r = await fetch("/api/console", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const d = await r.json();
+      if (!d?.consoleUrl) throw new Error("no url");
+      await navigator.clipboard.writeText(d.consoleUrl);
+      setCopyStatus("copied");
+      setTimeout(() => setCopyStatus("idle"), 4000);
+    } catch {
+      setCopyStatus("error");
+      setTimeout(() => setCopyStatus("idle"), 4000);
+    }
   }
 
   function endLab() {
@@ -413,6 +438,22 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         <div className="mt-2 rounded-lg border border-line bg-canvas p-3 text-xs text-ink-soft">
           <p className="font-semibold text-ink">Already signed into AWS?</p>
           <p className="mt-1">A browser holds one AWS session at a time. If you see “you must log out first,” open this in an <strong>incognito window</strong> (or log out of AWS first).</p>
+          <button
+            onClick={copyConsoleUrl}
+            disabled={copyStatus === "loading"}
+            className="mt-2 inline-flex items-center gap-1 rounded-md border border-line bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-60"
+          >
+            {copyStatus === "loading"
+              ? "Getting URL…"
+              : copyStatus === "copied"
+              ? "✓ Copied — paste in incognito"
+              : copyStatus === "error"
+              ? "Couldn’t copy — try again"
+              : "Copy URL for incognito"}
+          </button>
+          <p className="mt-1 text-[11px] text-muted">
+            URL is time-boxed and only works once — paste it quickly into an incognito window.
+          </p>
         </div>
         {objectives.length > 0 && (
           <div className="mt-5 border-t border-line pt-4">
@@ -420,7 +461,13 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
             <ul className="mt-2 space-y-2">
               {objectives.map((o) => (
                 <li key={o.id} className="flex gap-2 text-sm text-ink-soft">
-                  <span className="mt-0.5 flex-none text-line-strong">○</span>
+                  {/* Proper circle: drawn as a 12×12 div with a 2px border so it
+                      stays crisp at any zoom — the unicode ○ glyph rendered
+                      effectively invisible. */}
+                  <span
+                    className="mt-1 flex-none h-3 w-3 rounded-full border-2 border-muted"
+                    aria-hidden="true"
+                  />
                   <span>{o.description}</span>
                 </li>
               ))}
