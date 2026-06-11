@@ -33,8 +33,8 @@ STALE — THIS file is the source of truth.**
 > **Cross-session note:** this file + the auto-memory (`project_shieldsync_labs.md`)
 > are the source of truth. A *running* Claude session loaded its memory at its own
 > start, so it won't see later updates until it re-reads this file or restarts —
-> point stale sessions here. Everything is deployed **from the working tree**
-> (uncommitted); 3 sessions share the tree, so commit path-scoped, never blanket.
+> point stale sessions here. The deployed state is committed (`715ac2c`); 3 sessions
+> share the tree, so commit path-scoped, never blanket `git add -A`.
 
 ---
 
@@ -288,20 +288,30 @@ Read live Worker logs: `npx wrangler tail --format pretty` (from `app/`).
 
 ## 9. Known issues / pending work
 
-- **Cognito Google attribute mapping is mis-wired** (cosmetic, NOT a login blocker):
-  `family_name ← given_name` (surname slot gets first name), `given_name` unmapped,
-  `email_verified` unmapped (stored false). **Do not naively remap** — `family_name`
-  and `name` are **required** pool attributes (Required flag is immutable) and Google
-  doesn't always return a surname, so a blind fix will start *failing* provisioning
-  for single-name accounts. Safe fix = add a Pre-signup/Pre-token Lambda that
-  backfills required attrs, THEN `update-identity-provider` (full ProviderDetails,
-  it REPLACES), THEN delete the 2 corrupted users
-  (`google_117049350047204215672`, `google_102612926731906303006`). Do post-launch.
+- **Cognito Google attribute mapping is mis-wired — but INERT; DO NOT "fix" it
+  casually** (analyzed 2026-06-11): `family_name ← given_name` (surname slot holds the
+  first name), `given_name` unmapped, `email_verified` unmapped (stored `false`).
+  - **Why it's inert:** grep shows `family_name` is read in exactly ONE place —
+    `app/app/api/auth/callback/route.ts:45`, a name *fallback* that only fires when
+    `claims.name` is empty (Google always sends `name`, so it never fires). The
+    marketing table (`ShieldSyncLabUsers`) stores `name` (correct), not `family_name`.
+    So nothing meaningful consumes the wrong value.
+  - **Why the "Lambda backfill" plan is WRONG:** Cognito rejects a federated user at
+    *creation* when a **required** attribute is missing — that happens BEFORE any
+    pre-signup trigger runs, so no Lambda can inject it. And `family_name`/`name` are
+    Required with an **immutable** flag. The current `family_name ← given_name` mapping
+    is precisely what keeps the required field populated → it's load-bearing.
+  - **Why a naive remap is DANGEROUS:** flip to `family_name ← family_name` and any
+    Google account with no surname fails the required-attribute check → locked out.
+    The owner's own account (`himanshujain0911`, `name="Himanshu"`, single word) looks
+    like exactly that mononym case. **Zero upside, real lock-out risk → leave it.**
+  - **Only truly-correct fix:** recreate the pool with `family_name`/`name` OPTIONAL,
+    then map correctly. Disruptive (new pool id → reconfigure app client, Google IdP,
+    `wrangler.jsonc` vars). A planned migration, not a quick change. (`email_verified`
+    could be mapped safely on its own, but it's also inert today.)
 - **App changes DEPLOYED** (2026-06-11, Worker `9b162d59`): the `after()` callback fix
   (incident #6) **+** the animated terminal UX (`lab-panel.tsx` + `globals.css`
-  `ss-bar`). Built with webpack, smoke-tested 8/8. Still **uncommitted** in the working
-  tree (deployed from the tree, not `git commit`'d — 3 sessions share the tree, so
-  avoid a blanket `git add -A`; commit path-scoped).
+  `ss-bar`). Built with webpack, smoke-tested 8/8. Committed in `715ac2c`.
 - **4 lab CloudFormation templates** still to author: **kms, guardduty, cloudtrail, vpc**.
 - **Auto-grader** — a `/grade` engine endpoint + a "Check my work" button in the lab panel.
 - **Tighten role trusts** — narrow the lab role trust policy from `:root` to the
