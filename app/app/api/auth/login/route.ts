@@ -12,10 +12,17 @@ export async function GET(req: Request) {
   const returnTo = url.searchParams.get("returnTo") ?? "/dashboard";
   const state = crypto.randomUUID();
 
+  // Whitelist the post-login return path: must be a relative path on this site.
+  // Anything else (absolute URL, protocol-relative, javascript:) gets ignored —
+  // otherwise an attacker could send a victim to /api/auth/login?returnTo=evil.com
+  // and bounce them off our domain after login.
+  const safeReturnTo = /^\/[^/\\]/.test(returnTo) ? returnTo : "/dashboard";
+
   const res = NextResponse.redirect(authorizeUrl(provider, state));
-  res.cookies.set(STATE_COOKIE, `${state}|${returnTo}`, {
+  res.cookies.set(STATE_COOKIE, `${state}|${safeReturnTo}`, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    // Workers may not set NODE_ENV — secure unless we're on plain localhost.
+    secure: !/^http:\/\/(localhost|127\.0\.0\.1)/.test(url.origin),
     sameSite: "lax",
     maxAge: 600,
     path: "/",

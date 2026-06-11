@@ -9,11 +9,11 @@ import {
   SESSION_COOKIE,
   STATE_COOKIE,
 } from "@/lib/auth/cognito";
+import { engineFetch } from "@/lib/server/engine";
 
 // Cognito redirects the browser here with ?code & ?state. We exchange the code,
 // verify the ID token, set our session cookie, persist the user (marketing DB,
 // via the engine), then bounce back into the app.
-const ENGINE_URL = process.env.ENGINE_URL ?? "http://localhost:4000";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -21,7 +21,9 @@ export async function GET(req: Request) {
 
   const err = url.searchParams.get("error");
   if (err) {
-    console.error("[auth/callback] Cognito error:", err, "desc:", url.searchParams.get("error_description"), "full:", url.search);
+    // Log just the error code + description — never url.search (it can contain
+    // the OAuth code / state which together are a one-shot session bootstrap).
+    console.error("[auth/callback] Cognito error:", err, "desc:", url.searchParams.get("error_description"));
     return NextResponse.redirect(new URL(`/sign-in?error=${encodeURIComponent(err)}`, url.origin));
   }
 
@@ -31,10 +33,13 @@ export async function GET(req: Request) {
 
   // CSRF: the state must match what we stored, and it carries the return path.
   const raw = (await cookies()).get(STATE_COOKIE)?.value ?? "";
-  const [savedState, returnTo = "/dashboard"] = raw.split("|");
+  const [savedState, returnToRaw = "/dashboard"] = raw.split("|");
   if (!savedState || savedState !== state) {
     return NextResponse.redirect(new URL("/sign-in?error=bad_state", url.origin));
   }
+  // Belt-and-suspenders open-redirect guard: login already sanitizes, but if the
+  // cookie was somehow forged, only honour a relative path on THIS origin.
+  const returnTo = /^\/[^/\\]/.test(returnToRaw) ? returnToRaw : "/dashboard";
 
   let user;
   try {
@@ -64,18 +69,17 @@ export async function GET(req: Request) {
   // (Verified live 2026-06-11: two successful logins, zero table writes.)
   after(async () => {
     try {
-      await fetch(`${ENGINE_URL}/user`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(user),
-      });
+      await engineFetch("/user", { body: user, userId: user.id });
     } catch {}
   });
 
   const res = NextResponse.redirect(new URL(returnTo, url.origin));
   res.cookies.set(SESSION_COOKIE, session, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    // Workers may not set NODE_ENV — default to secure UNLESS we're on a plain
+    // localhost dev origin. Cookies without Secure get rejected by browsers on
+    // https in any modern setup, but we explicitly enforce it here.
+    secure: !/^http:\/\/(localhost|127\.0\.0\.1)/.test(url.origin),
     sameSite: "lax",
     maxAge: 7 * 24 * 3600,
     path: "/",

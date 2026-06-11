@@ -1,19 +1,17 @@
 import { NextResponse } from "next/server";
-
-const ENGINE_URL = process.env.ENGINE_URL ?? "http://localhost:4000";
+import { engineFetchAsUser } from "@/lib/server/engine";
 
 // End a lab early -> engine tears it down (aws-nuke) and recycles the account.
-// (The reaper also does this automatically on expiry.)
+// (The reaper also does this automatically on expiry.) The engine cross-checks
+// session ownership against X-User-Id, so a learner can only end THEIR session.
 export async function POST(req: Request) {
-  const { sessionId } = (await req.json()) as { sessionId?: string };
-  if (!sessionId) return NextResponse.json({ error: "missing sessionId" }, { status: 400 });
+  const { sessionId } = (await req.json().catch(() => ({}))) as { sessionId?: string };
+  if (!sessionId || !/^sess_[a-z0-9]{6,32}$/.test(sessionId)) {
+    return NextResponse.json({ error: "missing sessionId" }, { status: 400 });
+  }
   try {
-    const r = await fetch(`${ENGINE_URL}/teardown`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionId }),
-    });
-    if (!r.ok) return NextResponse.json({ error: "engine error" }, { status: 502 });
+    const r = await engineFetchAsUser("/teardown", { sessionId });
+    if (!r.ok) return NextResponse.json({ error: "engine error" }, { status: r.status });
     return NextResponse.json(await r.json());
   } catch {
     return NextResponse.json({ error: "engine unreachable" }, { status: 502 });

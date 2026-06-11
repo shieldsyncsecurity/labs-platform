@@ -2,14 +2,19 @@ import { NextResponse } from "next/server";
 import { getLab } from "@/lib/labs";
 import { listEntitlements } from "@/lib/server/store";
 import { getServerUser } from "@/lib/auth/session";
+import { engineFetch } from "@/lib/server/engine";
 
 // The browser hits THIS (the app server), which enforces entitlement and then
 // brokers to the internal engine. The engine URL/creds never reach the client.
-const ENGINE_URL = process.env.ENGINE_URL ?? "http://localhost:4000";
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as { userId?: string; labSlug?: string };
+  const body = (await req.json().catch(() => ({}))) as { userId?: string; labSlug?: string };
   const labSlug = body.labSlug;
+  // Whitelist labSlug at the edge — the engine also validates, but reject any
+  // path-traversal-shaped input here before we look it up or hit the engine.
+  if (labSlug && !/^[a-z0-9][a-z0-9-]{0,63}$/.test(labSlug)) {
+    return NextResponse.json({ error: "invalid lab" }, { status: 400 });
+  }
   // Prefer the VERIFIED session id; never trust a client-supplied userId when a
   // real session exists. Falls back to the body id only in mock/offline mode.
   const sessionUser = await getServerUser();
@@ -28,15 +33,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "not entitled" }, { status: 403 });
   }
 
-  // broker to the engine (lease -> deploy -> mint console URL). This takes ~1-2
-  // min (real deploy). Production refinement: make this async + poll for the URL.
+  // broker to the engine — passes the shared secret + verified user id via headers.
   let r: Response;
   try {
-    r = await fetch(`${ENGINE_URL}/launch`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ userId, labSlug }),
-    });
+    r = await engineFetch("/launch", { body: { userId, labSlug }, userId: userId ?? null });
   } catch {
     return NextResponse.json({ error: "engine unreachable" }, { status: 502 });
   }
