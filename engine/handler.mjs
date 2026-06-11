@@ -45,6 +45,7 @@ import {
   reap,
   rulesFor,
   launchCount,
+  freeCapacity,
 } from "./labinfra.mjs";
 
 const PRIMARY_LAB = "s3-misconfiguration-audit";
@@ -183,6 +184,16 @@ export async function handler(event) {
           windowHours: rules.windowHours,
           used,
         });
+      }
+
+      // Free labs are capped to a share of the pool (FREE_POOL_PCT) so a free rush
+      // can't starve paying users — paid launches skip this and use the rest.
+      if (rules.free) {
+        const fc = await freeCapacity();
+        if (fc.reached) {
+          console.log(`[launch] FREE_AT_CAPACITY ${fc.busy}/${fc.cap} (pool ${fc.total})`);
+          return resp(503, { error: "FREE_AT_CAPACITY", freeCap: fc.cap, freeBusy: fc.busy, poolSize: fc.total });
+        }
       }
 
       let leased;

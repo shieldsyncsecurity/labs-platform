@@ -27,7 +27,7 @@ STALE — THIS file is the source of truth.**
 | Lab account pool | 🟢 **CLEAN** | 3 sandboxes `available`, 0 stacks |
 | Marketing user-persist (`after()` fix) | 🟢 **VERIFIED** | a real login wrote through: `logins` 2→3, `lastSeen` → today |
 | Lab launch / teardown / warmer | 🟢 **VERIFIED** | test launch reached `active` in 72s, torn down clean; pool auto-warms (2 accts `warmReady`) |
-| Access rules (session length + launch caps) | 🟢 **LIVE** | per-tier durations + launch limits; free = 1/48h; verified (429 + durations). See §6b |
+| Access rules (session length + launch caps) | 🟢 **LIVE** | per-tier durations + launch limits; free = 1/48h **+ free-pool cap ≤30%**; verified (429, durations, 503 FREE_AT_CAPACITY). See §6b |
 | Real Razorpay | 🟡 deferred | mock gateway works; real blocked on GST (~1 mo) |
 | 4 lab CFNs (kms/guardduty/cloudtrail/vpc) · auto-grader · role-trust tightening | 🔴 todo | feature work, not blocking |
 
@@ -216,6 +216,12 @@ Engine DynamoDB tables (acct 750294427884): `ShieldSyncLabAccounts`,
 - **Launch limit** = rolling count of a user's runs for that lab (`launchCount()`),
   excluding failed deploys. Over the cap → engine returns **429 `LIMIT_REACHED`**
   (app `/api/launch` relays it). Reconnecting to an *active* session doesn't count.
+- **Free-pool cap** = free labs may occupy at most **30%** of the whole account pool
+  at once (`FREE_POOL_PCT` in labinfra, min 1 slot), so a free rush can't starve
+  paying users — paid launches skip the cap and use the rest. Over it → engine
+  returns **503 `FREE_AT_CAPACITY`**, which the lab console shows as "Free labs are at
+  capacity." Scales with the pool (20 accts → 6 free). Verified on a 3-acct pool
+  (cap 1): a 2nd concurrent free launch is blocked while a paid launch still succeeds.
 - **Entitlement window** (`accessUntil`, paid only) is set per-lab in
   `checkout/route.ts` to match the launch window. The free lab has no entitlement —
   the engine cap is the only gate.

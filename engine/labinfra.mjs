@@ -63,10 +63,50 @@ function labMeta(labSlug) {
   }
 }
 
-/** rulesFor(): access rules for a lab — free labs use FREE_RULE, else the level rule. */
+/** rulesFor(): access rules for a lab — free labs use FREE_RULE, else the level rule.
+ *  Carries a `free` flag so the caller can apply the free-pool cap. */
 export function rulesFor(labSlug) {
   const { level, free } = labMeta(labSlug);
-  return free ? FREE_RULE : LEVEL_RULES[level] ?? LEVEL_RULES.Beginner;
+  return { ...(free ? FREE_RULE : LEVEL_RULES[level] ?? LEVEL_RULES.Beginner), free };
+}
+
+// Free labs may occupy at most this SHARE of the whole account pool at once, so a
+// rush of free users can never starve paying customers. Scales as the pool grows
+// (e.g. 20 accounts → 6 free slots, 14 always reserved for paid). Min 1 so the
+// free lab still works on a tiny pool.
+const FREE_POOL_PCT = 0.3;
+
+async function poolSize() {
+  const db = await ddb();
+  const r = await db.send(new ScanCommand({ TableName: ACCOUNTS_TABLE, Select: "COUNT" }));
+  return r.Count ?? 0;
+}
+
+// Accounts currently held by a LIVE free-lab session (active/leasing, non-expired).
+async function activeFreeCount() {
+  const db = await ddb();
+  const now = Date.now();
+  const scan = await db.send(
+    new ScanCommand({
+      TableName: SESSIONS_TABLE,
+      FilterExpression: "(#s = :a OR #s = :l) AND attribute_exists(expiresAt)",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: { ":a": { S: "active" }, ":l": { S: "leasing" } },
+    })
+  );
+  return (scan.Items ?? []).filter(
+    (s) => new Date(s.expiresAt.S).getTime() > now && labMeta(s.labSlug?.S ?? "").free
+  ).length;
+}
+
+/**
+ * freeCapacity(): is the free-lab share of the pool already full? Free runs are
+ * capped at FREE_POOL_PCT of the pool (min 1) so they can't starve paid users.
+ */
+export async function freeCapacity() {
+  const [total, busy] = await Promise.all([poolSize(), activeFreeCount()]);
+  const cap = Math.max(1, Math.floor(total * FREE_POOL_PCT));
+  return { total, busy, cap, reached: busy >= cap };
 }
 
 // Per-account aws-nuke config, generated at teardown so it works for ANY pool

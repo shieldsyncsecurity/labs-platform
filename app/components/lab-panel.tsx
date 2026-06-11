@@ -122,7 +122,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [remaining, setRemaining] = useState(0);
-  const [flash, setFlash] = useState<"nocapacity" | "launcherror" | null>(null);
+  const [flash, setFlash] = useState<"nocapacity" | "freebusy" | "limitreached" | "launcherror" | null>(null);
   const [rated, setRated] = useState<"up" | "down" | null>(null);
   const [busy, setBusy] = useState(false);
   const expiryFired = useRef(false);
@@ -198,7 +198,13 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ userId: user!.id, labSlug: slug }),
       });
-      if (r.status === 503) { setSession(null); setFlash("nocapacity"); return; }
+      if (r.status === 503) {
+        const d = await r.json().catch(() => ({}));
+        setSession(null);
+        setFlash(d.error === "FREE_AT_CAPACITY" ? "freebusy" : "nocapacity");
+        return;
+      }
+      if (r.status === 429) { setSession(null); setFlash("limitreached"); return; }
       if (!r.ok) { setSession(null); setFlash("launcherror"); return; }
       const d = (await r.json()) as { sessionId: string; expiresAt?: string };
       try { sessionStorage.setItem(key, d.sessionId); } catch {}
@@ -262,6 +268,30 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         <p className="text-base font-extrabold text-ink">All seats busy</p>
         <p className="mt-1 text-sm text-ink-soft">Every isolated account is in use — one frees up as soon as a learner finishes.</p>
         <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-sm font-semibold text-ink hover:bg-canvas">Try again</button>
+      </div>
+    );
+  }
+  if (flash === "freebusy") {
+    return (
+      <div className={card}>
+        <p className="text-base font-extrabold text-ink">Free labs are at capacity</p>
+        <p className="mt-1 text-sm text-ink-soft">
+          Free sessions are capped at a share of the pool so paid learners always have room. One opens up
+          soon — try again in a few minutes, or get a paid lab for guaranteed access.
+        </p>
+        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-sm font-semibold text-ink hover:bg-canvas">Try again</button>
+      </div>
+    );
+  }
+  if (flash === "limitreached") {
+    return (
+      <div className={card}>
+        <p className="text-base font-extrabold text-ink">You&apos;ve used all your launches</p>
+        <p className="mt-1 text-sm text-ink-soft">
+          You&apos;ve hit this lab&apos;s launch limit for now. It resets on a rolling window — check back a
+          little later.
+        </p>
+        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-sm font-semibold text-ink hover:bg-canvas">OK</button>
       </div>
     );
   }

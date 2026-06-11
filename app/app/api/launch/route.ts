@@ -40,7 +40,12 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "engine unreachable" }, { status: 502 });
   }
-  if (r.status === 503) return NextResponse.json({ error: "NO_CAPACITY" }, { status: 503 });
+  if (r.status === 503) {
+    // Could be a general pool exhaustion OR the free-pool cap (FREE_AT_CAPACITY) —
+    // relay the engine's reason so the UI can show the right message.
+    const detail = await r.json().catch(() => ({}));
+    return NextResponse.json({ error: detail.error ?? "NO_CAPACITY", ...detail }, { status: 503 });
+  }
   if (r.status === 429) {
     // Per-level launch limit hit (e.g. Beginner = 3 runs / 72h) — relay the detail.
     const detail = await r.json().catch(() => ({}));
