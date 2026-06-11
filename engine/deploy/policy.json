@@ -15,7 +15,8 @@
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabAccounts",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabSessions",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabUsers",
-        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabEntitlements"
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabEntitlements",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabRatings"
       ]
     },
     {

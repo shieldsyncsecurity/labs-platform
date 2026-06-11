@@ -46,6 +46,7 @@ import {
   rulesFor,
   launchCount,
   freeCapacity,
+  recordRating,
 } from "./labinfra.mjs";
 
 const PRIMARY_LAB = "s3-misconfiguration-audit";
@@ -250,6 +251,13 @@ export async function handler(event) {
       const { id, email, name, provider } = parsed;
       if (!id) return resp(400, { error: "id required" });
       await upsertUser({ id, email, name, provider });
+      return resp(200, { ok: true });
+    }
+
+    if (method === "POST" && path === "/rate") {
+      const { userId, labSlug, rating } = parsed;
+      if (!userId || !labSlug || !rating) return resp(400, { error: "userId, labSlug, rating required" });
+      await recordRating(userId, labSlug, rating);
       return resp(200, { ok: true });
     }
 

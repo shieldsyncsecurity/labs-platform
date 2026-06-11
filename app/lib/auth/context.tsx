@@ -94,6 +94,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
+    // Best-effort: end any live lab in THIS browser first, so its account is
+    // released immediately instead of waiting ≤3 min for the reaper. `keepalive`
+    // lets the request survive the imminent logout navigation.
+    if (typeof window !== "undefined") {
+      try {
+        const labKeys: string[] = [];
+        for (let i = 0; i < window.sessionStorage.length; i++) {
+          const k = window.sessionStorage.key(i);
+          if (k && k.startsWith("lab:")) labKeys.push(k);
+        }
+        for (const k of labKeys) {
+          const sid = window.sessionStorage.getItem(k);
+          if (sid) {
+            void fetch("/api/end-lab", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ sessionId: sid }),
+              keepalive: true,
+            });
+          }
+          window.sessionStorage.removeItem(k);
+        }
+      } catch {}
+    }
     if (COGNITO_ENABLED) {
       cognitoSignOut(); // clears cookie + Cognito session, then redirects
       return NEVER;

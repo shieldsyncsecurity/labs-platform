@@ -194,7 +194,9 @@ printf '%s' '<value>' | npx wrangler secret put COGNITO_CLIENT_SECRET   # via Ba
 `ENGINE_URL` is the engine **API Gateway**:
 `https://lewssnjjhi.execute-api.us-east-1.amazonaws.com` (not a Lambda Function URL).
 Engine DynamoDB tables (acct 750294427884): `ShieldSyncLabAccounts`,
-`ShieldSyncLabSessions`, `ShieldSyncLabUsers`, `ShieldSyncLabEntitlements`.
+`ShieldSyncLabSessions`, `ShieldSyncLabUsers`, `ShieldSyncLabEntitlements`,
+`ShieldSyncLabRatings`. EventBridge crons (acct 750): `ShieldSyncReaper`
+(`rate(3 min)`→reap), `ShieldSyncWarmer` (`rate(10 min)`→warm).
 
 ---
 
@@ -375,12 +377,23 @@ Read live Worker logs: `npx wrangler tail --format pretty` (from `app/`).
   payload `{_worker:true,action:"reap"}`. Verified: reap ran clean (`checked 0,
   expired 0, reaped 0`). Abandonment is now safe — expired `active`/`leasing` sessions
   are swept within ~3 min, so the pool can't drift into collisions.
-  *Still nice-to-have (not blocking):* make `signOut()` call `/api/end-lab` first (in
-  `context.tsx`) so an abandoned account frees instantly instead of at expiry — the
-  reaper already prevents the pollution. The **warmer** (pre-stage accounts) is a
-  separate future cron.
+  *Done 2026-06-11:* `signOut()` now ends any live lab first (`context.tsx`, keepalive
+  fetch → `/api/end-lab`) for instant release; and a **warmer cron** keeps the pool
+  pre-staged — EventBridge **`ShieldSyncWarmer` = `rate(10 minutes)`** → Lambda
+  `{_worker:true,action:"warm"}` (acct 750).
   **Manual reap** anytime: assume `OrganizationAccountAccessRole` into 750 and invoke
   the Lambda with `{_worker:true,action:"reap"}`, or run `node engine/try-reap.mjs`.
+- **⚠️ Scaling the pool is blocked on an AWS account-limit increase.** The org caps at
+  its applied "Maximum number of accounts" — currently **5** (= the count). New orgs
+  get a low initial cap regardless of the documented default (10). This quota is NOT
+  self-service (Service Quotas `get-service-quota` → `NoSuchResourceException`); raise
+  it via **AWS Support / the console** (Service limit increase → Organizations →
+  Number of accounts). After approval, `node engine/try-provision.mjs <NNN>` vends a
+  sandbox (`sbxNNN@shieldsyncsecurity.com`): creates the account, bootstraps
+  `ShieldSyncLabExec`/`ShieldSyncLabUser`, sets a $10/mo budget, registers it in the
+  pool. The 30% free-pool cap scales automatically with pool size.
+- **Lab ratings** (`/api/rate` → engine `/rate` → `ShieldSyncLabRatings` table, acct
+  750) persist 👍/👎 per (labSlug, userId) for product signal. Done 2026-06-11.
 - **Razorpay** integration deferred (~1 month, until GST) — mock gateway live now.
 
 ---

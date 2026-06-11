@@ -259,6 +259,16 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       });
   }
 
+  function rate(value: "up" | "down") {
+    setRated(value); // optimistic
+    // Persist for product signal (fire-and-forget; never blocks the UI).
+    void fetch("/api/rate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ labSlug: slug, rating: value }),
+    }).catch(() => {});
+  }
+
   // ---------------- views ----------------
   if (!ready) return <div className={`${card} text-base text-ink-soft`}>This lab is coming soon.</div>;
 
@@ -359,8 +369,8 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
             <p className="mt-2 text-sm text-ink-soft">Thanks for the feedback! 🙌</p>
           ) : (
             <div className="mt-2 flex gap-2">
-              <button onClick={() => setRated("up")} aria-label="Helpful" className="rounded-lg border border-line px-4 py-2 text-base hover:bg-canvas">👍</button>
-              <button onClick={() => setRated("down")} aria-label="Not helpful" className="rounded-lg border border-line px-4 py-2 text-base hover:bg-canvas">👎</button>
+              <button onClick={() => rate("up")} aria-label="Helpful" className="rounded-lg border border-line px-4 py-2 text-base hover:bg-canvas">👍</button>
+              <button onClick={() => rate("down")} aria-label="Not helpful" className="rounded-lg border border-line px-4 py-2 text-base hover:bg-canvas">👎</button>
             </div>
           )}
         </div>
@@ -376,6 +386,11 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
           <span className="text-base font-extrabold text-ink">🟢 Lab is live</span>
           <span className={`font-mono text-sm font-bold ${low ? "text-[#b91c1c]" : "text-brand"}`}>⏱ {fmt(remaining)}</span>
         </div>
+        {low && (
+          <div className="mt-3 rounded-lg border border-[#fecaca] bg-[#fef2f2] p-2.5 text-sm font-semibold text-[#b91c1c]">
+            ⚠ Under 5 minutes left — wrap up and click <strong>End &amp; wipe lab</strong>. When the timer hits 0 the account is auto-wiped and your work is cleared.
+          </div>
+        )}
         <button onClick={openConsole} className="mt-4 block w-full rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong">Open AWS console ↗</button>
         <div className="mt-2 rounded-lg border border-line bg-canvas p-3 text-xs text-ink-soft">
           <p className="font-semibold text-ink">Already signed into AWS?</p>

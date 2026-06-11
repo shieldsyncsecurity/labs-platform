@@ -36,6 +36,7 @@ const ACCOUNTS_TABLE = "ShieldSyncLabAccounts";
 const SESSIONS_TABLE = "ShieldSyncLabSessions";
 const USERS_TABLE = "ShieldSyncLabUsers";
 const ENTITLEMENTS_TABLE = "ShieldSyncLabEntitlements";
+const RATINGS_TABLE = "ShieldSyncLabRatings";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
 
@@ -699,4 +700,24 @@ export async function upsertUser({ id, email, name, provider }) {
     })
   );
   return { userId: String(id) };
+}
+
+/**
+ * recordRating(): upsert a user's 👍/👎 for a lab (product signal). One row per
+ * (labSlug, userId) — latest rating wins. Query by labSlug to aggregate.
+ */
+export async function recordRating(userId, labSlug, rating) {
+  if (!userId || !labSlug) return;
+  const db = await ddb();
+  await db.send(
+    new PutItemCommand({
+      TableName: RATINGS_TABLE,
+      Item: {
+        labSlug: { S: String(labSlug) },
+        userId: { S: String(userId) },
+        rating: { S: String(rating) },
+        ratedAt: { S: new Date().toISOString() },
+      },
+    })
+  );
 }
