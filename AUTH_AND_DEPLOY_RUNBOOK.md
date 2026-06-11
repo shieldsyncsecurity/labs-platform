@@ -19,7 +19,7 @@ STALE — THIS file is the source of truth.**
 
 | Component | Status | Detail |
 |---|---|---|
-| App — Cloudflare Worker `labs-platform` | 🟢 **LIVE** | version `0dca9229`; pages + auth + lab UI all 200 |
+| App — Cloudflare Worker `labs-platform` | 🟢 **LIVE** | version `428796a8`; pages + auth + lab UI all 200 |
 | Cognito + Google sign-in | 🟢 **LIVE** | Google OAuth app **In Production**; full login round-trip works |
 | App → Engine wiring | 🟢 **WIRED** | `ENGINE_URL` set in `wrangler.jsonc` (NOT localhost); App→Engine→DDB verified |
 | Engine Lambda `ShieldSyncEngine` (acct 750) | 🟢 **DEPLOYED** | redeployed 2026-06-11; `/health` 200 |
@@ -29,9 +29,11 @@ STALE — THIS file is the source of truth.**
 | Lab launch / teardown | 🟢 **VERIFIED** | test launch → `active` in 72s, torn down clean |
 | Access rules (session length + launch caps) | 🟢 **LIVE** | per-tier durations + launch limits; free = 1/48h **+ free-pool cap ≤30%**; verified (429, durations, 503 FREE_AT_CAPACITY). See §6b |
 | UX polish | 🟢 **LIVE** | sign-out ends lab (instant `/api/end-lab`); 👍/👎 → `ShieldSyncLabRatings`; <5 min low-time warning |
+| **Auto-grader** ("Check my work") | 🟢 **LIVE** | `/grade` scores a live lab vs its `successCriteria` from REAL account state (s3 + iam labs); verified fresh→0/4, remediated→PASS |
+| Role-trust hygiene | 🟢 **DONE** | lab roles `:root` → `[ShieldSyncEngineRole, OrgAccountAccessRole]`; `LabExec` on existing 3 left as-is (protected by ProtectGovernance SCP). `FORCE_REFRESH` env var removed |
 | Pool scaling past 5 accounts | 🔴 **BLOCKED** | AWS org account cap = **5** (at limit); needs a Support quota increase (your action). See §9 |
 | Real Razorpay | 🟡 deferred | mock gateway works; real blocked on GST (~1 mo) |
-| 2 lab CFNs (cloudtrail, guardduty) · auto-grader · role-trust tightening | 🔴 todo | feature work, not blocking |
+| 2 lab CFNs (cloudtrail, guardduty) | 🔴 todo | content authored; need `template.yaml` + `ready:true` |
 
 > **Cross-session note:** this file + the auto-memory (`project_shieldsync_labs.md`)
 > are the source of truth. A *running* Claude session loaded its memory at its own
@@ -352,11 +354,20 @@ Read live Worker logs: `npx wrangler tail --format pretty` (from `app/`).
 - **2 labs still need CFN templates** (have content, can't launch): `cloudtrail-forensics`,
   `guardduty-security-hub-triage`. The other 4 (iam/s3/kms/vpc) have `template.yaml` and
   are launchable.
-- **Leftover `FORCE_REFRESH=1` env var** on the engine Lambda (acct 750) — harmless, set
-  in an old session to force a cold start; remove it (`aws lambda update-function-configuration --environment "Variables={}"`).
-- **Auto-grader** — a `/grade` engine endpoint + a "Check my work" button in the lab panel.
-- **Tighten role trusts** — narrow the lab role trust policy from `:root` to the
-  specific Lambda exec role.
+- ✅ **`FORCE_REFRESH` env var removed** from the engine Lambda (2026-06-11).
+- ✅ **Auto-grader DONE** (2026-06-11) — `engine/graders.mjs` scores a live lab vs its
+  `successCriteria` from REAL account state: `/grade` (handler) → assume
+  `ShieldSyncLabExec` → inspect (S3 policy-status/policy/BPA, IAM users/policies,
+  `SimulatePrincipalPolicy`). App `/api/grade` + "Check my work" button (per-criterion
+  ✅/⬜). Graders exist for **s3 + iam** (the launchable labs); add a `gradeXxx()` per new
+  lab. **Gotcha:** a new grader file must be added to `deploy.ps1`'s `Compress-Archive`
+  line or it won't ship. Verified: fresh lab → 0/4; after remediation → criteria flip to PASS.
+- ✅ **Role-trust tightening DONE** (2026-06-11) — lab roles `:root` →
+  `[ShieldSyncEngineRole, OrganizationAccountAccessRole]`. `provision.mjs` sets it for
+  future accounts (in the Root OU, before the SCP applies); `ShieldSyncLabUser` updated
+  on the existing 3. `ShieldSyncLabExec` on the existing 3 could NOT be re-trusted in
+  place — the **ProtectGovernance SCP** (`p-t63yhec3`) denies `UpdateAssumeRolePolicy` on
+  it inside the OU (a deliberate guardrail; the role is also protected from tampering).
 - **✅ Teardown gap → lab launches failed (FIXED + DEPLOYED 2026-06-11).**
   **Trigger = abandonment, not a broken teardown.** Sign-out (`context.tsx`
   `signOut()` → `cognitoSignOut()` → `/api/auth/logout`) **never calls
