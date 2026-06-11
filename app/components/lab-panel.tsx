@@ -125,6 +125,8 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [flash, setFlash] = useState<"nocapacity" | "freebusy" | "limitreached" | "launcherror" | null>(null);
   const [rated, setRated] = useState<"up" | "down" | null>(null);
   const [busy, setBusy] = useState(false);
+  const [grade, setGrade] = useState<{ gradable: boolean; passed: boolean; criteria: { id: string; description: string; passed: boolean }[] } | null>(null);
+  const [grading, setGrading] = useState(false);
   const expiryFired = useRef(false);
   const consoleWindowRef = useRef<Window | null>(null);
   const lab = getLab(slug);
@@ -269,6 +271,22 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     }).catch(() => {});
   }
 
+  async function checkWork() {
+    if (!sessionId) return;
+    setGrading(true);
+    try {
+      const r = await fetch("/api/grade", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      setGrade(r.ok ? await r.json() : null);
+    } catch {
+      setGrade(null);
+    }
+    setGrading(false);
+  }
+
   // ---------------- views ----------------
   if (!ready) return <div className={`${card} text-base text-ink-soft`}>This lab is coming soon.</div>;
 
@@ -409,7 +427,35 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
             </ul>
           </div>
         )}
-        <button onClick={endLab} className="mt-5 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">End &amp; wipe lab</button>
+        <div className="mt-5 border-t border-line pt-4">
+          <button
+            onClick={checkWork}
+            disabled={grading}
+            className="w-full rounded-xl bg-ink px-5 py-2.5 text-base font-semibold text-white hover:opacity-90 disabled:opacity-60"
+          >
+            {grading ? "Checking your work…" : "✓ Check my work"}
+          </button>
+          {grade && (grade.gradable ? (
+            <div className="mt-3">
+              <p className={`text-sm font-bold ${grade.passed ? "text-[#15803d]" : "text-ink"}`}>
+                {grade.passed
+                  ? "🎉 All checks passed — nicely done!"
+                  : `${grade.criteria.filter((c) => c.passed).length}/${grade.criteria.length} checks passing — keep going`}
+              </p>
+              <ul className="mt-2 space-y-2">
+                {grade.criteria.map((c) => (
+                  <li key={c.id} className="flex gap-2 text-sm">
+                    <span className="mt-0.5 flex-none">{c.passed ? "✅" : "⬜"}</span>
+                    <span className={`text-ink-soft ${c.passed ? "line-through" : ""}`}>{c.description}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-muted">Auto-grading isn&apos;t available for this lab yet.</p>
+          ))}
+        </div>
+        <button onClick={endLab} className="mt-3 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">End &amp; wipe lab</button>
       </div>
     );
   }

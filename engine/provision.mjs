@@ -23,9 +23,23 @@ const MGMT_ACCOUNT = "851236938541";
 const BUDGET_EMAIL = "info@shieldsyncsecurity.com";
 const ADMIN_POLICY = "arn:aws:iam::aws:policy/AdministratorAccess";
 const CONTROL_ROLES = ["ShieldSyncLabExec", "ShieldSyncLabUser"];
+// Scoped trust: ONLY the engine's Lambda exec role (prod) and the platform-account
+// OrganizationAccountAccessRole (the local-dev bridge in labinfra) may assume the
+// lab roles — NOT the whole platform-account root. Least privilege for cross-account.
 const TRUST_PLATFORM = JSON.stringify({
   Version: "2012-10-17",
-  Statement: [{ Effect: "Allow", Principal: { AWS: `arn:aws:iam::${PLATFORM_ACCOUNT}:root` }, Action: "sts:AssumeRole" }],
+  Statement: [
+    {
+      Effect: "Allow",
+      Principal: {
+        AWS: [
+          `arn:aws:iam::${PLATFORM_ACCOUNT}:role/ShieldSyncEngineRole`,
+          `arn:aws:iam::${PLATFORM_ACCOUNT}:role/OrganizationAccountAccessRole`,
+        ],
+      },
+      Action: "sts:AssumeRole",
+    },
+  ],
 });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

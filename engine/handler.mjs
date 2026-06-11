@@ -48,6 +48,7 @@ import {
   freeCapacity,
   recordRating,
 } from "./labinfra.mjs";
+import { gradeLab } from "./graders.mjs";
 
 const PRIMARY_LAB = "s3-misconfiguration-audit";
 
@@ -259,6 +260,22 @@ export async function handler(event) {
       if (!userId || !labSlug || !rating) return resp(400, { error: "userId, labSlug, rating required" });
       await recordRating(userId, labSlug, rating);
       return resp(200, { ok: true });
+    }
+
+    if (method === "POST" && path === "/grade") {
+      const { sessionId } = parsed;
+      const s = await getSession(sessionId);
+      if (!s) return resp(404, { error: "not found" });
+      if (s.status !== "active") return resp(409, { error: "not ready", status: s.status });
+      try {
+        const execRoleArn = `arn:aws:iam::${s.accountId}:role/ShieldSyncLabExec`;
+        const result = await gradeLab(s.labSlug, execRoleArn, s.accountId);
+        console.log(`[grade] ${sessionId} ${s.labSlug}: ${result.criteria.filter((c) => c.passed).length}/${result.criteria.length}`);
+        return resp(200, result);
+      } catch (e) {
+        console.error(`[grade] ${sessionId} failed: ${e.message}`);
+        return resp(500, { error: "grading failed" });
+      }
     }
 
     // ── Entitlements (persistent, DynamoDB-backed) ───────────────────────────

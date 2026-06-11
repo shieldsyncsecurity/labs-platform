@@ -169,7 +169,7 @@ async function platformCreds() {
   return _pc.creds;
 }
 
-async function assumeInSandbox(roleArn, sessionName, durationSeconds) {
+export async function assumeInSandbox(roleArn, sessionName, durationSeconds) {
   // Lambda runs in the platform account — use execution role directly.
   // Local dev assumes into the platform account first via platformCreds().
   const sts = process.env.AWS_LAMBDA_FUNCTION_NAME
