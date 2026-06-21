@@ -39,50 +39,6 @@ export const LABS: Lab[] = [
     tags: ["IAM", "Privilege Escalation", "Least Privilege"],
     estimatedActiveMinutes: 75,
   },
-  {
-    slug: "kms-data-protection",
-    title: "KMS & data protection",
-    level: "Beginner",
-    free: false,
-    ready: false,
-    summary:
-      "Encrypt the right things the right way: KMS key policies, grants, and enforcing encryption across services.",
-    tags: ["KMS", "Encryption", "Key Policy"],
-    estimatedActiveMinutes: 80,
-  },
-  {
-    slug: "guardduty-security-hub-triage",
-    title: "GuardDuty & Security Hub triage",
-    level: "Intermediate",
-    free: false,
-    ready: false,
-    summary:
-      "Work a stream of findings: separate signal from noise, triage by severity, and decide what to action.",
-    tags: ["GuardDuty", "Security Hub", "Detection"],
-    estimatedActiveMinutes: 90,
-  },
-  {
-    slug: "cloudtrail-forensics",
-    title: "CloudTrail forensics",
-    level: "Advanced",
-    free: false,
-    ready: false,
-    summary:
-      "Reconstruct an attacker's actions from CloudTrail: trace the access path, find what was touched, and scope the blast radius.",
-    tags: ["CloudTrail", "Forensics", "IR"],
-    estimatedActiveMinutes: 120,
-  },
-  {
-    slug: "vpc-network-exposure",
-    title: "VPC network exposure",
-    level: "Intermediate",
-    free: false,
-    ready: false,
-    summary:
-      "Hunt down over-permissive security groups and network paths that expose workloads, and lock them down.",
-    tags: ["VPC", "Security Groups", "Networking"],
-    estimatedActiveMinutes: 90,
-  },
 ];
 
 export function getLab(slug: string): Lab | undefined {
