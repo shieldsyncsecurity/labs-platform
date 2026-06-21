@@ -128,7 +128,9 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [grade, setGrade] = useState<{ gradable: boolean; passed: boolean; criteria: { id: string; description: string; passed: boolean }[] } | null>(null);
   const [grading, setGrading] = useState(false);
   const [copyStatus, setCopyStatus] = useState<"idle" | "loading" | "copied" | "error">("idle");
+  const [wantsLaunch, setWantsLaunch] = useState(false);
   const expiryFired = useRef(false);
+  const autoLaunched = useRef(false);
   const consoleWindowRef = useRef<Window | null>(null);
   const lab = getLab(slug);
 
@@ -312,6 +314,33 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     setGrading(false);
   }
 
+  // Read the wizard's ?intent=launch handoff once (client-only → no hydration mismatch).
+  useEffect(() => {
+    try {
+      if (new URLSearchParams(window.location.search).get("intent") === "launch") setWantsLaunch(true);
+    } catch {}
+  }, []);
+
+  // Auto-launch when the learner arrives from the marketing wizard with
+  // ?intent=launch, once they're signed in and entitled. Turns the funnel handoff
+  // into a single sign-in with no extra "Launch" click. Guarded so it fires at most
+  // once and never double-leases (waits out the sessionStorage restore race).
+  useEffect(() => {
+    if (!wantsLaunch || autoLaunched.current) return;
+    if (!user || !hasAccess(slug)) return;          // wait for auth + entitlements
+    if (sessionId || session) return;               // already in a session/flow
+    try { if (sessionStorage.getItem(key)) return; } catch {} // restore-race guard
+    autoLaunched.current = true;
+    // Strip the param so a refresh / back-nav can't relaunch.
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.delete("intent");
+      window.history.replaceState(null, "", u.pathname + u.search);
+    } catch {}
+    void launch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsLaunch, user, sessionId, session, slug, hasAccess]);
+
   // ---------------- views ----------------
   if (!ready) return <div className={`${card} text-base text-ink-soft`}>This lab is coming soon.</div>;
 
@@ -362,7 +391,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       <div className={card}>
         <p className="text-base font-extrabold text-ink">Start this lab</p>
         <p className="mt-1 text-sm text-ink-soft">Sign in to spin up your own isolated AWS lab.</p>
-        <Link href={`/sign-in?returnTo=${encodeURIComponent(`/labs/${slug}`)}`} className="mt-4 block rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong">Sign in to start</Link>
+        <Link href={`/sign-in?returnTo=${encodeURIComponent(`/labs/${slug}${wantsLaunch ? "?intent=launch" : ""}`)}`} className="mt-4 block rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong">{wantsLaunch ? "Sign in & launch" : "Sign in to start"}</Link>
       </div>
     );
   }
@@ -405,6 +434,14 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       <div className={card}>
         <p className="text-base font-extrabold text-ink">⏹ Lab ended</p>
         <p className="mt-1 text-sm text-ink-soft">Your account was wiped clean and returned to the pool — nothing you did leaks to the next learner.</p>
+        {/* The IAM revoke kills the federated AWS API session, but the BROWSER
+            tab can still look normal until the user clicks something. If they
+            opened the console via Copy-URL into an incognito window, our app
+            never had a reference to that window so it didn't get auto-closed.
+            Tell them to close it explicitly. */}
+        <div className="mt-3 rounded-lg border border-[#fde68a] bg-[#fffbeb] p-2.5 text-xs text-[#92400e]">
+          🪟 <strong>Close any AWS console tabs you opened</strong> — their session was revoked, but the tab may look unchanged until you click. (The incognito copy-URL flow doesn’t auto-close.)
+        </div>
         <button onClick={() => { clearSession(); void launch(); }} className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-semibold text-white hover:bg-brand-strong">Start a new lab</button>
         <div className="mt-5 border-t border-line pt-4">
           <p className="text-xs font-bold uppercase tracking-wider text-muted">Did this lab help?</p>
