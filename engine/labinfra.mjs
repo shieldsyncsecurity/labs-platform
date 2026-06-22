@@ -275,14 +275,24 @@ export async function lease(userId, labSlug, windowMinutes = 30) {
  * any. Used to make launch idempotent — one active lab per learner — so a page
  * reload reconnects to the running lab instead of leasing another account.
  */
-export async function findActiveSession(userId) {
+export async function findActiveSession(userId, labSlug) {
   const db = await ddb();
+  // When labSlug is given, only reconnect to a live session FOR THAT LAB —
+  // otherwise launching lab B while lab A is live would silently hand back lab
+  // A's session (wrong-lab console). Omitting labSlug keeps the old behaviour
+  // (any live session) for callers that want it.
+  let filter = "userId = :u AND (#s = :active OR #s = :leasing) AND attribute_exists(expiresAt)";
+  const values = { ":u": { S: userId }, ":active": { S: "active" }, ":leasing": { S: "leasing" } };
+  if (labSlug) {
+    filter += " AND labSlug = :l";
+    values[":l"] = { S: labSlug };
+  }
   const scan = await db.send(
     new ScanCommand({
       TableName: SESSIONS_TABLE,
-      FilterExpression: "userId = :u AND (#s = :active OR #s = :leasing) AND attribute_exists(expiresAt)",
+      FilterExpression: filter,
       ExpressionAttributeNames: { "#s": "status" },
-      ExpressionAttributeValues: { ":u": { S: userId }, ":active": { S: "active" }, ":leasing": { S: "leasing" } },
+      ExpressionAttributeValues: values,
     })
   );
   const now = Date.now();
@@ -550,6 +560,12 @@ export async function teardown(sessionId) {
   // Revoke the learner's live console session NOW — deny everything for sessions
   // issued before this moment. So "End" actually ends their AWS access instantly,
   // instead of the federated session outliving the (minutes-long) wipe.
+  //
+  // CRITICAL: a failed revoke means the federated session may outlive the nuke
+  // — a real cross-tenant risk if the next learner gets the same account. We do
+  // NOT swallow errors silently; we log the full reason and surface it to the
+  // session record so the UI + ops can see something went wrong.
+  let revokeOk = false;
   try {
     const iam = new IAMClient({
       region: REGION,
@@ -567,9 +583,19 @@ export async function teardown(sessionId) {
         }),
       })
     );
+    revokeOk = true;
     console.log(`  revoked learner console session on ${accountId}`);
   } catch (e) {
-    console.log(`  (revoke note: ${e.name})`);
+    const reason = `${e.name}: ${e.message}`;
+    console.error(`  ❌ REVOKE FAILED on ${accountId}: ${reason}`);
+    // Persist the failure into the session record so the UI / status endpoint
+    // surface it; still proceed to nuke (wiping the account is the bigger win),
+    // but the caller can see that the session-revoke step was incomplete.
+    await markSession(sessionId, "ending", `revoke failed: ${reason}`).catch(() => {});
+  }
+  if (!revokeOk) {
+    // Final breadcrumb in the logs — easy to grep.
+    console.error(`  [security] account ${accountId} torn down WITHOUT a revoke — verify console URL no longer works`);
   }
 
   // In Lambda, binary is downloaded to /tmp at init; locally use the bundled exe.

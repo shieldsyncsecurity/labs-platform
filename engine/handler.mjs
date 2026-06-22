@@ -198,14 +198,21 @@ export async function handler(event) {
 
     if (method === "POST" && path === "/launch") {
       const { userId, labSlug } = parsed;
+      // Reject path-traversal-shaped labSlugs at the API edge before leasing.
+      // Without this, a bogus slug consumes a pool account and a rate-limit slot
+      // before the deploy step rejects it (deployStack also validates — this is
+      // defense in depth).
+      if (typeof labSlug !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(labSlug)) {
+        return resp(400, { error: "invalid lab slug" });
+      }
       // Trust the header (set by the app from the verified Cognito session) over
       // the body when both are present; falls back to body for local-dev callers
       // without auth, and finally to "anon" so the smoke /health flow still works.
       const uid = callerUserId || userId || "anon";
 
-      const existing = await findActiveSession(uid);
+      const existing = await findActiveSession(uid, labSlug);
       if (existing) {
-        console.log(`[launch] reconnect ${existing.sessionId}`);
+        console.log(`[launch] reconnect ${existing.sessionId} (${labSlug})`);
         return resp(200, { sessionId: existing.sessionId, expiresAt: existing.expiresAt, resumed: true });
       }
 
