@@ -483,15 +483,29 @@ export async function deployLab({ sessionId, accountId, labSlug, execRoleArn }) 
   console.log(`  deploying stack ${stackName} into account ${accountId} ...`);
   const { outputs } = await deployStack(execRoleArn, labSlug, stackName, [{ Key: "ShieldSyncSession", Value: sessionId }]);
   const db = await ddb();
-  await db.send(
-    new UpdateItemCommand({
-      TableName: SESSIONS_TABLE,
-      Key: { sessionId: { S: sessionId } },
-      UpdateExpression: "SET #s = :active, stackName = :sn",
-      ExpressionAttributeNames: { "#s": "status" },
-      ExpressionAttributeValues: { ":active": { S: "active" }, ":sn": { S: stackName } },
-    })
-  );
+  try {
+    await db.send(
+      new UpdateItemCommand({
+        TableName: SESSIONS_TABLE,
+        Key: { sessionId: { S: sessionId } },
+        // Only flip to "active" if the session is STILL leasing. If it was torn
+        // down (ending/done/error) while this cold deploy was in flight, do NOT
+        // resurrect it — otherwise a teardown-during-deploy race leaves a zombie
+        // "active" session on an account teardown is already wiping. teardown +
+        // the reaper reclaim the account; the lock TTL clears the user lock.
+        UpdateExpression: "SET #s = :active, stackName = :sn",
+        ConditionExpression: "#s = :leasing",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":active": { S: "active" }, ":sn": { S: stackName }, ":leasing": { S: "leasing" } },
+      })
+    );
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") {
+      console.warn(`[deployLab] ${sessionId} no longer leasing — skipping activate (torn down mid-deploy); teardown/reaper will reclaim ${accountId}`);
+      return { stackName, outputs, skipped: true };
+    }
+    throw e;
+  }
   return { stackName, outputs };
 }
 
