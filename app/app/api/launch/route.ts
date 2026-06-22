@@ -51,6 +51,11 @@ export async function POST(req: Request) {
     const detail = await r.json().catch(() => ({}));
     return NextResponse.json({ error: "LIMIT_REACHED", ...detail }, { status: 429 });
   }
+  if (r.status === 409) {
+    // H3: user already has a live lab (one live session per user) — relay which.
+    const detail = await r.json().catch(() => ({}));
+    return NextResponse.json({ error: detail.error ?? "ALREADY_ACTIVE", ...detail }, { status: 409 });
+  }
   if (!r.ok) return NextResponse.json({ error: "engine error" }, { status: 502 });
 
   return NextResponse.json(await r.json());

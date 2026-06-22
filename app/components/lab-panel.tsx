@@ -127,7 +127,8 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [remaining, setRemaining] = useState(0);
-  const [flash, setFlash] = useState<"nocapacity" | "freebusy" | "limitreached" | "launcherror" | null>(null);
+  const [flash, setFlash] = useState<"nocapacity" | "freebusy" | "limitreached" | "alreadyactive" | "launcherror" | null>(null);
+  const [flashLab, setFlashLab] = useState<string | null>(null);
   const [rated, setRated] = useState<"up" | "down" | null>(null);
   const [busy, setBusy] = useState(false);
   const [grade, setGrade] = useState<{ gradable: boolean; passed: boolean; criteria: { id: string; description: string; passed: boolean }[] } | null>(null);
@@ -216,6 +217,13 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         return;
       }
       if (r.status === 429) { setSession(null); setFlash("limitreached"); return; }
+      if (r.status === 409) {
+        const d = await r.json().catch(() => ({}));
+        setSession(null);
+        setFlashLab(typeof d.labSlug === "string" ? d.labSlug : null);
+        setFlash("alreadyactive");
+        return;
+      }
       if (!r.ok) { setSession(null); setFlash("launcherror"); return; }
       const d = (await r.json()) as { sessionId: string; expiresAt?: string };
       try { sessionStorage.setItem(key, d.sessionId); } catch {}
@@ -403,6 +411,26 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
           little later.
         </p>
         <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">OK</button>
+      </div>
+    );
+  }
+  if (flash === "alreadyactive") {
+    const otherTitle = flashLab ? getLab(flashLab)?.title ?? flashLab : null;
+    const otherIsThis = !flashLab || flashLab === slug;
+    return (
+      <div className={card} role="alert">
+        <p className="text-base font-extrabold text-ink">You already have a lab running</p>
+        <p className="mt-1 text-base text-ink-soft">
+          {otherIsThis
+            ? "This lab is already starting in another tab. End it before launching again."
+            : `Your “${otherTitle}” lab is still live. You can only run one lab at a time — end it first, then start this one.`}
+        </p>
+        {!otherIsThis && flashLab && (
+          <Link href={`/labs/${flashLab}`} className="mt-4 block rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong">
+            Go to your live lab
+          </Link>
+        )}
+        <button onClick={() => setFlash(null)} className="mt-3 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">OK</button>
       </div>
     );
   }

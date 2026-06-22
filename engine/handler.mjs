@@ -64,6 +64,9 @@ import {
   launchCount,
   freeCapacity,
   recordRating,
+  acquireUserLock,
+  bindLockSession,
+  releaseUserLock,
 } from "./labinfra.mjs";
 import { gradeLab } from "./graders.mjs";
 
@@ -105,7 +108,7 @@ export async function handler(event) {
     await nukeReady; // ensure binary is in /tmp before any work that needs it
 
     if (action === "deploy") {
-      const { sessionId, accountId, execRoleArn, labSlug } = event;
+      const { sessionId, accountId, execRoleArn, labSlug, userId } = event;
       try {
         await deployLab({ sessionId, accountId, execRoleArn, labSlug });
         console.log(`[worker] deploy done ${sessionId}`);
@@ -113,8 +116,10 @@ export async function handler(event) {
         console.error(`[worker] deploy failed ${sessionId}: ${e.message}`);
         await markSession(sessionId, "error", e.message).catch(() => {});
         // Release the account back to the pool — deploy failed before anything
-        // was provisioned, so there is nothing to nuke.
+        // was provisioned, so there is nothing to nuke — and free the user's
+        // launch lock so they can retry (H3).
         await releaseAccount(accountId).catch(() => {});
+        await releaseUserLock(userId).catch(() => {});
       }
       await invokeWorker("warm").catch(() => {});
       return;
@@ -216,11 +221,30 @@ export async function handler(event) {
         return resp(200, { sessionId: existing.sessionId, expiresAt: existing.expiresAt, resumed: true });
       }
 
-      // Per-level launch limit (e.g. Beginner = 3 runs / 72h). Reconnects above
-      // don't count — only genuinely new runs do. Session length is also per-level.
       const rules = rulesFor(labSlug);
+
+      // H3: atomically claim the per-user launch lock BEFORE leasing — closes the
+      // TOCTOU window where two concurrent launches could each grab an account.
+      // ttl = session window + 10 min grace (DynamoDB TTL is the backstop).
+      const lock = await acquireUserLock(uid, labSlug, rules.sessionMinutes * 60 + 600);
+      if (!lock.acquired) {
+        // Lost the race, or the user already has a live lab. If it's the SAME lab,
+        // the winner's session row likely exists by now → reconnect; otherwise
+        // tell them which lab they already have running.
+        const raced = await findActiveSession(uid, labSlug);
+        if (raced) {
+          console.log(`[launch] reconnect-after-lock ${raced.sessionId} (${labSlug})`);
+          return resp(200, { sessionId: raced.sessionId, expiresAt: raced.expiresAt, resumed: true });
+        }
+        console.log(`[launch] ALREADY_ACTIVE ${uid} wants ${labSlug}, holds ${lock.labSlug}`);
+        return resp(409, { error: "ALREADY_ACTIVE", labSlug: lock.labSlug });
+      }
+
+      // Per-level launch limit (e.g. Beginner = 3 runs / 72h). Reconnects don't
+      // count — only genuinely new runs do. Session length is also per-level.
       const used = await launchCount(uid, labSlug, rules.windowHours);
       if (used >= rules.maxLaunches) {
+        await releaseUserLock(uid);
         console.log(`[launch] LIMIT_REACHED ${uid} ${labSlug}: ${used}/${rules.maxLaunches} in ${rules.windowHours}h`);
         return resp(429, {
           error: "LIMIT_REACHED",
@@ -235,6 +259,7 @@ export async function handler(event) {
       if (rules.free) {
         const fc = await freeCapacity();
         if (fc.reached) {
+          await releaseUserLock(uid);
           console.log(`[launch] FREE_AT_CAPACITY ${fc.busy}/${fc.cap} (pool ${fc.total})`);
           return resp(503, { error: "FREE_AT_CAPACITY", freeCap: fc.cap, freeBusy: fc.busy, poolSize: fc.total });
         }
@@ -244,9 +269,12 @@ export async function handler(event) {
       try {
         leased = await lease(uid, labSlug, rules.sessionMinutes);
       } catch (e) {
+        await releaseUserLock(uid);
         if (e.message === "NO_CAPACITY") return resp(503, { error: "NO_CAPACITY" });
         throw e;
       }
+
+      await bindLockSession(uid, leased.sessionId);
 
       if (leased.warm) {
         console.log(`[launch] WARM hit ${leased.sessionId} on ${leased.accountId}`);
@@ -258,6 +286,7 @@ export async function handler(event) {
           accountId: leased.accountId,
           execRoleArn: leased.execRoleArn,
           labSlug,
+          userId: uid,
         });
       }
 

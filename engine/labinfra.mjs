@@ -14,6 +14,7 @@ import {
   GetItemCommand,
   UpdateItemCommand,
   PutItemCommand,
+  DeleteItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import {
   CloudFormationClient,
@@ -37,6 +38,7 @@ const SESSIONS_TABLE = "ShieldSyncLabSessions";
 const USERS_TABLE = "ShieldSyncLabUsers";
 const ENTITLEMENTS_TABLE = "ShieldSyncLabEntitlements";
 const RATINGS_TABLE = "ShieldSyncLabRatings";
+const USER_LOCKS_TABLE = "ShieldSyncLabUserLocks"; // H3: one-live-session-per-user guard (TTL on `ttl`)
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
 
@@ -361,6 +363,69 @@ export async function releaseAccount(accountId) {
   );
 }
 
+// ── H3: per-user launch lock ────────────────────────────────────────────────
+// Enforces ONE live session per user, atomically. The conditional PutItem closes
+// the TOCTOU window where two concurrent /launch calls could each lease an
+// account. Released on teardown / deploy-failure / launch-reject; DynamoDB TTL on
+// `ttl` is the backstop so a missed release self-clears.
+
+/**
+ * acquireUserLock(): atomically claim the per-user launch lock. Succeeds if the
+ * user has no lock or their lock's ttl has already passed. Returns
+ * {acquired:true} or {acquired:false, labSlug} (the lab they already hold).
+ */
+export async function acquireUserLock(userId, labSlug, ttlSeconds) {
+  const db = await ddb();
+  const nowSec = Math.floor(Date.now() / 1000);
+  try {
+    await db.send(
+      new PutItemCommand({
+        TableName: USER_LOCKS_TABLE,
+        Item: {
+          userId: { S: userId },
+          labSlug: { S: labSlug },
+          ttl: { N: String(nowSec + ttlSeconds) },
+          acquiredAt: { S: new Date().toISOString() },
+        },
+        ConditionExpression: "attribute_not_exists(userId) OR #ttl < :now",
+        ExpressionAttributeNames: { "#ttl": "ttl" },
+        ExpressionAttributeValues: { ":now": { N: String(nowSec) } },
+      })
+    );
+    return { acquired: true };
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") {
+      const cur = await db.send(new GetItemCommand({ TableName: USER_LOCKS_TABLE, Key: { userId: { S: userId } } }));
+      return { acquired: false, labSlug: cur.Item?.labSlug?.S };
+    }
+    throw e;
+  }
+}
+
+/** bindLockSession(): record the sessionId on the user's lock (traceability). */
+export async function bindLockSession(userId, sessionId) {
+  const db = await ddb();
+  await db
+    .send(
+      new UpdateItemCommand({
+        TableName: USER_LOCKS_TABLE,
+        Key: { userId: { S: userId } },
+        UpdateExpression: "SET sessionId = :sid",
+        ExpressionAttributeValues: { ":sid": { S: sessionId } },
+      })
+    )
+    .catch(() => {});
+}
+
+/** releaseUserLock(): drop the per-user lock (idempotent). */
+export async function releaseUserLock(userId) {
+  if (!userId) return;
+  const db = await ddb();
+  await db
+    .send(new DeleteItemCommand({ TableName: USER_LOCKS_TABLE, Key: { userId: { S: userId } } }))
+    .catch(() => {});
+}
+
 /** markSession(): set a session's status (+ optional error message). */
 export async function markSession(sessionId, status, error) {
   const db = await ddb();
@@ -550,6 +615,7 @@ export async function teardown(sessionId) {
   const s = await db.send(new GetItemCommand({ TableName: SESSIONS_TABLE, Key: { sessionId: { S: sessionId } } }));
   if (!s.Item) throw new Error("session not found");
   const accountId = s.Item.accountId.S;
+  const lockUserId = s.Item.userId?.S; // release the per-user launch lock at the end
   await markSession(sessionId, "ending").catch(() => {});
 
   const a = await db.send(new GetItemCommand({ TableName: ACCOUNTS_TABLE, Key: { accountId: { S: accountId } } }));
@@ -652,6 +718,7 @@ export async function teardown(sessionId) {
       ExpressionAttributeValues: { ":done": { S: "done" }, ":t": { S: new Date().toISOString() } },
     })
   );
+  await releaseUserLock(lockUserId);
   return { accountId, status: "released_to_pool" };
 }
 
