@@ -1,0 +1,48 @@
+name: Deploy labs app (Cloudflare)
+
+# Auto-deploy the labs Worker on push to master when the app/ changes — mirrors
+# the marketing site's push-to-deploy so labs no longer needs a manual
+# `npm run cf:deploy`. Runs the SAME command as the manual deploy:
+# `opennextjs-cloudflare build` (which runs `npm run build` = `next build --webpack`
+# — the webpack build is mandatory; Turbopack breaks OpenNext) then `wrangler deploy`.
+#
+# The ENGINE (engine/) is NOT deployed here — it's an AWS Lambda (deploy.ps1).
+# Engine-only commits don't touch app/, so they won't trigger this.
+#
+# ── ONE-TIME SETUP (required before this works) ──────────────────────────────
+# Add two repo secrets at GitHub → Settings → Secrets and variables → Actions:
+#   CLOUDFLARE_API_TOKEN  — create in Cloudflare dash → My Profile → API Tokens →
+#                           "Edit Cloudflare Workers" template (Account · Workers
+#                           Scripts: Edit). Scope it to the ShieldSync account.
+#   CLOUDFLARE_ACCOUNT_ID — 0ffe012ec833f7c0d329fbddeba2e4e9
+# Until both exist, runs fail at the deploy step (build still passes) — the live
+# Worker is untouched, so keep using `npm run cf:deploy` in the meantime.
+#
+# Worker secrets (SESSION_SECRET, COGNITO_CLIENT_SECRET, ENGINE_SHARED_SECRET) and
+# vars (wrangler.jsonc) already live on the Worker — `wrangler deploy` preserves
+# them; this workflow never sets or reads them.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "app/**"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Build (webpack) + deploy to Cloudflare
+        run: npm run cf:deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
