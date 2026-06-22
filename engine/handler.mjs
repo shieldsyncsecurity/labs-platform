@@ -284,7 +284,13 @@ export async function handler(event) {
         return resp(403, { error: "forbidden" });
       }
       if (s.status !== "active") return resp(409, { error: "not ready", status: s.status });
-      const url = await mintConsoleUrl({ accountId: s.accountId });
+      // Size the console session to the lab's remaining time so 60/120-min labs
+      // don't lose their console after a fixed 30 min. STS role-chained creds cap
+      // at 1h (ShieldSyncLabUser MaxSessionDuration), so clamp to [15min, 1h];
+      // for longer labs the learner re-mints via "Copy URL for incognito".
+      const remainingMs = s.expiresAt ? new Date(s.expiresAt).getTime() - Date.now() : 0;
+      const durationSeconds = Math.max(900, Math.min(3600, Math.floor(remainingMs / 1000)));
+      const url = await mintConsoleUrl({ accountId: s.accountId, durationSeconds });
       return resp(200, { consoleUrl: url.consoleUrl, expiresInSeconds: url.expiresInSeconds });
     }
 

@@ -1,5 +1,9 @@
-# ShieldSync Labs - aws-nuke config for SANDBOX teardown
-# =======================================================
+# ShieldSync Labs - aws-nuke config for SANDBOX teardown  (REFERENCE / MANUAL USE ONLY)
+# =====================================================================================
+# ⚠️ The engine does NOT read this file. teardown() (labinfra.mjs `nukeConfigFor`) and
+#    reset-pool.mjs both GENERATE an equivalent per-account config at runtime. Keep this
+#    only for manual dry-runs — and if used directly, the `accounts:` block below must
+#    list EVERY pool account (all current sandboxes are listed, as of 2026-06-22).
 # Tool:    ekristen/aws-nuke (the maintained fork), v3+.   github.com/ekristen/aws-nuke
 # Purpose: between learners, FULLY wipe a leased sandbox account back to its clean
 #          baseline - catching anything a learner created OUTSIDE the lab's
@@ -37,6 +41,12 @@ blocklist:
 # (or generate this block from the account-baseline automation).
 accounts:
   "244686897857": # ShieldSync Sandbox 001
+    presets:
+      - control-plane
+  "350823026476": # ShieldSync Sandbox 002
+    presets:
+      - control-plane
+  "511568812872": # ShieldSync Sandbox 003
     presets:
       - control-plane
 
