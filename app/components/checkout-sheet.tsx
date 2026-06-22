@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth/context";
 import { mockPaymentClient, type CheckoutInfo } from "@/lib/payments/client";
 import { formatMoney } from "@/lib/payments/pricing";
@@ -27,6 +27,15 @@ export function CheckoutSheet({
   const { user } = useAuth();
   const [info, setInfo] = useState<CheckoutInfo | null>(null);
   const [phase, setPhase] = useState<"loading" | "summary" | "processing" | "done" | "failed">("loading");
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Modal a11y: move focus into the dialog on open, close on Escape.
+  useEffect(() => {
+    dialogRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   useEffect(() => {
     if (!user) return;
@@ -51,7 +60,12 @@ export function CheckoutSheet({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-2xl bg-surface p-6 shadow-xl"
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="checkout-title"
+        className="w-full max-w-md rounded-2xl bg-surface p-6 shadow-xl outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -63,7 +77,7 @@ export function CheckoutSheet({
           </button>
         </div>
 
-        <h2 className="mt-4 text-xl font-extrabold text-ink">
+        <h2 id="checkout-title" className="mt-4 text-xl font-extrabold text-ink">
           {plan === "monthly" ? "Monthly — all AWS labs" : labTitle}
         </h2>
         <p className="mt-1 text-base text-ink-soft">
@@ -91,7 +105,7 @@ export function CheckoutSheet({
             </button>
             <button
               onClick={() => pay("failure")}
-              className="rounded-xl border border-line px-6 py-2.5 text-sm font-semibold text-muted hover:bg-canvas"
+              className="rounded-xl border border-line px-6 py-2.5 text-base font-semibold text-muted hover:bg-canvas"
             >
               Simulate a failed payment
             </button>
@@ -105,8 +119,8 @@ export function CheckoutSheet({
         {phase === "done" && (
           <div className="mt-5">
             <p className="text-base font-semibold text-ink">✓ Payment confirmed</p>
-            <p className="mt-1 text-sm text-muted">
-              The signed webhook granted your access server-side.
+            <p className="mt-1 text-base text-muted">
+              Your access was confirmed securely server-side.
             </p>
             <button
               onClick={() => onPaid()}

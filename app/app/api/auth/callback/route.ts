@@ -33,7 +33,11 @@ export async function GET(req: Request) {
 
   // CSRF: the state must match what we stored, and it carries the return path.
   const raw = (await cookies()).get(STATE_COOKIE)?.value ?? "";
-  const [savedState, returnToRaw = "/dashboard"] = raw.split("|");
+  // Split on the FIRST "|" only so a returnTo that contains "|" survives intact
+  // (state is a UUID with no "|"; everything after the first separator is the path).
+  const sep = raw.indexOf("|");
+  const savedState = sep === -1 ? raw : raw.slice(0, sep);
+  const returnToRaw = (sep === -1 ? "" : raw.slice(sep + 1)) || "/dashboard";
   if (!savedState || savedState !== state) {
     return NextResponse.redirect(new URL("/sign-in?error=bad_state", url.origin));
   }

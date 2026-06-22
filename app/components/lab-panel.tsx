@@ -77,7 +77,7 @@ function fmt(total: number) {
 }
 const card = "rounded-2xl border border-line bg-surface p-5";
 
-function LeasingCard() {
+function LeasingCard({ onCancel }: { onCancel?: () => void }) {
   const shown = useStaggeredLog(BUILD_LOG);
   return (
     <div className={card} role="status" aria-live="polite">
@@ -92,6 +92,11 @@ function LeasingCard() {
       <p className="mt-2.5 text-xs text-muted">
         us-east-1 · isolated AWS account · you can leave this tab — it&apos;ll be ready when you&apos;re back
       </p>
+      {onCancel && (
+        <button onClick={onCancel} className="mt-3 text-sm font-semibold text-muted hover:text-ink">
+          Cancel
+        </button>
+      )}
     </div>
   );
 }
@@ -436,7 +441,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const status = session?.status;
 
   if (status === "leasing") {
-    return <LeasingCard />;
+    return <LeasingCard onCancel={endLab} />;
   }
 
   if (status === "ending") {
@@ -470,7 +475,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         <div className="mt-5 border-t border-line pt-4">
           <p className="text-xs font-bold uppercase tracking-wider text-muted">Did this lab help?</p>
           {rated ? (
-            <p className="mt-2 text-sm text-ink-soft">Thanks for the feedback! 🙌</p>
+            <p className="mt-2 text-base text-ink-soft">Thanks for the feedback! 🙌</p>
           ) : (
             <div className="mt-2 flex gap-2">
               <button onClick={() => rate("up")} aria-label="Helpful" className="rounded-lg border border-line px-4 py-2 text-base hover:bg-canvas">👍</button>
@@ -553,7 +558,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
               <ul className="mt-2 space-y-2">
                 {grade.criteria.map((c) => (
                   <li key={c.id} className="flex gap-2 text-sm">
-                    <span className="mt-0.5 flex-none">{c.passed ? "✅" : "⬜"}</span>
+                    <span className="mt-0.5 flex-none" role="img" aria-label={c.passed ? "Passed:" : "Not done yet:"}>{c.passed ? "✅" : "⬜"}</span>
                     <span className={`text-ink-soft ${c.passed ? "line-through" : ""}`}>{c.description}</span>
                   </li>
                 ))}

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth/context";
+import { COGNITO_ENABLED } from "@/lib/auth/cognito-adapter";
 
 // Only honour a same-origin path as the post-sign-in destination — never an
 // absolute/external or protocol-relative URL (open-redirect). Mirrors the
@@ -52,10 +53,12 @@ export default function SignInPage() {
         </button>
       </div>
 
-      <p className="mt-6 text-sm text-muted">
-        Demo sign-in (offline). In production these route through Amazon Cognito — Google as a
-        built-in social provider, LinkedIn via OpenID Connect.
-      </p>
+      {!COGNITO_ENABLED && (
+        <p className="mt-6 text-sm text-muted">
+          Demo sign-in (offline). In production these route through Amazon Cognito — Google as a
+          built-in social provider, LinkedIn via OpenID Connect.
+        </p>
+      )}
     </div>
   );
 }

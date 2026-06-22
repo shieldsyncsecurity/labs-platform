@@ -9,6 +9,12 @@ out/
 .env.local
 .env*.local
 app/.env.local
+.env
+.env.production
+# Keys / certs / logs — never commit (matches any directory, incl. engine/)
+*.pem
+*.key
+*.log
 
 # Build artifacts
 engine/deploy/engine.zip

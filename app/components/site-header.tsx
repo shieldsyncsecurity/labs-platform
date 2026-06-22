@@ -34,7 +34,7 @@ export function SiteHeader() {
 
           {loading ? null : user ? (
             <div className="ml-2 flex items-center gap-3">
-              <Link href="/account" className="hidden text-muted hover:text-ink sm:inline">
+              <Link href="/account" className="text-muted hover:text-ink">
                 {user.name}
               </Link>
               <button
