@@ -24,7 +24,8 @@
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabUsers",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabEntitlements",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabRatings",
-        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabUserLocks"
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabUserLocks",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabQueue"
       ]
     },
     {

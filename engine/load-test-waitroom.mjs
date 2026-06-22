@@ -20,6 +20,7 @@ import {
   ScanCommand,
   PutItemCommand,
   DeleteItemCommand,
+  GetItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import {
   LambdaClient,
@@ -31,6 +32,7 @@ const REGION = "us-east-1";
 const PLATFORM = "750294427884";
 const SESSIONS = "ShieldSyncLabSessions";
 const ACCOUNTS = "ShieldSyncLabAccounts";
+const QUEUE = "ShieldSyncLabQueue";
 const FN = "ShieldSyncEngine";
 const FREE_LAB = "s3-misconfiguration-audit";
 const FREE_POOL_PCT = 1.0; // must match labinfra.mjs
@@ -130,15 +132,21 @@ try {
     }));
   }
 
+  // queue helper: GET /queue as a given user
+  const launcherId = `loadtest-launcher-${stamp}`;
+  const qA = `loadtest-qA-${stamp}`;
+  const qB = `loadtest-qB-${stamp}`;
+  const qget = (uid) =>
+    fetch(`${base}/queue?labSlug=${FREE_LAB}`, {
+      headers: { "x-engine-token": secret, "x-user-id": uid },
+    }).then((res) => res.json());
+
   // 1) Pool full → fresh user must get 503 FREE_AT_CAPACITY + nextFreeAt=earliest
+  //    and be placed 1st in line (the only waiter so far).
   console.log(`\nTest 1 — pool full, fresh user launches:`);
   const r = await fetch(`${base}/launch`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-engine-token": secret,
-      "x-user-id": `loadtest-launcher-${stamp}`,
-    },
+    headers: { "content-type": "application/json", "x-engine-token": secret, "x-user-id": launcherId },
     body: JSON.stringify({ labSlug: FREE_LAB }),
   });
   const body = await r.json().catch(() => ({}));
@@ -148,6 +156,17 @@ try {
   ok(typeof body.nextFreeAt === "string" && new Date(body.nextFreeAt).getTime() > Date.now(),
      `nextFreeAt is in the future → countdown is positive`);
   ok(body.freeCap === cap && body.freeBusy === cap, `freeCap/freeBusy = ${cap}/${cap} (got ${body.freeCap}/${body.freeBusy})`);
+  ok(body.position === 1 && body.waiting === 1, `503 places launcher 1st in line (pos ${body.position}/${body.waiting})`);
+
+  // 3) Place-in-line queue (pool still full): order is stable + FIFO by enqueue.
+  console.log(`\nTest 3 — wait-room queue ordering (pool full):`);
+  const a1 = await qget(qA); // queue: launcher, A
+  ok(a1.reached === true, `/queue reports reached=true while full`);
+  ok(a1.position === 2 && a1.waiting === 2, `A is 2nd of 2 (got ${a1.position}/${a1.waiting})`);
+  const b1 = await qget(qB); // queue: launcher, A, B
+  ok(b1.position === 3 && b1.waiting === 3, `B is 3rd of 3 (got ${b1.position}/${b1.waiting})`);
+  const a2 = await qget(qA); // A re-polls — place must stay 2 (not jump behind B)
+  ok(a2.position === 2 && a2.waiting === 3, `A's place is stable at 2 of 3 on re-poll (got ${a2.position}/${a2.waiting})`);
 
   // 2) Free one seat → boundary: NOT reached, nextFreeAt advances to next expiry
   console.log(`\nTest 2 — free the earliest seat, recheck capacity:`);
@@ -159,11 +178,23 @@ try {
   } else {
     ok(after.nextFreeAt === null, `no seats busy → nextFreeAt null`);
   }
+
+  // 4) Seat now free → /queue reports reached=false (client should launch) and
+  //    drops the poller from the line.
+  console.log(`\nTest 4 — a seat is free, poll /queue:`);
+  const a3 = await qget(qA);
+  ok(a3.reached === false, `/queue reports reached=false when a seat is open`);
+  ok(a3.position === 0, `position cleared to 0 (got ${a3.position})`);
+  const qrow = await db.send(new GetItemCommand({ TableName: QUEUE, Key: { userId: { S: qA } } }));
+  ok(!qrow.Item, `A was dequeued from the line after getting the all-clear`);
 } finally {
-  // ── cleanup: delete every seeded row no matter what ───────────────────────
-  console.log(`\nCleanup — deleting ${seeds.length} seeded row(s)…`);
+  // ── cleanup: delete every seeded row + queue row no matter what ───────────
+  console.log(`\nCleanup — deleting ${seeds.length} seeded session(s) + queue rows…`);
   for (const s of seeds) {
     await db.send(new DeleteItemCommand({ TableName: SESSIONS, Key: { sessionId: { S: s.sid } } })).catch(() => {});
+  }
+  for (const uid of [`loadtest-launcher-${stamp}`, `loadtest-qA-${stamp}`, `loadtest-qB-${stamp}`]) {
+    await db.send(new DeleteItemCommand({ TableName: QUEUE, Key: { userId: { S: uid } } })).catch(() => {});
   }
   const end = await liveFreeCapacity();
   console.log(`  free pool now: ${end.busy} busy (should be 0 if it was idle at start)`);

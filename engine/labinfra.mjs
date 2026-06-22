@@ -39,6 +39,7 @@ const USERS_TABLE = "ShieldSyncLabUsers";
 const ENTITLEMENTS_TABLE = "ShieldSyncLabEntitlements";
 const RATINGS_TABLE = "ShieldSyncLabRatings";
 const USER_LOCKS_TABLE = "ShieldSyncLabUserLocks"; // H3: one-live-session-per-user guard (TTL on `ttl`)
+const QUEUE_TABLE = "ShieldSyncLabQueue"; // wait-room "place in line" (informational; TTL on `ttl`)
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
 
@@ -433,6 +434,72 @@ export async function releaseUserLock(userId) {
   const db = await ddb();
   await db
     .send(new DeleteItemCommand({ TableName: USER_LOCKS_TABLE, Key: { userId: { S: userId } } }))
+    .catch(() => {});
+}
+
+// ── Wait-room queue: informational "place in line" ─────────────────────────
+// Tracks who is WAITING for a free seat so the UI can show "~Nth in line".
+// PURELY INDICATIVE — allocation stays first-to-retry. There is NO head-of-line
+// handoff, so an abandoned waiter can never deadlock the pool. Entries carry a
+// short TTL refreshed on every poll; a waiter who leaves ages out within ~ttl.
+// (DynamoDB TTL deletion is eventual, so reads also filter expired rows.)
+
+/** enqueueWaiter(): record/refresh this user as waiting for `labSlug`. The first
+ *  wait timestamp sticks (so position is stable across polls); switching labs
+ *  resets the place; ttl is always bumped so live waiters stay counted. */
+export async function enqueueWaiter(userId, labSlug, ttlSeconds = 90) {
+  if (!userId) return;
+  const db = await ddb();
+  const nowMs = Date.now();
+  const ttl = Math.floor(nowMs / 1000) + ttlSeconds;
+  const cur = await db
+    .send(new GetItemCommand({ TableName: QUEUE_TABLE, Key: { userId: { S: userId } } }))
+    .catch(() => ({}));
+  const sameLab = cur.Item?.labSlug?.S === labSlug && cur.Item?.enqueuedAt?.N;
+  const enqueuedAt = sameLab ? cur.Item.enqueuedAt.N : String(nowMs);
+  await db.send(
+    new PutItemCommand({
+      TableName: QUEUE_TABLE,
+      Item: {
+        userId: { S: userId },
+        labSlug: { S: labSlug },
+        enqueuedAt: { N: enqueuedAt },
+        ttl: { N: String(ttl) },
+      },
+    })
+  );
+}
+
+/** queuePosition(): {position (1-based), waiting (total live waiters)} for this
+ *  user/lab. Excludes TTL-expired rows. A caller not yet enqueued is treated as
+ *  last in line. */
+export async function queuePosition(userId, labSlug) {
+  const db = await ddb();
+  const nowSec = Math.floor(Date.now() / 1000);
+  const scan = await db.send(
+    new ScanCommand({
+      TableName: QUEUE_TABLE,
+      FilterExpression: "labSlug = :l AND #ttl > :now AND attribute_exists(enqueuedAt)",
+      ExpressionAttributeNames: { "#ttl": "ttl" },
+      ExpressionAttributeValues: { ":l": { S: labSlug }, ":now": { N: String(nowSec) } },
+    })
+  );
+  const items = scan.Items ?? [];
+  const waiting = items.length;
+  const mine = items.find((i) => i.userId?.S === userId);
+  if (!mine) return { position: waiting + 1, waiting: waiting + 1 };
+  const myAt = Number(mine.enqueuedAt.N);
+  const ahead = items.filter((i) => Number(i.enqueuedAt.N) < myAt).length;
+  return { position: ahead + 1, waiting };
+}
+
+/** dequeueWaiter(): drop this user from the line (idempotent) — call when they
+ *  get a seat so they stop counting against everyone behind them. */
+export async function dequeueWaiter(userId) {
+  if (!userId) return;
+  const db = await ddb();
+  await db
+    .send(new DeleteItemCommand({ TableName: QUEUE_TABLE, Key: { userId: { S: userId } } }))
     .catch(() => {});
 }
 

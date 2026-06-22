@@ -137,6 +137,8 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [wantsLaunch, setWantsLaunch] = useState(false);
   const [freeNextAt, setFreeNextAt] = useState<string | null>(null); // when a free slot frees up
   const [freeWait, setFreeWait] = useState(0); // seconds until then
+  const [freePos, setFreePos] = useState(0); // place in line (1-based; 0 = unknown)
+  const [freeWaiting, setFreeWaiting] = useState(0); // total people waiting
   const expiryFired = useRef(false);
   const autoLaunched = useRef(false);
   const freeRetry = useRef(false);
@@ -239,6 +241,8 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         setSession(null);
         if (d.error === "FREE_AT_CAPACITY") {
           setFreeNextAt(typeof d.nextFreeAt === "string" ? d.nextFreeAt : null);
+          if (typeof d.position === "number") setFreePos(d.position);
+          if (typeof d.waiting === "number") setFreeWaiting(d.waiting);
           setFlash("freebusy");
         } else {
           setFlash("nocapacity");
@@ -416,6 +420,32 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flash, freeNextAt]);
 
+  // Wait-room poll: while in line, refresh place + the soonest-free time, and grab
+  // a seat the moment one opens (even before the countdown elapses — someone may
+  // finish early). Also keeps this waiter's queue TTL alive. ~every 12s.
+  useEffect(() => {
+    if (flash !== "freebusy") return;
+    let stop = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/queue?labSlug=${encodeURIComponent(slug)}`, { cache: "no-store" });
+        if (stop || !r.ok) return;
+        const d = (await r.json()) as { reached?: boolean; nextFreeAt?: string | null; position?: number; waiting?: number };
+        if (stop) return;
+        if (typeof d.nextFreeAt === "string") setFreeNextAt(d.nextFreeAt);
+        if (typeof d.position === "number") setFreePos(d.position);
+        if (typeof d.waiting === "number") setFreeWaiting(d.waiting);
+        if (d.reached === false && !freeRetry.current) {
+          freeRetry.current = true;
+          void launch(); // a seat opened — claim it now
+        }
+      } catch {}
+    };
+    const t = setInterval(poll, 12000);
+    return () => { stop = true; clearInterval(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flash, slug]);
+
   // ---------------- views ----------------
   if (!ready) return <div className={`${card} text-base text-ink-soft`}>This lab is coming soon.</div>;
 
@@ -446,6 +476,14 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     return (
       <div className={card} role="status" aria-live="polite">
         <p className="text-base font-extrabold text-ink">Free labs are busy right now</p>
+        {freePos >= 1 && (
+          <div className="mt-3 flex items-center justify-between rounded-lg border border-brand/30 bg-brand/5 p-3">
+            <span className="text-sm font-semibold text-ink-soft">Your place in line</span>
+            <span className="text-base font-bold text-brand">
+              {freeWaiting > 1 ? `#${freePos} of ${freeWaiting}` : "You're first in line"}
+            </span>
+          </div>
+        )}
         {waiting ? (
           <>
             <div className="mt-3 flex items-center justify-between rounded-lg border border-line bg-canvas p-3">

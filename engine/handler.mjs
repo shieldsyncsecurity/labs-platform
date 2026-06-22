@@ -67,6 +67,9 @@ import {
   acquireUserLock,
   bindLockSession,
   releaseUserLock,
+  enqueueWaiter,
+  queuePosition,
+  dequeueWaiter,
 } from "./labinfra.mjs";
 import { gradeLab } from "./graders.mjs";
 
@@ -217,6 +220,7 @@ export async function handler(event) {
 
       const existing = await findActiveSession(uid, labSlug);
       if (existing) {
+        await dequeueWaiter(uid).catch(() => {}); // they have a seat — leave the line
         console.log(`[launch] reconnect ${existing.sessionId} (${labSlug})`);
         return resp(200, { sessionId: existing.sessionId, expiresAt: existing.expiresAt, resumed: true });
       }
@@ -233,6 +237,7 @@ export async function handler(event) {
         // tell them which lab they already have running.
         const raced = await findActiveSession(uid, labSlug);
         if (raced) {
+          await dequeueWaiter(uid).catch(() => {}); // they have a seat — leave the line
           console.log(`[launch] reconnect-after-lock ${raced.sessionId} (${labSlug})`);
           return resp(200, { sessionId: raced.sessionId, expiresAt: raced.expiresAt, resumed: true });
         }
@@ -260,8 +265,11 @@ export async function handler(event) {
         const fc = await freeCapacity();
         if (fc.reached) {
           await releaseUserLock(uid);
-          console.log(`[launch] FREE_AT_CAPACITY ${fc.busy}/${fc.cap} (pool ${fc.total}) nextFreeAt=${fc.nextFreeAt}`);
-          return resp(503, { error: "FREE_AT_CAPACITY", freeCap: fc.cap, freeBusy: fc.busy, poolSize: fc.total, nextFreeAt: fc.nextFreeAt });
+          // Join the wait-room line (informational) and report this user's place.
+          await enqueueWaiter(uid, labSlug).catch(() => {});
+          const q = await queuePosition(uid, labSlug).catch(() => ({ position: 1, waiting: 1 }));
+          console.log(`[launch] FREE_AT_CAPACITY ${fc.busy}/${fc.cap} (pool ${fc.total}) nextFreeAt=${fc.nextFreeAt} pos=${q.position}/${q.waiting}`);
+          return resp(503, { error: "FREE_AT_CAPACITY", freeCap: fc.cap, freeBusy: fc.busy, poolSize: fc.total, nextFreeAt: fc.nextFreeAt, position: q.position, waiting: q.waiting });
         }
       }
 
@@ -275,6 +283,7 @@ export async function handler(event) {
       }
 
       await bindLockSession(uid, leased.sessionId);
+      await dequeueWaiter(uid).catch(() => {}); // got a seat — leave the line
 
       if (leased.warm) {
         console.log(`[launch] WARM hit ${leased.sessionId} on ${leased.accountId}`);
@@ -300,6 +309,27 @@ export async function handler(event) {
       const labSlug = event.queryStringParameters?.labSlug;
       const s = await findActiveSession(callerUserId || "anon", labSlug);
       return resp(200, { session: s });
+    }
+
+    if (method === "GET" && path === "/queue") {
+      // Wait-room poll: refresh this user's place in line, report it, and say
+      // whether a free seat has opened (so the client can launch immediately
+      // instead of waiting out the countdown). Informational only — see
+      // enqueueWaiter() in labinfra. Free labs only.
+      const labSlug = event.queryStringParameters?.labSlug;
+      if (typeof labSlug !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(labSlug)) {
+        return resp(400, { error: "invalid lab slug" });
+      }
+      const uid = callerUserId || "anon";
+      const fc = await freeCapacity();
+      if (!fc.reached) {
+        // A seat is free — drop them from the line; the client should launch now.
+        await dequeueWaiter(uid).catch(() => {});
+        return resp(200, { reached: false, nextFreeAt: fc.nextFreeAt, position: 0, waiting: 0 });
+      }
+      await enqueueWaiter(uid, labSlug).catch(() => {});
+      const q = await queuePosition(uid, labSlug).catch(() => ({ position: 1, waiting: 1 }));
+      return resp(200, { reached: true, nextFreeAt: fc.nextFreeAt, position: q.position, waiting: q.waiting });
     }
 
     if (method === "GET" && path.startsWith("/session/")) {
