@@ -135,8 +135,11 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [grading, setGrading] = useState(false);
   const [copyStatus, setCopyStatus] = useState<"idle" | "loading" | "copied" | "error">("idle");
   const [wantsLaunch, setWantsLaunch] = useState(false);
+  const [freeNextAt, setFreeNextAt] = useState<string | null>(null); // when a free slot frees up
+  const [freeWait, setFreeWait] = useState(0); // seconds until then
   const expiryFired = useRef(false);
   const autoLaunched = useRef(false);
+  const freeRetry = useRef(false);
   const redirecting = useRef(false);
   const consoleWindowRef = useRef<Window | null>(null);
   const lab = getLab(slug);
@@ -213,7 +216,12 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       if (r.status === 503) {
         const d = await r.json().catch(() => ({}));
         setSession(null);
-        setFlash(d.error === "FREE_AT_CAPACITY" ? "freebusy" : "nocapacity");
+        if (d.error === "FREE_AT_CAPACITY") {
+          setFreeNextAt(typeof d.nextFreeAt === "string" ? d.nextFreeAt : null);
+          setFlash("freebusy");
+        } else {
+          setFlash("nocapacity");
+        }
         return;
       }
       if (r.status === 429) { setSession(null); setFlash("limitreached"); return; }
@@ -365,6 +373,28 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     window.location.href = `/sign-in?returnTo=${encodeURIComponent(returnTo)}`;
   }, [wantsLaunch, loading, user, slug]);
 
+  // Wait-room countdown: when free labs are at capacity, count down to the soonest
+  // free slot (nextFreeAt) and AUTO-RETRY the launch when it hits 0. If still busy,
+  // /launch returns a fresh nextFreeAt and the countdown restarts. (Upper bound —
+  // a slot can free sooner if a learner finishes early; the retry catches that too.)
+  useEffect(() => {
+    if (flash !== "freebusy" || !freeNextAt) { setFreeWait(0); return; }
+    freeRetry.current = false;
+    const end = new Date(freeNextAt).getTime();
+    const tick = () => {
+      const s = Math.max(0, Math.floor((end - Date.now()) / 1000));
+      setFreeWait(s);
+      if (s === 0 && !freeRetry.current) {
+        freeRetry.current = true;
+        void launch();
+      }
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flash, freeNextAt]);
+
   // ---------------- views ----------------
   if (!ready) return <div className={`${card} text-base text-ink-soft`}>This lab is coming soon.</div>;
 
@@ -391,14 +421,30 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     );
   }
   if (flash === "freebusy") {
+    const waiting = !!freeNextAt && freeWait > 0;
     return (
-      <div className={card} role="alert">
-        <p className="text-base font-extrabold text-ink">Free labs are at capacity</p>
-        <p className="mt-1 text-base text-ink-soft">
-          Free sessions are capped at a share of the pool so paid learners always have room. One opens up
-          soon — try again in a few minutes, or get a paid lab for guaranteed access.
-        </p>
-        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">Try again</button>
+      <div className={card} role="status" aria-live="polite">
+        <p className="text-base font-extrabold text-ink">Free labs are busy right now</p>
+        {waiting ? (
+          <>
+            <div className="mt-3 flex items-center justify-between rounded-lg border border-line bg-canvas p-3">
+              <span className="text-sm font-semibold text-ink-soft">A spot should open in</span>
+              <span className="font-mono text-lg font-bold text-brand">{fmt(freeWait)}</span>
+            </div>
+            <div className="ss-bar-track mt-3">
+              <div className="ss-bar-fill ss-bar-brand" />
+            </div>
+            <p className="mt-2.5 text-sm text-ink-soft">
+              Keep this tab open — we&apos;ll start your lab <strong>automatically</strong> the moment one frees up.
+              (It may open sooner if someone finishes early.)
+            </p>
+          </>
+        ) : (
+          <p className="mt-1 text-base text-ink-soft">
+            Every free seat is in use right now. We&apos;ll keep checking — hold on a moment, or grab a paid lab for guaranteed access.
+          </p>
+        )}
+        <button onClick={() => { setFlash(null); void launch(); }} className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-semibold text-white hover:bg-brand-strong">Try now</button>
       </div>
     );
   }
