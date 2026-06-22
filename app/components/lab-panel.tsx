@@ -131,7 +131,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [flashLab, setFlashLab] = useState<string | null>(null);
   const [rated, setRated] = useState<"up" | "down" | null>(null);
   const [busy, setBusy] = useState(false);
-  const [grade, setGrade] = useState<{ gradable: boolean; passed: boolean; criteria: { id: string; description: string; passed: boolean }[] } | null>(null);
+  const [grade, setGrade] = useState<{ gradable: boolean; passed: boolean; criteria: { id: string; description: string; passed: boolean; unknown?: boolean }[] } | null>(null);
   const [grading, setGrading] = useState(false);
   const [copyStatus, setCopyStatus] = useState<"idle" | "loading" | "copied" | "error">("idle");
   const [wantsLaunch, setWantsLaunch] = useState(false);
@@ -581,15 +581,30 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
               <p className={`text-sm font-bold ${grade.passed ? "text-[#15803d]" : "text-ink"}`}>
                 {grade.passed
                   ? "🎉 All checks passed — nicely done!"
-                  : `${grade.criteria.filter((c) => c.passed).length}/${grade.criteria.length} checks passing — keep going`}
+                  : `${grade.criteria.filter((c) => c.passed && !c.unknown).length}/${grade.criteria.length} checks passing — keep going`}
               </p>
+              {grade.criteria.some((c) => c.unknown) && (
+                <p className="mt-1 text-xs text-[#92400e]">⚠ Some checks couldn&apos;t run (a temporary AWS hiccup) — click “Check my work” again.</p>
+              )}
               <ul className="mt-2 space-y-2">
-                {grade.criteria.map((c) => (
-                  <li key={c.id} className="flex gap-2 text-sm">
-                    <span className="mt-0.5 flex-none" role="img" aria-label={c.passed ? "Passed:" : "Not done yet:"}>{c.passed ? "✅" : "⬜"}</span>
-                    <span className={`text-ink-soft ${c.passed ? "line-through" : ""}`}>{c.description}</span>
-                  </li>
-                ))}
+                {grade.criteria.map((c) => {
+                  const state = c.unknown ? "unknown" : c.passed ? "pass" : "todo";
+                  return (
+                    <li key={c.id} className="flex gap-2 text-sm">
+                      <span
+                        className="mt-0.5 flex-none"
+                        role="img"
+                        aria-label={state === "unknown" ? "Couldn't check:" : state === "pass" ? "Passed:" : "Not done yet:"}
+                      >
+                        {state === "unknown" ? "⚠️" : state === "pass" ? "✅" : "⬜"}
+                      </span>
+                      <span className={`text-ink-soft ${state === "pass" ? "line-through" : ""}`}>
+                        {c.description}
+                        {state === "unknown" && <span className="text-[#92400e]"> — couldn’t verify</span>}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ) : (
