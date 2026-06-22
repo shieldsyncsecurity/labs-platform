@@ -61,6 +61,10 @@ export function authorizeUrl(provider: string, state: string): string {
     redirect_uri: REDIRECT_URI(),
     scope: "openid email profile",
     state,
+    // Force the account chooser instead of silently reusing the browser's
+    // Google session. Cognito forwards `prompt` to the social IdP, so Google
+    // shows its "choose an account" screen every time.
+    prompt: "select_account",
   });
   const idp = PROVIDER_IDP[provider];
   if (idp) p.set("identity_provider", idp);
