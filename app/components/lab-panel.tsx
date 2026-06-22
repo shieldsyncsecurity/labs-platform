@@ -116,7 +116,7 @@ function EndingCard() {
 }
 
 export function LabPanel({ slug, objectives, ready }: { slug: string; objectives: Objective[]; ready: boolean }) {
-  const { user, hasAccess, refreshEntitlements } = useAuth();
+  const { user, loading, hasAccess, refreshEntitlements } = useAuth();
   const key = `lab:${slug}`;
   const [showCheckout, setShowCheckout] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -131,6 +131,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [wantsLaunch, setWantsLaunch] = useState(false);
   const expiryFired = useRef(false);
   const autoLaunched = useRef(false);
+  const redirecting = useRef(false);
   const consoleWindowRef = useRef<Window | null>(null);
   const lab = getLab(slug);
 
@@ -341,8 +342,31 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantsLaunch, user, sessionId, session, slug, hasAccess]);
 
+  // Arrived with intent=launch but NOT signed in → send straight to Google sign-in,
+  // returning here (with the intent) to auto-launch. Without this the learner would
+  // just see a duplicate "Sign in & launch" button and the funnel looks like a no-op.
+  useEffect(() => {
+    if (!wantsLaunch || loading || user || redirecting.current) return;
+    redirecting.current = true;
+    const returnTo = `/labs/${slug}?intent=launch`;
+    window.location.href = `/sign-in?returnTo=${encodeURIComponent(returnTo)}`;
+  }, [wantsLaunch, loading, user, slug]);
+
   // ---------------- views ----------------
   if (!ready) return <div className={`${card} text-base text-ink-soft`}>This lab is coming soon.</div>;
+
+  // Auth still resolving, or about to bounce an intent=launch arrival to sign-in —
+  // show a neutral "signing in" state, never the duplicate sign-in button.
+  if (loading || (wantsLaunch && !user)) {
+    return (
+      <div className={card}>
+        <p className="text-base font-extrabold text-ink">{wantsLaunch && !user ? "Taking you to sign-in…" : "Loading…"}</p>
+        {wantsLaunch && !user && (
+          <p className="mt-1 text-sm text-ink-soft">One quick Google sign-in and your free lab launches automatically.</p>
+        )}
+      </div>
+    );
+  }
 
   if (flash === "nocapacity") {
     return (
@@ -391,7 +415,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       <div className={card}>
         <p className="text-base font-extrabold text-ink">Start this lab</p>
         <p className="mt-1 text-sm text-ink-soft">Sign in to spin up your own isolated AWS lab.</p>
-        <Link href={`/sign-in?returnTo=${encodeURIComponent(`/labs/${slug}${wantsLaunch ? "?intent=launch" : ""}`)}`} className="mt-4 block rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong">{wantsLaunch ? "Sign in & launch" : "Sign in to start"}</Link>
+        <Link href={`/sign-in?returnTo=${encodeURIComponent(`/labs/${slug}`)}`} className="mt-4 block rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong">Sign in to start</Link>
       </div>
     );
   }
