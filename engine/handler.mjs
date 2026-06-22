@@ -293,6 +293,15 @@ export async function handler(event) {
       return resp(200, { sessionId: leased.sessionId, expiresAt: leased.expiresAt, resumed: false, warm: leased.warm });
     }
 
+    if (method === "GET" && path === "/active") {
+      // Server-authoritative: does THIS user already have a live session for this
+      // lab? Lets ANY tab/device restore the running lab — not just the tab that
+      // launched it (closes the sessionStorage-only per-tab gap).
+      const labSlug = event.queryStringParameters?.labSlug;
+      const s = await findActiveSession(callerUserId || "anon", labSlug);
+      return resp(200, { session: s });
+    }
+
     if (method === "GET" && path.startsWith("/session/")) {
       const id = path.slice("/session/".length);
       const s = await getSession(id);
