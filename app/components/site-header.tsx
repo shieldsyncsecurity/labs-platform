@@ -18,6 +18,13 @@ export function SiteHeader() {
         </Link>
 
         <nav className="flex items-center gap-1 text-[15px] font-semibold text-ink-soft">
+          {/* Back to the marketing site (cross-origin → plain anchor, same tab). */}
+          <a
+            href="https://shieldsyncsecurity.com"
+            className="hidden rounded-lg px-3 py-2 text-muted hover:bg-canvas hover:text-ink sm:inline"
+          >
+            ← Main site
+          </a>
           <Link href="/" className="rounded-lg px-3 py-2 hover:bg-canvas">
             Catalog
           </Link>
