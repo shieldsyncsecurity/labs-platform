@@ -173,3 +173,17 @@ a {
 }
 .ss-bar-brand { background: var(--color-brand); }
 .ss-bar-red   { background: #ef4444; }
+
+/* Respect prefers-reduced-motion: stop the scanning bars, pulsing dots, and the
+   blinking terminal cursor. Show a calm static state instead of continuous motion
+   (WCAG 2.3.3). The marketing site already honors this; the labs app now does too. */
+@media (prefers-reduced-motion: reduce) {
+  .ss-bar-fill {
+    animation: none;
+    left: 0;
+    width: 100%;
+  }
+  .animate-pulse {
+    animation: none;
+  }
+}

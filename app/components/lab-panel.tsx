@@ -80,7 +80,7 @@ const card = "rounded-2xl border border-line bg-surface p-5";
 function LeasingCard() {
   const shown = useStaggeredLog(BUILD_LOG);
   return (
-    <div className={card}>
+    <div className={card} role="status" aria-live="polite">
       <div className="flex items-center gap-2.5">
         <span className="h-2 w-2 flex-none rounded-full bg-brand animate-pulse" />
         <span className="text-sm font-bold text-ink">Building your lab</span>
@@ -99,7 +99,7 @@ function LeasingCard() {
 function EndingCard() {
   const shown = useStaggeredLog(WIPE_LOG);
   return (
-    <div className={card}>
+    <div className={card} role="status" aria-live="polite">
       <div className="flex items-center gap-2.5">
         <span className="h-2 w-2 flex-none rounded-full bg-[#ef4444] animate-pulse" />
         <span className="text-sm font-bold text-ink">Wiping your lab clean</span>
@@ -359,10 +359,10 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   // show a neutral "signing in" state, never the duplicate sign-in button.
   if (loading || (wantsLaunch && !user)) {
     return (
-      <div className={card}>
+      <div className={card} role="status" aria-live="polite">
         <p className="text-base font-extrabold text-ink">{wantsLaunch && !user ? "Taking you to sign-in…" : "Loading…"}</p>
         {wantsLaunch && !user && (
-          <p className="mt-1 text-sm text-ink-soft">One quick Google sign-in and your free lab launches automatically.</p>
+          <p className="mt-1 text-base text-ink-soft">One quick Google sign-in and your free lab launches automatically.</p>
         )}
       </div>
     );
@@ -370,42 +370,42 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
 
   if (flash === "nocapacity") {
     return (
-      <div className={card}>
+      <div className={card} role="alert">
         <p className="text-base font-extrabold text-ink">All seats busy</p>
-        <p className="mt-1 text-sm text-ink-soft">Every isolated account is in use — one frees up as soon as a learner finishes.</p>
-        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-sm font-semibold text-ink hover:bg-canvas">Try again</button>
+        <p className="mt-1 text-base text-ink-soft">Every isolated account is in use — one frees up as soon as a learner finishes.</p>
+        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">Try again</button>
       </div>
     );
   }
   if (flash === "freebusy") {
     return (
-      <div className={card}>
+      <div className={card} role="alert">
         <p className="text-base font-extrabold text-ink">Free labs are at capacity</p>
-        <p className="mt-1 text-sm text-ink-soft">
+        <p className="mt-1 text-base text-ink-soft">
           Free sessions are capped at a share of the pool so paid learners always have room. One opens up
           soon — try again in a few minutes, or get a paid lab for guaranteed access.
         </p>
-        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-sm font-semibold text-ink hover:bg-canvas">Try again</button>
+        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">Try again</button>
       </div>
     );
   }
   if (flash === "limitreached") {
     return (
-      <div className={card}>
+      <div className={card} role="alert">
         <p className="text-base font-extrabold text-ink">You&apos;ve used all your launches</p>
-        <p className="mt-1 text-sm text-ink-soft">
+        <p className="mt-1 text-base text-ink-soft">
           You&apos;ve hit this lab&apos;s launch limit for now. It resets on a rolling window — check back a
           little later.
         </p>
-        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-sm font-semibold text-ink hover:bg-canvas">OK</button>
+        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">OK</button>
       </div>
     );
   }
   if (flash === "launcherror") {
     return (
-      <div className={card}>
+      <div className={card} role="alert">
         <p className="text-base font-semibold text-[#b91c1c]">Couldn&apos;t start the lab.</p>
-        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-sm font-semibold text-ink hover:bg-canvas">Retry</button>
+        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">Retry</button>
       </div>
     );
   }
@@ -414,7 +414,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     return (
       <div className={card}>
         <p className="text-base font-extrabold text-ink">Start this lab</p>
-        <p className="mt-1 text-sm text-ink-soft">Sign in to spin up your own isolated AWS lab.</p>
+        <p className="mt-1 text-base text-ink-soft">Sign in to spin up your own isolated AWS lab.</p>
         <Link href={`/sign-in?returnTo=${encodeURIComponent(`/labs/${slug}`)}`} className="mt-4 block rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong">Sign in to start</Link>
       </div>
     );
@@ -424,7 +424,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     return (
       <div className={card}>
         <p className="text-base font-extrabold text-ink">Get this lab</p>
-        <p className="mt-1 text-sm text-ink-soft">One-time purchase — simulated checkout, 24h access.</p>
+        <p className="mt-1 text-base text-ink-soft">One-time purchase — simulated checkout, 24h access.</p>
         <button onClick={() => setShowCheckout(true)} className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-semibold text-white hover:bg-brand-strong">Get this lab</button>
         {showCheckout && (
           <CheckoutSheet labSlug={slug} labTitle={lab?.title ?? "Lab"} plan="per-lab" onClose={() => setShowCheckout(false)} onPaid={async () => { await refreshEntitlements(); setShowCheckout(false); }} />
@@ -445,7 +445,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
 
   if (status === "error") {
     return (
-      <div className={card}>
+      <div className={card} role="alert">
         <p className="text-base font-semibold text-[#b91c1c]">The lab failed to start.</p>
         {session?.error && <p className="mt-1 break-words text-xs text-muted">{session.error}</p>}
         <button onClick={() => { clearSession(); void launch(); }} className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-semibold text-white hover:bg-brand-strong">Try again</button>
@@ -455,9 +455,9 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
 
   if (status === "done") {
     return (
-      <div className={card}>
+      <div className={card} role="status" aria-live="polite">
         <p className="text-base font-extrabold text-ink">⏹ Lab ended</p>
-        <p className="mt-1 text-sm text-ink-soft">Your account was wiped clean and returned to the pool — nothing you did leaks to the next learner.</p>
+        <p className="mt-1 text-base text-ink-soft">Your account was wiped clean and returned to the pool — nothing you did leaks to the next learner.</p>
         {/* The IAM revoke kills the federated AWS API session, but the BROWSER
             tab can still look normal until the user clicks something. If they
             opened the console via Copy-URL into an incognito window, our app
@@ -485,18 +485,18 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   if (status === "active") {
     const low = remaining > 0 && remaining < 300;
     return (
-      <div className={card}>
+      <div className={card} role="status" aria-live="polite">
         <div className="flex items-center justify-between">
           <span className="text-base font-extrabold text-ink">🟢 Lab is live</span>
           <span className={`font-mono text-sm font-bold ${low ? "text-[#b91c1c]" : "text-brand"}`}>⏱ {fmt(remaining)}</span>
         </div>
         {low && (
-          <div className="mt-3 rounded-lg border border-[#fecaca] bg-[#fef2f2] p-2.5 text-sm font-semibold text-[#b91c1c]">
+          <div role="alert" className="mt-3 rounded-lg border border-[#fecaca] bg-[#fef2f2] p-2.5 text-sm font-semibold text-[#b91c1c]">
             ⚠ Under 5 minutes left — wrap up and click <strong>End &amp; wipe lab</strong>. When the timer hits 0 the account is auto-wiped and your work is cleared.
           </div>
         )}
         <button onClick={openConsole} className="mt-4 block w-full rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong">Open AWS console ↗</button>
-        <div className="mt-2 rounded-lg border border-line bg-canvas p-3 text-xs text-ink-soft">
+        <div className="mt-2 rounded-lg border border-line bg-canvas p-3 text-sm text-ink-soft">
           <p className="font-semibold text-ink">Already signed into AWS?</p>
           <p className="mt-1">A browser holds one AWS session at a time. If you see “you must log out first,” open this in an <strong>incognito window</strong> (or log out of AWS first).</p>
           <button
@@ -521,7 +521,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
             <p className="text-xs font-bold uppercase tracking-wider text-muted">Objectives</p>
             <ul className="mt-2 space-y-2">
               {objectives.map((o) => (
-                <li key={o.id} className="flex gap-2 text-sm text-ink-soft">
+                <li key={o.id} className="flex gap-2 text-base text-ink-soft">
                   {/* Proper circle: drawn as a 12×12 div with a 2px border so it
                       stays crisp at any zoom — the unicode ○ glyph rendered
                       effectively invisible. */}
@@ -572,7 +572,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   return (
     <div className={card}>
       <p className="text-base font-extrabold text-ink">Start this lab</p>
-      <p className="mt-1 text-sm text-ink-soft">Your own isolated AWS account (~30 min), the scenario pre-deployed, auto-wiped when you finish.</p>
+      <p className="mt-1 text-base text-ink-soft">Your own isolated AWS account (~30 min), the scenario pre-deployed, auto-wiped when you finish.</p>
       <button onClick={launch} className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-semibold text-white hover:bg-brand-strong">Launch lab</button>
       <p className="mt-2 text-xs text-muted">Opens the AWS console in a new tab; this guide stays here.</p>
     </div>
