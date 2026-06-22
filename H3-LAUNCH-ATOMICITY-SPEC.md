@@ -1,9 +1,18 @@
 # H3 — Launch atomicity (per-user TOCTOU) — design spec
 
-> Status: **NOT IMPLEMENTED** — deferred from the 2026-06-22 E2E test/fix pass.
-> Reason for deferral: the fix mutates the live account-leasing path and must be
-> concurrency-tested before shipping to a production AWS-vending engine. This doc
-> is the implementation plan for a future, verified change.
+> Status: **✅ IMPLEMENTED + VERIFIED LIVE (2026-06-22, commit `308dfd7`).**
+> Built per this spec: `ShieldSyncLabUserLocks` table (TTL on `ttl`) +
+> acquire/bind/release in `labinfra.mjs`, `/launch` lock flow + reconnect-or-409
+> in `handler.mjs`, app 409 relay + LabPanel "already running" state, engine IAM
+> grants the table. **Concurrency test passed on the live engine:** 5 simultaneous
+> launches (same user) → exactly 1 lease + 4 reconnects; launching a different lab
+> while one is live → 409 ALREADY_ACTIVE; DDB showed 1 session + 1 lock; teardown
+> releases the lock. (Spec retained below for reference.)
+>
+> Known edge (not H3-specific): tearing down a session DURING its cold deploy can
+> race the deploy worker (deploy flips status back to active after teardown marks
+> ending) — the lock TTL + reaper are the backstops. Normal teardown (after active)
+> releases cleanly.
 
 ## 1. Problem
 
