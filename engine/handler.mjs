@@ -260,8 +260,8 @@ export async function handler(event) {
         const fc = await freeCapacity();
         if (fc.reached) {
           await releaseUserLock(uid);
-          console.log(`[launch] FREE_AT_CAPACITY ${fc.busy}/${fc.cap} (pool ${fc.total})`);
-          return resp(503, { error: "FREE_AT_CAPACITY", freeCap: fc.cap, freeBusy: fc.busy, poolSize: fc.total });
+          console.log(`[launch] FREE_AT_CAPACITY ${fc.busy}/${fc.cap} (pool ${fc.total}) nextFreeAt=${fc.nextFreeAt}`);
+          return resp(503, { error: "FREE_AT_CAPACITY", freeCap: fc.cap, freeBusy: fc.busy, poolSize: fc.total, nextFreeAt: fc.nextFreeAt });
         }
       }
 
