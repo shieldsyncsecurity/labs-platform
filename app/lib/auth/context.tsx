@@ -11,6 +11,12 @@ import type { AuthUser, Entitlement } from "./types";
 import { getLab } from "@/lib/labs";
 import { COGNITO_ENABLED, cognitoSignIn, cognitoSignOut, cognitoGetUser } from "./cognito-adapter";
 
+// The mock/demo learner is a LOCAL-DEV fallback only. It must NEVER be reachable
+// in production — real accounts (Cognito/Google) only. Gate it on a production
+// build (NODE_ENV is inlined at build time) so even a misconfigured
+// NEXT_PUBLIC_AUTH_MODE can't enable demo login in prod.
+const ALLOW_MOCK = !COGNITO_ENABLED && process.env.NODE_ENV !== "production";
+
 // Redirect-based flows (Cognito) navigate away; the returned promise never
 // resolves so callers don't run post-await code before the browser leaves.
 const NEVER = new Promise<void>(() => {});
@@ -69,7 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     (async () => {
-      const u = COGNITO_ENABLED ? await cognitoGetUser() : loadUser();
+      const u = COGNITO_ENABLED ? await cognitoGetUser() : ALLOW_MOCK ? loadUser() : null;
       setUser(u);
       setLoading(false);
       if (u) void refreshEntitlements(u);
@@ -83,7 +89,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         cognitoSignIn(provider, returnTo); // full-page redirect to Cognito, then back to returnTo
         return NEVER;
       }
-      // Mock (offline): mint a demo user.
+      // Production hardening: no Cognito + not a dev build = NO login at all.
+      // The demo learner is dev-only; real accounts only in prod.
+      if (!ALLOW_MOCK) {
+        console.error("Auth not configured (no Cognito) — demo login is disabled in production.");
+        return;
+      }
+      // Mock (offline dev only): mint a demo user.
       const d = DEMO[provider];
       const u: AuthUser = { id: `${provider}-demo`, email: d.email, name: d.name, provider };
       setUser(u);
