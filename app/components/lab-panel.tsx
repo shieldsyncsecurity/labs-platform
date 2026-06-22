@@ -140,6 +140,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const expiryFired = useRef(false);
   const autoLaunched = useRef(false);
   const freeRetry = useRef(false);
+  const restoredFromServer = useRef(false);
   const redirecting = useRef(false);
   const consoleWindowRef = useRef<Window | null>(null);
   const lab = getLab(slug);
@@ -160,6 +161,26 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       if (sid) setSessionId(sid);
     } catch {}
   }, [key]);
+
+  // Server-authoritative restore: if signed in and we DON'T already know a session
+  // (fresh tab / different device / cleared sessionStorage), ask the server whether
+  // this user has a live lab for this slug and adopt it. Closes the per-tab gap.
+  useEffect(() => {
+    if (restoredFromServer.current || loading || !user || sessionId) return;
+    try { if (sessionStorage.getItem(key)) return; } catch {}
+    restoredFromServer.current = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/active-session?labSlug=${encodeURIComponent(slug)}`, { cache: "no-store" });
+        if (!r.ok) return;
+        const d = (await r.json()) as { session?: { sessionId?: string } | null };
+        if (d.session?.sessionId) {
+          try { sessionStorage.setItem(key, d.session.sessionId); } catch {}
+          setSessionId(d.session.sessionId); // → polling restores the live lab
+        }
+      } catch {}
+    })();
+  }, [loading, user, sessionId, slug, key]);
 
   // poll the server for the session's real status (the single source of truth)
   useEffect(() => {
