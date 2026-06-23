@@ -15,6 +15,7 @@
     "COGNITO_DOMAIN": "shieldsync-labs.auth.us-east-1.amazoncognito.com",
     "COGNITO_USER_POOL_ID": "us-east-1_5Hu20LAi8",
     "COGNITO_CLIENT_ID": "36s7i98jnt0mj8n5m8h0s711kn",
-    "APP_URL": "https://labs.shieldsyncsecurity.com"
+    "APP_URL": "https://labs.shieldsyncsecurity.com",
+    "ADMIN_USER_IDS": "b4b864a8-80b1-705f-2c40-fee7397141d2"
   }
 }

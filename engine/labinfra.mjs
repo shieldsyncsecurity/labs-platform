@@ -939,3 +939,24 @@ export async function recordRating(userId, labSlug, rating) {
     })
   );
 }
+
+/**
+ * ratingsSummary(): aggregate 👍/👎 per lab for the admin readout. One Scan over
+ * the (small) ratings table → [{labSlug, up, down, total, pct}] sorted by volume.
+ * pct = % thumbs-up (null when a lab has no ratings yet).
+ */
+export async function ratingsSummary() {
+  const db = await ddb();
+  const { Items } = await db.send(new ScanCommand({ TableName: RATINGS_TABLE }));
+  const by = {};
+  for (const it of Items ?? []) {
+    const slug = it.labSlug?.S;
+    if (!slug) continue;
+    by[slug] ??= { labSlug: slug, up: 0, down: 0 };
+    if (it.rating?.S === "up") by[slug].up++;
+    else if (it.rating?.S === "down") by[slug].down++;
+  }
+  return Object.values(by)
+    .map((s) => ({ ...s, total: s.up + s.down, pct: s.up + s.down ? Math.round((100 * s.up) / (s.up + s.down)) : null }))
+    .sort((a, b) => b.total - a.total);
+}

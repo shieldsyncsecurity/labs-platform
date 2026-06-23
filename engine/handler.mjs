@@ -64,6 +64,7 @@ import {
   launchCount,
   freeCapacity,
   recordRating,
+  ratingsSummary,
   acquireUserLock,
   bindLockSession,
   releaseUserLock,
@@ -387,6 +388,12 @@ export async function handler(event) {
       if (!userId || !labSlug || !rating) return resp(400, { error: "userId, labSlug, rating required" });
       await recordRating(userId, labSlug, rating);
       return resp(200, { ok: true });
+    }
+
+    if (method === "GET" && path === "/ratings/summary") {
+      // Aggregated 👍/👎 per lab for the admin readout. Admin-gating happens in the
+      // app (only admins can reach /api/admin/ratings); the token guards the engine.
+      return resp(200, { labs: await ratingsSummary() });
     }
 
     if (method === "POST" && path === "/grade") {
