@@ -56,9 +56,10 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
           )}
         </div>
 
-        {/* sticky workspace panel */}
+        {/* sticky workspace panel — cap to viewport height + scroll internally so the
+            bottom controls (End / Check my work) stay reachable on short windows */}
         <div className="lg:col-span-1">
-          <div className="lg:sticky lg:top-6">
+          <div className="lg:sticky lg:top-6 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-1">
             <LabPanel slug={lab.slug} objectives={objectives} ready={lab.ready} />
             <div className="mt-3 flex flex-wrap gap-1.5">
               {lab.tags.map((t) => (
