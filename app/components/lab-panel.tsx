@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth/context";
 import { getLab } from "@/lib/labs";
+import { rulesForLab } from "@/lib/access-rules";
 import { CheckoutSheet } from "@/components/checkout-sheet";
 
 // ── animated terminal log lines ──────────────────────────────────────────────
@@ -146,6 +147,10 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const redirecting = useRef(false);
   const consoleWindowRef = useRef<Window | null>(null);
   const lab = getLab(slug);
+  // Launch policy (per-lab, from the single source the engine mirrors) — shown
+  // up front so the cap isn't a surprise only when you hit it.
+  const rule = lab ? rulesForLab(lab.level, lab.free) : null;
+  const launchPolicy = rule ? `${rule.maxLaunches} launch${rule.maxLaunches === 1 ? "" : "es"} every ${rule.windowHours}h` : "";
 
   function clearSession() {
     setSessionId(null);
@@ -512,8 +517,9 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       <div className={card} role="alert">
         <p className="text-base font-extrabold text-ink">You&apos;ve used all your launches</p>
         <p className="mt-1 text-base text-ink-soft">
-          You&apos;ve hit this lab&apos;s launch limit for now. It resets on a rolling window — check back a
-          little later.
+          {lab?.free
+            ? `The free lab includes ${launchPolicy}. It resets on a rolling ${rule?.windowHours}-hour window — your next run frees up about ${rule?.windowHours}h after your last one.`
+            : `You've used all your launches for this lab (${launchPolicy}). It resets on a rolling ${rule?.windowHours}-hour window — check back a little later.`}
         </p>
         <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">OK</button>
       </div>
@@ -726,6 +732,12 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     <div className={card}>
       <p className="text-base font-extrabold text-ink">Start this lab</p>
       <p className="mt-1 text-base text-ink-soft">Your own isolated AWS account (~30 min), the scenario pre-deployed, auto-wiped when you finish.</p>
+      {rule && (
+        <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-line bg-canvas px-2.5 py-1 text-sm text-ink-soft">
+          <span aria-hidden>↻</span>
+          {lab?.free ? "Free lab" : lab?.level} · {launchPolicy}
+        </p>
+      )}
       <button onClick={launch} className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-semibold text-white hover:bg-brand-strong">Launch lab</button>
       <p className="mt-2 text-xs text-muted">Opens the AWS console in a new tab; this guide stays here.</p>
     </div>
