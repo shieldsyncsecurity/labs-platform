@@ -7,6 +7,9 @@ import { getLab } from "@/lib/labs";
 import { rulesForLab } from "@/lib/access-rules";
 import { CheckoutSheet } from "@/components/checkout-sheet";
 
+// Where "contact support" links go (the marketing contact page — WhatsApp + form).
+const SUPPORT_URL = "https://shieldsyncsecurity.com/contact";
+
 // ── animated terminal log lines ──────────────────────────────────────────────
 
 const BUILD_LOG: { ms: number; text: string }[] = [
@@ -471,8 +474,11 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     return (
       <div className={card} role="alert">
         <p className="text-base font-extrabold text-ink">All seats busy</p>
-        <p className="mt-1 text-base text-ink-soft">Every isolated account is in use — one frees up as soon as a learner finishes.</p>
-        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">Try again</button>
+        <p className="mt-1 text-base text-ink-soft">Every isolated account is in use — one frees up as soon as a learner finishes. Give it a minute and try again.</p>
+        <button onClick={() => { setFlash(null); void launch(); }} className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-semibold text-white hover:bg-brand-strong">Try again</button>
+        <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer" className="mt-3 block text-center text-sm font-semibold text-ink-soft hover:text-ink hover:underline">
+          Stuck for a while? Contact support →
+        </a>
       </div>
     );
   }
@@ -548,8 +554,15 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   if (flash === "launcherror") {
     return (
       <div className={card} role="alert">
-        <p className="text-base font-semibold text-[#b91c1c]">Couldn&apos;t start the lab.</p>
-        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">Retry</button>
+        <p className="text-base font-extrabold text-ink">Couldn&apos;t start the lab</p>
+        <p className="mt-1 text-base text-ink-soft">
+          That was most likely a brief hiccup on our side — nothing you did. Give it another try; it usually
+          works on the second go.
+        </p>
+        <button onClick={() => { setFlash(null); void launch(); }} className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-semibold text-white hover:bg-brand-strong">Try again</button>
+        <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer" className="mt-3 block text-center text-sm font-semibold text-ink-soft hover:text-ink hover:underline">
+          Still stuck? Contact support →
+        </a>
       </div>
     );
   }

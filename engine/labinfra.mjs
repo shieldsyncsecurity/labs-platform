@@ -204,9 +204,10 @@ async function platformCreds() {
 export async function assumeInSandbox(roleArn, sessionName, durationSeconds) {
   // Lambda runs in the platform account — use execution role directly.
   // Local dev assumes into the platform account first via platformCreds().
+  const stsCfg = { region: REGION, maxAttempts: 5, retryMode: "adaptive" }; // ride out AssumeRole throttling under burst
   const sts = process.env.AWS_LAMBDA_FUNCTION_NAME
-    ? new STSClient({ region: REGION })
-    : new STSClient({ region: REGION, credentials: await platformCreds() });
+    ? new STSClient(stsCfg)
+    : new STSClient({ ...stsCfg, credentials: await platformCreds() });
   const r = await sts.send(
     new AssumeRoleCommand({ RoleArn: roleArn, RoleSessionName: sessionName, DurationSeconds: durationSeconds })
   );
@@ -548,13 +549,21 @@ async function deployStack(execRoleArn, labSlug, stackName, tags = []) {
   const cfn = new CloudFormationClient({
     region: REGION,
     credentials: { accessKeyId: c.AccessKeyId, secretAccessKey: c.SecretAccessKey, sessionToken: c.SessionToken },
+    // Ride out transient AWS errors (throttling under a launch burst, eventual
+    // consistency) without failing the user's launch — adaptive mode adds client
+    // -side rate limiting on top of retries.
+    maxAttempts: 5,
+    retryMode: "adaptive",
   });
   await cfn.send(
     new CreateStackCommand({
       StackName: stackName,
       TemplateBody: templateBody,
       Capabilities: ["CAPABILITY_NAMED_IAM"],
-      OnFailure: "DO_NOTHING",
+      // DELETE (not DO_NOTHING): a CREATE_FAILED stack auto-rolls-back + deletes, so
+      // it leaves no debris, the account recycles cleanly, and the stack name is
+      // free if the learner retries. (Was DO_NOTHING — a dev-only setting.)
+      OnFailure: "DELETE",
       Tags: tags,
     })
   );
