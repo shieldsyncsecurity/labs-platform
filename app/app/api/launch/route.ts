@@ -33,10 +33,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "not entitled" }, { status: 403 });
   }
 
-  // broker to the engine — passes the shared secret + verified user id via headers.
+  // broker to the engine — passes the shared secret + verified user id via headers,
+  // plus the Cloudflare client IP for the engine's per-network abuse guards.
+  const ip = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip");
   let r: Response;
   try {
-    r = await engineFetch("/launch", { body: { userId, labSlug }, userId: userId ?? null });
+    r = await engineFetch("/launch", { body: { userId, labSlug }, userId: userId ?? null, ip });
   } catch {
     return NextResponse.json({ error: "engine unreachable" }, { status: 502 });
   }

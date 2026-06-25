@@ -67,6 +67,9 @@ import {
   ratingsSummary,
   poolCounts,
   healPool,
+  hashIp,
+  ipLaunchCount,
+  freeIpCount,
   acquireUserLock,
   bindLockSession,
   releaseUserLock,
@@ -244,6 +247,15 @@ export async function handler(event) {
       // without auth, and finally to "anon" so the smoke /health flow still works.
       const uid = callerUserId || userId || "anon";
 
+      // Abuse guard: per-network rate cap (Cloudflare client IP, hashed). Bounds
+      // burst farming from one IP across labs/accounts before we do any real work.
+      const ipHash = hashIp(event.headers?.["x-client-ip"] ?? event.headers?.["X-Client-IP"] ?? null);
+      if (ipHash && (await ipLaunchCount(ipHash, 10)) >= 8) {
+        metric({ Launch: 1 }, { Outcome: "ratelimited" });
+        console.log(`[launch] RATE_LIMITED ip-hash ${ipHash.slice(0, 8)}… (>=8 launches/10min)`);
+        return resp(429, { error: "RATE_LIMITED" });
+      }
+
       const existing = await findActiveSession(uid, labSlug);
       if (existing) {
         await dequeueWaiter(uid).catch(() => {}); // they have a seat — leave the line
@@ -289,6 +301,14 @@ export async function handler(event) {
       // Free labs are capped to a share of the pool (FREE_POOL_PCT) so a free rush
       // can't starve paying users — paid launches skip this and use the rest.
       if (rules.free) {
+        // Multi-account guard: cap FREE launches per network (defeats "many Google
+        // accounts, one IP" farming of the per-user 1/48h free cap).
+        if (ipHash && (await freeIpCount(ipHash, 48)) >= 3) {
+          await releaseUserLock(uid);
+          metric({ Launch: 1 }, { Outcome: "freeip" });
+          console.log(`[launch] FREE_IP_LIMIT ip-hash ${ipHash.slice(0, 8)}… (>=3 free/48h)`);
+          return resp(429, { error: "FREE_IP_LIMIT" });
+        }
         const fc = await freeCapacity();
         if (fc.reached) {
           await releaseUserLock(uid);
@@ -303,7 +323,7 @@ export async function handler(event) {
 
       let leased;
       try {
-        leased = await lease(uid, labSlug, rules.sessionMinutes);
+        leased = await lease(uid, labSlug, rules.sessionMinutes, ipHash);
       } catch (e) {
         await releaseUserLock(uid);
         if (e.message === "NO_CAPACITY") { metric({ Launch: 1 }, { Outcome: "nocapacity" }); return resp(503, { error: "NO_CAPACITY" }); }

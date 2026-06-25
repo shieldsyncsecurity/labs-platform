@@ -23,6 +23,7 @@ import {
   waitUntilStackCreateComplete,
 } from "@aws-sdk/client-cloudformation";
 import { IAMClient, PutRolePolicyCommand } from "@aws-sdk/client-iam";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -241,7 +242,7 @@ function rid(n = 10) {
  * "active" (instant start, no deploy). Otherwise claims a cold account ->
  * "leasing" and the caller deploys in the background.
  */
-export async function lease(userId, labSlug, windowMinutes = 30) {
+export async function lease(userId, labSlug, windowMinutes = 30, ipHash = null) {
   const db = await ddb();
   const sessionId = "sess_" + rid();
   const now = Date.now();
@@ -287,6 +288,7 @@ export async function lease(userId, labSlug, windowMinutes = 30) {
       status: { S: warm ? "active" : "leasing" },
       startedAt: { S: new Date(now).toISOString() },
       expiresAt: { S: expiresAt },
+      ...(ipHash ? { ipHash: { S: ipHash } } : {}),
     };
     if (warm && acct.warmStackName?.S) item.stackName = { S: acct.warmStackName.S };
     await db.send(new PutItemCommand({ TableName: SESSIONS_TABLE, Item: item }));
@@ -346,6 +348,48 @@ export async function launchCount(userId, labSlug, windowHours) {
   );
   return (scan.Items ?? []).filter(
     (s) => new Date(s.startedAt.S).getTime() >= sinceMs && s.status?.S !== "error"
+  ).length;
+}
+
+// ── Abuse guards keyed by client IP ─────────────────────────────────────────
+// The app forwards Cloudflare's CF-Connecting-IP; we store/count only a salted
+// HASH (never the raw IP) so this stays privacy-preserving while still catching
+// sock-puppet farming from one network.
+
+export function hashIp(ip) {
+  if (!ip) return null;
+  return createHash("sha256").update("shieldsync:" + String(ip)).digest("hex").slice(0, 32);
+}
+
+async function sessionsForIp(ipHash) {
+  const db = await ddb();
+  const scan = await db.send(
+    new ScanCommand({
+      TableName: SESSIONS_TABLE,
+      FilterExpression: "ipHash = :h AND attribute_exists(startedAt)",
+      ExpressionAttributeValues: { ":h": { S: ipHash } },
+    })
+  );
+  return scan.Items ?? [];
+}
+
+/** ipLaunchCount(): launches (any lab) from this IP in the last `minutes` — a
+ *  per-network rate cap so one IP can't farm accounts in a burst. Excludes errors. */
+export async function ipLaunchCount(ipHash, minutes) {
+  if (!ipHash) return 0;
+  const sinceMs = Date.now() - minutes * 60000;
+  return (await sessionsForIp(ipHash)).filter(
+    (s) => new Date(s.startedAt.S).getTime() >= sinceMs && s.status?.S !== "error"
+  ).length;
+}
+
+/** freeIpCount(): FREE-lab launches from this IP in the window — defeats the
+ *  "many Google accounts, one network" bypass of the per-user free cap. */
+export async function freeIpCount(ipHash, windowHours) {
+  if (!ipHash) return 0;
+  const sinceMs = Date.now() - windowHours * 3600000;
+  return (await sessionsForIp(ipHash)).filter(
+    (s) => new Date(s.startedAt.S).getTime() >= sinceMs && s.status?.S !== "error" && labMeta(s.labSlug?.S ?? "").free
   ).length;
 }
 

@@ -143,6 +143,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [freeWait, setFreeWait] = useState(0); // seconds until then
   const [freePos, setFreePos] = useState(0); // place in line (1-based; 0 = unknown)
   const [freeWaiting, setFreeWaiting] = useState(0); // total people waiting
+  const [limitReason, setLimitReason] = useState<string | null>(null); // which 429 cap
   const expiryFired = useRef(false);
   const autoLaunched = useRef(false);
   const freeRetry = useRef(false);
@@ -257,7 +258,13 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         }
         return;
       }
-      if (r.status === 429) { setSession(null); setFlash("limitreached"); return; }
+      if (r.status === 429) {
+        const d = await r.json().catch(() => ({}));
+        setSession(null);
+        setLimitReason(typeof d.error === "string" ? d.error : "LIMIT_REACHED");
+        setFlash("limitreached");
+        return;
+      }
       if (r.status === 409) {
         const d = await r.json().catch(() => ({}));
         setSession(null);
@@ -521,9 +528,15 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   if (flash === "limitreached") {
     return (
       <div className={card} role="alert">
-        <p className="text-base font-extrabold text-ink">You&apos;ve used all your launches</p>
+        <p className="text-base font-extrabold text-ink">
+          {limitReason === "RATE_LIMITED" ? "Too many launches just now" : limitReason === "FREE_IP_LIMIT" ? "Free lab limit reached for your network" : "You've used all your launches"}
+        </p>
         <p className="mt-1 text-base text-ink-soft">
-          {lab?.free
+          {limitReason === "RATE_LIMITED"
+            ? "We saw a burst of launches from your network. Give it a couple of minutes, then try again."
+            : limitReason === "FREE_IP_LIMIT"
+            ? "The free lab is one run per person — and it's been used several times from your network already. Try again later, or unlock a paid lab for instant, unlimited access."
+            : lab?.free
             ? `The free lab includes ${launchPolicy}. It resets on a rolling ${rule?.windowHours}-hour window — your next run frees up about ${rule?.windowHours}h after your last one.`
             : `You've used all your launches for this lab (${launchPolicy}). It resets on a rolling ${rule?.windowHours}-hour window — check back a little later.`}
         </p>

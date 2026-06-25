@@ -22,6 +22,8 @@ type Opts = {
   withUser?: boolean;
   /** Override the user id (used by anonymous flows like local dev). */
   userId?: string | null;
+  /** Client IP (Cloudflare CF-Connecting-IP) → engine abuse guards (hashed there). */
+  ip?: string | null;
   /** Pass through to fetch() — e.g. cache: "no-store" for polls. */
   cache?: RequestCache;
 };
@@ -36,6 +38,7 @@ export async function engineFetch(path: string, opts: Opts = {}): Promise<Respon
   } else if (opts.userId) {
     headers["x-user-id"] = opts.userId;
   }
+  if (opts.ip) headers["x-client-ip"] = opts.ip;
   return fetch(`${ENGINE_URL}${path}`, {
     method: opts.method ?? "POST",
     headers,
