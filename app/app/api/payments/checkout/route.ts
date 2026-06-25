@@ -6,17 +6,26 @@ import { getLab } from "@/lib/labs";
 import { rulesForLab, MONTHLY_ACCESS_DAYS } from "@/lib/access-rules";
 import type { CheckoutRequest } from "@/lib/payments/types";
 
-// Creates a server-side signed order. The order details are embedded in a
-// signed payload returned to the client — no in-memory store needed, so the
-// mock-pay route can verify + fulfill on any Worker instance.
-export async function POST(req: Request) {
-  const body = (await req.json()) as CheckoutRequest;
-  const sessionUser = await getServerUser();
-  // Always use the verified server-side user id, never trust the client-supplied one.
-  const userId = sessionUser?.id ?? body.userId;
+// Creates a server-side signed order. DISABLED until payments are live
+// (PAYMENTS_LIVE=1) and AUTH-ONLY — the userId is taken ONLY from the verified
+// Cognito session, never from the client body (trusting body.userId let an
+// unauthenticated caller mint an order for any user — half of the payment-bypass
+// chain). When Paytm goes live this is replaced by server-persisted orders.
+const PAYMENTS_LIVE = process.env.PAYMENTS_LIVE === "1";
 
-  if (!userId || !body.plan) {
-    return NextResponse.json({ error: "missing userId or plan" }, { status: 400 });
+export async function POST(req: Request) {
+  if (!PAYMENTS_LIVE) {
+    return NextResponse.json({ error: "payments not available yet" }, { status: 503 });
+  }
+  const sessionUser = await getServerUser();
+  if (!sessionUser?.id) {
+    return NextResponse.json({ error: "sign in required" }, { status: 401 });
+  }
+  const body = (await req.json()) as CheckoutRequest;
+  const userId = sessionUser.id; // verified session only — never body.userId
+
+  if (!body.plan) {
+    return NextResponse.json({ error: "missing plan" }, { status: 400 });
   }
   const currency = body.currency ?? "INR";
   const amountMinor = priceFor(body.labSlug ?? null, body.plan, currency);
