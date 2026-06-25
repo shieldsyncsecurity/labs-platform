@@ -52,7 +52,7 @@ $ZIP_PATH  = "$DEPLOY_DIR\engine.zip"
 # aws-nuke binary lives in S3 and is fetched by Lambda at init — NOT bundled here.
 if (Test-Path $ZIP_PATH) { Remove-Item $ZIP_PATH -Force }
 
-Compress-Archive -Path "$SCRIPT_DIR\handler.mjs","$SCRIPT_DIR\labinfra.mjs","$SCRIPT_DIR\graders.mjs" -DestinationPath $ZIP_PATH
+Compress-Archive -Path "$SCRIPT_DIR\handler.mjs","$SCRIPT_DIR\labinfra.mjs","$SCRIPT_DIR\graders.mjs","$SCRIPT_DIR\metrics.mjs" -DestinationPath $ZIP_PATH
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open($ZIP_PATH, "Update")

@@ -65,6 +65,7 @@ import {
   freeCapacity,
   recordRating,
   ratingsSummary,
+  poolCounts,
   acquireUserLock,
   bindLockSession,
   releaseUserLock,
@@ -73,6 +74,7 @@ import {
   dequeueWaiter,
 } from "./labinfra.mjs";
 import { gradeLab } from "./graders.mjs";
+import { metric } from "./metrics.mjs";
 
 const PRIMARY_LAB = "s3-misconfiguration-audit";
 
@@ -113,10 +115,13 @@ export async function handler(event) {
 
     if (action === "deploy") {
       const { sessionId, accountId, execRoleArn, labSlug, userId } = event;
+      const t0 = Date.now();
       try {
         await deployLab({ sessionId, accountId, execRoleArn, labSlug });
+        metric({ Deploy: 1, ColdDeploySeconds: (Date.now() - t0) / 1000 }, { Outcome: "success" });
         console.log(`[worker] deploy done ${sessionId}`);
       } catch (e) {
+        metric({ Deploy: 1 }, { Outcome: "failed" });
         console.error(`[worker] deploy failed ${sessionId}: ${e.message}`);
         await markSession(sessionId, "error", e.message).catch(() => {});
         // Release the account back to the pool — deploy failed before anything
@@ -131,10 +136,13 @@ export async function handler(event) {
 
     if (action === "teardown") {
       const { sessionId } = event;
+      const t0 = Date.now();
       try {
         await teardown(sessionId);
+        metric({ Teardown: 1, TeardownSeconds: (Date.now() - t0) / 1000 }, { Outcome: "success" });
         console.log(`[worker] teardown done ${sessionId}`);
       } catch (e) {
+        metric({ Teardown: 1 }, { Outcome: "failed" });
         console.error(`[worker] teardown failed ${sessionId}: ${e.message}`);
       }
       await invokeWorker("warm").catch(() => {});
@@ -142,7 +150,9 @@ export async function handler(event) {
     }
 
     if (action === "warm") {
+      metric({ WarmRun: 1 }); // cron heartbeat — alarm if this stops
       await runWarmer();
+      await poolCounts().then((p) => metric({ PoolAvailable: p.available, PoolLeased: p.leased, PoolStuck: p.stuck })).catch(() => {});
       return;
     }
 
@@ -151,8 +161,10 @@ export async function handler(event) {
       // that were abandoned (sign-out / tab-close never called /end-lab). This is
       // what keeps the pool from drifting (DDB says available while AWS still holds
       // a CREATE_COMPLETE stack) and causing CREATE_FAILED collisions on next launch.
+      metric({ ReapRun: 1 }); // cron heartbeat — alarm if this stops
       try {
         const r = await reap();
+        metric({ Reaped: r.reaped.length });
         console.log(
           `[worker] reap: checked ${r.activeChecked}, expired ${r.expired}, reaped ${r.reaped.length}` +
             (r.reaped.length ? ` (${r.reaped.join(", ")})` : "")
@@ -160,6 +172,9 @@ export async function handler(event) {
       } catch (e) {
         console.error(`[worker] reap failed: ${e.message}`);
       }
+      // Pool census every reap (~3 min) → drives the PoolAvailable=0 starvation
+      // alarm and the PoolStuck (drifted account) alarm.
+      await poolCounts().then((p) => metric({ PoolAvailable: p.available, PoolLeased: p.leased, PoolStuck: p.stuck })).catch(() => {});
       return;
     }
 
@@ -252,6 +267,7 @@ export async function handler(event) {
       if (used >= rules.maxLaunches) {
         await releaseUserLock(uid);
         console.log(`[launch] LIMIT_REACHED ${uid} ${labSlug}: ${used}/${rules.maxLaunches} in ${rules.windowHours}h`);
+        metric({ Launch: 1 }, { Outcome: "limit" });
         return resp(429, {
           error: "LIMIT_REACHED",
           maxLaunches: rules.maxLaunches,
@@ -269,6 +285,7 @@ export async function handler(event) {
           // Join the wait-room line (informational) and report this user's place.
           await enqueueWaiter(uid, labSlug).catch(() => {});
           const q = await queuePosition(uid, labSlug).catch(() => ({ position: 1, waiting: 1 }));
+          metric({ Launch: 1 }, { Outcome: "freebusy" });
           console.log(`[launch] FREE_AT_CAPACITY ${fc.busy}/${fc.cap} (pool ${fc.total}) nextFreeAt=${fc.nextFreeAt} pos=${q.position}/${q.waiting}`);
           return resp(503, { error: "FREE_AT_CAPACITY", freeCap: fc.cap, freeBusy: fc.busy, poolSize: fc.total, nextFreeAt: fc.nextFreeAt, position: q.position, waiting: q.waiting });
         }
@@ -279,12 +296,13 @@ export async function handler(event) {
         leased = await lease(uid, labSlug, rules.sessionMinutes);
       } catch (e) {
         await releaseUserLock(uid);
-        if (e.message === "NO_CAPACITY") return resp(503, { error: "NO_CAPACITY" });
+        if (e.message === "NO_CAPACITY") { metric({ Launch: 1 }, { Outcome: "nocapacity" }); return resp(503, { error: "NO_CAPACITY" }); }
         throw e;
       }
 
       await bindLockSession(uid, leased.sessionId);
       await dequeueWaiter(uid).catch(() => {}); // got a seat — leave the line
+      metric({ Launch: 1 }, { Outcome: leased.warm ? "warm" : "cold" });
 
       if (leased.warm) {
         console.log(`[launch] WARM hit ${leased.sessionId} on ${leased.accountId}`);
@@ -432,6 +450,7 @@ export async function handler(event) {
 
     return resp(404, { error: "not found" });
   } catch (e) {
+    metric({ EngineError: 1 }, { Path: path }); // handled 500s → alarm (Lambda's own Errors metric misses these)
     console.error("engine error:", e);
     return resp(500, { error: e.message });
   }

@@ -97,6 +97,17 @@ async function poolSize() {
   return r.Count ?? 0;
 }
 
+// Pool census by status — for the PoolAvailable/PoolLeased/PoolStuck metrics.
+// "stuck" = leased but with no live session pointing back (drifted/orphaned).
+export async function poolCounts() {
+  const db = await ddb();
+  const r = await db.send(new ScanCommand({ TableName: ACCOUNTS_TABLE }));
+  const items = r.Items ?? [];
+  const n = (s) => items.filter((i) => i.status?.S === s).length;
+  const stuck = items.filter((i) => i.status?.S === "leased" && !i.currentSessionId?.S).length;
+  return { total: items.length, available: n("available"), leased: n("leased"), warming: n("warming"), cleaning: n("cleaning"), stuck };
+}
+
 // expiresAt of every LIVE free-lab session (active/leasing, non-expired). Drives
 // both the free-pool count AND the "next slot frees at" wait-room countdown.
 async function activeFreeExpiries() {
