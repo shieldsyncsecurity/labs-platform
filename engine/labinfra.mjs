@@ -857,6 +857,57 @@ export async function reap() {
 }
 
 /**
+ * healPool(): reclaim accounts whose DB state has DRIFTED (the session-based reaper
+ * only catches expired sessions). Conservative on purpose — only auto-acts on cases
+ * that are unambiguously safe; anything else is left for the PoolStuck alarm so a
+ * human looks before we touch it. Two cases handled:
+ *   1. leased account whose session already SETTLED (done/error) → the lab is already
+ *      cleaned, the account just never got flipped back → releaseAccount (no nuke).
+ *   2. leased account whose session is still "leasing" but is OLD (cold deploy hung /
+ *      worker died, well past the ~5-min deploy max-wait) → teardown (full aws-nuke +
+ *      release) in case a partial stack exists.
+ * NEVER touches active+non-expired (in use), recent leasing (deploy in progress),
+ * warming, or leased-with-missing-session (ambiguous → alarm).
+ */
+export async function healPool() {
+  const db = await ddb();
+  const now = Date.now();
+  const HUNG_LEASING_MS = 12 * 60 * 1000;
+  const scan = await db.send(
+    new ScanCommand({
+      TableName: ACCOUNTS_TABLE,
+      FilterExpression: "#s = :leased",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: { ":leased": { S: "leased" } },
+    })
+  );
+  const healed = [];
+  for (const a of scan.Items ?? []) {
+    const accountId = a.accountId.S;
+    const sid = a.currentSessionId?.S;
+    if (!sid) continue; // leased w/ no session = ambiguous → leave to PoolStuck alarm
+    try {
+      const sres = await db.send(new GetItemCommand({ TableName: SESSIONS_TABLE, Key: { sessionId: { S: sid } } }));
+      const st = sres.Item?.status?.S;
+      const startedMs = sres.Item?.startedAt?.S ? new Date(sres.Item.startedAt.S).getTime() : 0;
+      if (st === "done" || st === "error") {
+        await releaseAccount(accountId);
+        healed.push(`${accountId}(settled:${st})`);
+        console.log(`  [heal] released ${accountId} — session ${sid} was ${st} but account still leased`);
+      } else if (st === "leasing" && startedMs && now - startedMs > HUNG_LEASING_MS) {
+        console.log(`  [heal] hung deploy — tearing down ${accountId} (session ${sid} leasing ${Math.round((now - startedMs) / 60000)}min)`);
+        await teardown(sid);
+        healed.push(`${accountId}(hung-deploy)`);
+      }
+      // active+non-expired (in use) and recent-leasing (deploy in flight) → skip
+    } catch (e) {
+      console.log(`  [heal] ${accountId} failed: ${e.message}`);
+    }
+  }
+  return { healed };
+}
+
+/**
  * grantEntitlement(): idempotently write an entitlement row.
  * labSlug "*" means all-access (monthly plan).
  */

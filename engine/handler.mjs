@@ -66,6 +66,7 @@ import {
   recordRating,
   ratingsSummary,
   poolCounts,
+  healPool,
   acquireUserLock,
   bindLockSession,
   releaseUserLock,
@@ -171,6 +172,15 @@ export async function handler(event) {
         );
       } catch (e) {
         console.error(`[worker] reap failed: ${e.message}`);
+      }
+      // Self-heal drifted accounts (leaked-after-settle / hung deploy) before we
+      // census — so the gauge reflects the post-heal truth.
+      try {
+        const h = await healPool();
+        metric({ Healed: h.healed.length });
+        if (h.healed.length) console.log(`[worker] heal: reclaimed ${h.healed.length} (${h.healed.join(", ")})`);
+      } catch (e) {
+        console.error(`[worker] heal failed: ${e.message}`);
       }
       // Pool census every reap (~3 min) → drives the PoolAvailable=0 starvation
       // alarm and the PoolStuck (drifted account) alarm.
