@@ -138,6 +138,8 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [grade, setGrade] = useState<{ gradable: boolean; passed: boolean; criteria: { id: string; description: string; passed: boolean; unknown?: boolean }[] } | null>(null);
   const [grading, setGrading] = useState(false);
   const [copyStatus, setCopyStatus] = useState<"idle" | "loading" | "copied" | "error">("idle");
+  const [consoleOpening, setConsoleOpening] = useState(false); // "Open AWS console" in flight
+  const [consoleError, setConsoleError] = useState(false); // console mint failed (don't fail silently)
   const [wantsLaunch, setWantsLaunch] = useState(false);
   const [freeNextAt, setFreeNextAt] = useState<string | null>(null); // when a free slot frees up
   const [freeWait, setFreeWait] = useState(0); // seconds until then
@@ -281,20 +283,34 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   }
 
   async function openConsole() {
+    setConsoleError(false);
+    setConsoleOpening(true);
     // open the tab synchronously (popup-blocker safe), then redirect it to the fresh URL
     const w = window.open("", "_blank");
     if (w) w.document.write("<p style='font-family:sans-serif;padding:2rem;color:#334155'>Opening your AWS lab…</p>");
     consoleWindowRef.current = w; // keep ref so we can log out on wipe
+    const fail = () => {
+      // never fail silently — the pre-opened tab vanishing with no message was a real
+      // "did it break?" moment for users. Close it and show an inline explanation.
+      if (w) w.close();
+      consoleWindowRef.current = null;
+      setConsoleError(true);
+      setTimeout(() => setConsoleError(false), 10000);
+    };
     try {
       const r = await fetch("/api/console", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ sessionId }),
       });
-      const d = await r.json();
-      if (d.consoleUrl) { if (w) w.location.href = d.consoleUrl; else window.open(d.consoleUrl, "_blank"); }
-      else { if (w) w.close(); consoleWindowRef.current = null; }
-    } catch { if (w) w.close(); consoleWindowRef.current = null; }
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.consoleUrl) { if (w) w.location.href = d.consoleUrl; else window.open(d.consoleUrl, "_blank"); }
+      else fail();
+    } catch {
+      fail();
+    } finally {
+      setConsoleOpening(false);
+    }
   }
 
   // Mint a FRESH console URL and copy it to the clipboard so the user can paste
@@ -665,7 +681,14 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
             ⚠ Under 5 minutes left — wrap up and click <strong>End &amp; wipe lab</strong>. When the timer hits 0 the account is auto-wiped and your work is cleared.
           </div>
         )}
-        <button onClick={openConsole} className="mt-4 block w-full rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong">Open AWS console ↗</button>
+        <button onClick={openConsole} disabled={consoleOpening} className="mt-4 block w-full rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong disabled:opacity-70">
+          {consoleOpening ? "Opening console…" : "Open AWS console ↗"}
+        </button>
+        {consoleError && (
+          <p role="alert" className="mt-2 rounded-lg border border-[#fecaca] bg-[#fef2f2] p-2.5 text-sm font-semibold text-[#b91c1c]">
+            Couldn&apos;t open the console just yet — it may still be finishing setup. Give it a few seconds and click again, or use <strong>Copy URL for incognito</strong> below. Still stuck? <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer" className="underline">Contact support</a>.
+          </p>
+        )}
         <div className="mt-2 rounded-lg border border-line bg-canvas p-3 text-sm text-ink-soft">
           <p className="font-semibold text-ink">Already signed into AWS?</p>
           <p className="mt-1">A browser holds one AWS session at a time. If you see “you must log out first,” open this in an <strong>incognito window</strong> (or log out of AWS first).</p>
