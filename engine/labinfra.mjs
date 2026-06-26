@@ -41,6 +41,7 @@ const ENTITLEMENTS_TABLE = "ShieldSyncLabEntitlements";
 const RATINGS_TABLE = "ShieldSyncLabRatings";
 const USER_LOCKS_TABLE = "ShieldSyncLabUserLocks"; // H3: one-live-session-per-user guard (TTL on `ttl`)
 const QUEUE_TABLE = "ShieldSyncLabQueue"; // wait-room "place in line" (informational; TTL on `ttl`)
+const ORDERS_TABLE = "ShieldSyncLabOrders"; // payment orders — webhook validates payment vs this (TTL on `ttl`)
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
 
@@ -566,6 +567,92 @@ export async function dequeueWaiter(userId) {
   await db
     .send(new DeleteItemCommand({ TableName: QUEUE_TABLE, Key: { userId: { S: userId } } }))
     .catch(() => {});
+}
+
+// ── Payment orders (runbook §6d) ────────────────────────────────────────────
+// The server-side record the real-provider webhook validates a payment against
+// (amount/currency) instead of a client-replayable payload, then grants ONLY on
+// an idempotent created->paid transition. status is forced server-side.
+
+/** createOrder(): persist a checkout order as "created". Won't overwrite a PAID
+ *  order (so a paid order can never be reset to re-grant). 90-day TTL. */
+export async function createOrder(order) {
+  if (!order?.id || !order?.userId) throw new Error("order id + userId required");
+  const db = await ddb();
+  const ttl = Math.floor(Date.now() / 1000) + 90 * 24 * 3600;
+  try {
+    await db.send(
+      new PutItemCommand({
+        TableName: ORDERS_TABLE,
+        Item: {
+          orderId: { S: String(order.id) },
+          userId: { S: String(order.userId) },
+          labSlug: { S: String(order.labSlug ?? "") },
+          plan: { S: String(order.plan) },
+          amountMinor: { N: String(order.amountMinor ?? 0) },
+          currency: { S: String(order.currency ?? "INR") },
+          status: { S: "created" }, // forced — never trust a client-supplied status
+          createdAt: { S: String(order.createdAt ?? new Date().toISOString()) },
+          ttl: { N: String(ttl) },
+        },
+        ConditionExpression: "attribute_not_exists(orderId) OR #s <> :paid",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":paid": { S: "paid" } },
+      })
+    );
+  } catch (e) {
+    if (e.name !== "ConditionalCheckFailedException") throw e;
+    // an already-PAID order with this id exists — leave it untouched.
+  }
+}
+
+/** getOrder(): fetch one order (or null). labSlug "" maps back to null. */
+export async function getOrder(orderId) {
+  if (!orderId) return null;
+  const db = await ddb();
+  const r = await db.send(new GetItemCommand({ TableName: ORDERS_TABLE, Key: { orderId: { S: String(orderId) } } }));
+  const it = r.Item;
+  if (!it) return null;
+  return {
+    id: it.orderId.S,
+    userId: it.userId?.S,
+    labSlug: it.labSlug?.S ? it.labSlug.S : null,
+    plan: it.plan?.S,
+    amountMinor: Number(it.amountMinor?.N ?? 0),
+    currency: it.currency?.S,
+    status: it.status?.S,
+    createdAt: it.createdAt?.S,
+    paymentId: it.paymentId?.S ?? null,
+    paidAt: it.paidAt?.S ?? null,
+  };
+}
+
+/** markOrderPaid(): atomic, idempotent created->paid. Returns true ONLY for the
+ *  call that actually flipped it — so out of N webhook retries exactly one grants. */
+export async function markOrderPaid(orderId, paymentId) {
+  if (!orderId) return false;
+  const db = await ddb();
+  try {
+    await db.send(
+      new UpdateItemCommand({
+        TableName: ORDERS_TABLE,
+        Key: { orderId: { S: String(orderId) } },
+        UpdateExpression: "SET #s = :paid, paymentId = :pid, paidAt = :now",
+        ConditionExpression: "#s = :created", // only the created->paid transition wins
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: {
+          ":paid": { S: "paid" },
+          ":created": { S: "created" },
+          ":pid": { S: String(paymentId ?? "") },
+          ":now": { S: new Date().toISOString() },
+        },
+      })
+    );
+    return true;
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return false; // already paid / missing
+    throw e;
+  }
 }
 
 /** markSession(): set a session's status (+ optional error message). */

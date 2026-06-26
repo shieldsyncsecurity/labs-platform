@@ -70,6 +70,9 @@ import {
   hashIp,
   ipLaunchCount,
   freeIpCount,
+  createOrder,
+  getOrder,
+  markOrderPaid,
   acquireUserLock,
   bindLockSession,
   releaseUserLock,
@@ -442,6 +445,27 @@ export async function handler(event) {
       // Aggregated 👍/👎 per lab for the admin readout. Admin-gating happens in the
       // app (only admins can reach /api/admin/ratings); the token guards the engine.
       return resp(200, { labs: await ratingsSummary() });
+    }
+
+    // ── Payment orders (runbook §6d) — token-guarded; the app's /checkout +
+    // /webhook are the only callers. The webhook validates a provider payment vs
+    // the persisted order, then grants on the idempotent created->paid transition.
+    if (method === "POST" && path === "/orders") {
+      const order = parsed;
+      if (!order?.id || !order?.userId) return resp(400, { error: "order id + userId required" });
+      await createOrder(order);
+      return resp(200, { ok: true });
+    }
+
+    if (method === "GET" && path === "/orders") {
+      const order = await getOrder(event.queryStringParameters?.orderId);
+      return resp(200, { order });
+    }
+
+    if (method === "POST" && path === "/orders/paid") {
+      const { orderId, paymentId } = parsed;
+      const transitioned = await markOrderPaid(orderId, paymentId);
+      return resp(200, { transitioned });
     }
 
     if (method === "POST" && path === "/grade") {
