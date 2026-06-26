@@ -161,6 +161,15 @@ a {
 .lab-md .ss-track > p:first-child {
   margin-top: 4px;
 }
+/* Both tracks render into the DOM; the toggle just flips which is shown via this
+   attribute on the article — instant, no React re-render of the markdown. Defaults
+   to Console (works pre-JS too, since the attribute is server-rendered). */
+.ss-guide[data-track="console"] .ss-track-cli {
+  display: none;
+}
+.ss-guide[data-track="cli"] .ss-track-console {
+  display: none;
+}
 
 /* Scanning indeterminate progress bar (lab build / wipe states) */
 @keyframes ss-scan {

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth/context";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -85,30 +85,34 @@ export function LabGuide({ slug, instructions }: { slug: string; instructions: s
     try { localStorage.setItem("ss-lab-track", t); } catch {}
   };
 
+  // Render the markdown ONCE (memoized on the source) — both tracks go into the
+  // DOM and the toggle just flips which is visible via CSS (data-track on the
+  // article). Re-parsing ~15 ReactMarkdown blocks on every toggle made the switch
+  // feel broken/laggy; this makes it instant.
+  const { rendered, hasTracks } = useMemo(() => {
+    const segs = splitTracks(instructions);
+    const has = segs.some((s) => s.kind !== "common");
+    const nodes = segs.map((s, i) =>
+      s.kind === "common" ? (
+        <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
+          {s.text}
+        </ReactMarkdown>
+      ) : (
+        <div key={i} className={`ss-track ss-track-${s.kind}`}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.text}</ReactMarkdown>
+        </div>
+      )
+    );
+    return { rendered: nodes, hasTracks: has };
+  }, [instructions]);
+
   // Free labs and already-paid users get immediate access.
   // hasAccess() returns true for free labs without needing entitlements.
   if (hasAccess(slug)) {
-    const segs = splitTracks(instructions);
-    const hasTracks = segs.some((s) => s.kind !== "common");
     return (
-      <article className="lab-md rounded-2xl border border-line bg-surface p-6 sm:p-7">
+      <article className="lab-md ss-guide rounded-2xl border border-line bg-surface p-6 sm:p-7" data-track={track}>
         {hasTracks && <TrackToggle track={track} onPick={pick} />}
-        {segs.map((s, i) => {
-          if (s.kind === "common") {
-            return (
-              <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
-                {s.text}
-              </ReactMarkdown>
-            );
-          }
-          if (s.kind !== track) return null;
-          // Visually group the chosen method block so steps stay scannable.
-          return (
-            <div key={i} className="ss-track">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.text}</ReactMarkdown>
-            </div>
-          );
-        })}
+        {rendered}
       </article>
     );
   }
