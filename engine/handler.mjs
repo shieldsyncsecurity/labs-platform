@@ -62,6 +62,7 @@ import {
   findExpiredSessions,
   rulesFor,
   launchCount,
+  nextLaunchAt,
   freeCapacity,
   recordRating,
   ratingsSummary,
@@ -303,11 +304,15 @@ export async function handler(event) {
         await releaseUserLock(uid);
         console.log(`[launch] LIMIT_REACHED ${uid} ${labSlug}: ${used}/${rules.maxLaunches} in ${rules.windowHours}h`);
         metric({ Launch: 1 }, { Outcome: "limit" });
+        // Exact time the next run frees up (oldest in-window launch + window) so the
+        // UI can show "unlocks at 3:45 PM" instead of a vague "about 24h".
+        const retryAt = await nextLaunchAt(uid, labSlug, rules.windowHours, rules.maxLaunches).catch(() => null);
         return resp(429, {
           error: "LIMIT_REACHED",
           maxLaunches: rules.maxLaunches,
           windowHours: rules.windowHours,
           used,
+          retryAt,
         });
       }
 

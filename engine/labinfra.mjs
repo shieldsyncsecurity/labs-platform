@@ -357,6 +357,33 @@ export async function launchCount(userId, labSlug, windowHours) {
   ).length;
 }
 
+/**
+ * nextLaunchAt(): the ISO time the user's next run frees up for this lab — i.e.
+ * when their in-window launch count drops back below maxLaunches. That's when the
+ * oldest launch that needs to age out leaves the rolling window. Returns null if
+ * they're not actually at the cap. Lets the UI show an exact "unlocks at HH:MM"
+ * instead of a vague "about 24h after your last one".
+ */
+export async function nextLaunchAt(userId, labSlug, windowHours, maxLaunches) {
+  const db = await ddb();
+  const sinceMs = Date.now() - windowHours * 3600 * 1000;
+  const scan = await db.send(
+    new ScanCommand({
+      TableName: SESSIONS_TABLE,
+      FilterExpression: "userId = :u AND labSlug = :l AND attribute_exists(startedAt)",
+      ExpressionAttributeValues: { ":u": { S: userId }, ":l": { S: labSlug } },
+    })
+  );
+  const startTimes = (scan.Items ?? [])
+    .filter((s) => new Date(s.startedAt.S).getTime() >= sinceMs && s.status?.S !== "error")
+    .map((s) => new Date(s.startedAt.S).getTime())
+    .sort((a, b) => a - b); // oldest first
+  if (startTimes.length < maxLaunches) return null;
+  // The launch that must age out to get back under the cap (handles maxLaunches > 1).
+  const target = startTimes[startTimes.length - maxLaunches];
+  return new Date(target + windowHours * 3600 * 1000).toISOString();
+}
+
 // ── Abuse guards keyed by client IP ─────────────────────────────────────────
 // The app forwards Cloudflare's CF-Connecting-IP; we store/count only a salted
 // HASH (never the raw IP) so this stays privacy-preserving while still catching

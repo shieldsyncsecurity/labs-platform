@@ -90,6 +90,24 @@ function fmt(total: number) {
   const s = total % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
+
+// Format the "next run unlocks" ISO time into the learner's LOCAL time + a rough
+// relative ("in about 6 h"). Returns null when there's no usable timestamp so the
+// caller can fall back to the generic wording.
+function fmtRetry(iso: string | null): { exact: string; rel: string } | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  const exact = new Date(t).toLocaleString(undefined, {
+    weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+  const mins = Math.max(0, Math.round((t - Date.now()) / 60000));
+  const rel =
+    mins < 60 ? `about ${mins} min` :
+    mins < 60 * 24 ? `about ${Math.round(mins / 60)} h` :
+    `about ${Math.round(mins / 60 / 24)} day${Math.round(mins / 60 / 24) === 1 ? "" : "s"}`;
+  return { exact, rel };
+}
 const card = "rounded-2xl border border-line bg-surface p-5";
 
 function LeasingCard({ onCancel }: { onCancel?: () => void }) {
@@ -170,6 +188,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [freePos, setFreePos] = useState(0); // place in line (1-based; 0 = unknown)
   const [freeWaiting, setFreeWaiting] = useState(0); // total people waiting
   const [limitReason, setLimitReason] = useState<string | null>(null); // which 429 cap
+  const [limitRetryAt, setLimitRetryAt] = useState<string | null>(null); // exact ISO time the next run frees up
   const expiryFired = useRef(false);
   const autoLaunched = useRef(false);
   const freeRetry = useRef(false);
@@ -288,6 +307,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         const d = await r.json().catch(() => ({}));
         setSession(null);
         setLimitReason(typeof d.error === "string" ? d.error : "LIMIT_REACHED");
+        setLimitRetryAt(typeof d.retryAt === "string" ? d.retryAt : null);
         setFlash("limitreached");
         return;
       }
@@ -576,9 +596,17 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
             ? "We saw a burst of launches from your network. Give it a couple of minutes, then try again."
             : limitReason === "FREE_IP_LIMIT"
             ? "The free lab is one run per person — and it's been used several times from your network already. Try again later, or unlock a paid lab for instant, unlimited access."
-            : lab?.free
-            ? `The free lab includes ${launchPolicy}. It resets on a rolling ${rule?.windowHours}-hour window — your next run frees up about ${rule?.windowHours}h after your last one.`
-            : `You've used all your launches for this lab (${launchPolicy}). It resets on a rolling ${rule?.windowHours}-hour window — check back a little later.`}
+            : (() => {
+                const retry = fmtRetry(limitRetryAt);
+                if (lab?.free) {
+                  return retry
+                    ? `The free lab is ${launchPolicy}. Your next run unlocks at ${retry.exact} (${retry.rel} from now).`
+                    : `The free lab includes ${launchPolicy}. It resets on a rolling ${rule?.windowHours}-hour window — your next run frees up about ${rule?.windowHours}h after your last one.`;
+                }
+                return retry
+                  ? `You've used all your launches for this lab (${launchPolicy}). Your next run unlocks at ${retry.exact} (${retry.rel} from now).`
+                  : `You've used all your launches for this lab (${launchPolicy}). It resets on a rolling ${rule?.windowHours}-hour window — check back a little later.`;
+              })()}
         </p>
         <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">OK</button>
       </div>
