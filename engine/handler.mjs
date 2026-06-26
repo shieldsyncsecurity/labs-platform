@@ -59,7 +59,7 @@ import {
   upsertUser,
   grantEntitlement,
   listEntitlements,
-  reap,
+  findExpiredSessions,
   rulesFor,
   launchCount,
   freeCapacity,
@@ -170,11 +170,21 @@ export async function handler(event) {
       // a CREATE_COMPLETE stack) and causing CREATE_FAILED collisions on next launch.
       metric({ ReapRun: 1 }); // cron heartbeat — alarm if this stops
       try {
-        const r = await reap();
-        metric({ Reaped: r.reaped.length });
+        // Identify expired sessions, then DISPATCH one async teardown worker each so
+        // the accounts recycle CONCURRENTLY (own Lambda container per account, own
+        // 15-min budget) instead of nuking serially in this single invocation. A
+        // wave of expiries now recovers the pool in ~1x nuke time, not Nx — and no
+        // single reap can time out mid-nuke and strand later accounts.
+        const { activeChecked, expired } = await findExpiredSessions();
+        for (const sessionId of expired) {
+          await invokeWorker("teardown", { sessionId }).catch((e) =>
+            console.error(`[reap] dispatch teardown ${sessionId} failed: ${e.message}`)
+          );
+        }
+        metric({ Reaped: expired.length });
         console.log(
-          `[worker] reap: checked ${r.activeChecked}, expired ${r.expired}, reaped ${r.reaped.length}` +
-            (r.reaped.length ? ` (${r.reaped.join(", ")})` : "")
+          `[worker] reap: checked ${activeChecked}, expired ${expired.length}, dispatched ${expired.length}` +
+            (expired.length ? ` (${expired.join(", ")})` : "")
         );
       } catch (e) {
         console.error(`[worker] reap failed: ${e.message}`);

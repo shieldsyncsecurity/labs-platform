@@ -975,10 +975,11 @@ export async function teardown(sessionId) {
 }
 
 /**
- * reap(): find active/leasing sessions whose expiresAt has passed and tear each
- * down. Run on a schedule (EventBridge in prod). Returns what it reaped.
+ * findExpiredSessions(): the identify-half of reap — active/leasing sessions whose
+ * expiresAt has passed. Split out so the prod handler can DISPATCH each teardown as
+ * its own async worker (parallel pool recovery) instead of nuking them serially.
  */
-export async function reap() {
+export async function findExpiredSessions() {
   const db = await ddb();
   const nowMs = Date.now();
   const scan = await db.send(
@@ -991,11 +992,21 @@ export async function reap() {
   );
   const active = scan.Items ?? [];
   const expired = active.filter((it) => new Date(it.expiresAt.S).getTime() < nowMs);
+  return { activeChecked: active.length, expired: expired.map((it) => it.sessionId.S) };
+}
 
+/**
+ * reap(): find expired sessions and tear each down SERIALLY in this invocation.
+ * Used by local dev (server.mjs) and as a fallback. In prod the handler instead
+ * dispatches one async teardown worker per expired session (see handler reap action)
+ * so N accounts recycle concurrently — a serial reap of 3 multi-minute nukes could
+ * also approach the Lambda timeout.
+ */
+export async function reap() {
+  const { activeChecked, expired } = await findExpiredSessions();
   const reaped = [];
-  for (const it of expired) {
-    const sid = it.sessionId.S;
-    console.log(`  reaping expired session ${sid} (expired ${it.expiresAt.S}) ...`);
+  for (const sid of expired) {
+    console.log(`  reaping expired session ${sid} ...`);
     try {
       await teardown(sid);
       reaped.push(sid);
@@ -1003,7 +1014,7 @@ export async function reap() {
       console.log(`  FAILED to reap ${sid}: ${e.message}`);
     }
   }
-  return { activeChecked: active.length, expired: expired.length, reaped };
+  return { activeChecked, expired: expired.length, reaped };
 }
 
 /**
