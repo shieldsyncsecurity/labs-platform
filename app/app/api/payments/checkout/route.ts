@@ -4,7 +4,8 @@ import { priceFor } from "@/lib/payments/pricing";
 import { getServerUser } from "@/lib/auth/session";
 import { getLab } from "@/lib/labs";
 import { rulesForLab, MONTHLY_ACCESS_DAYS } from "@/lib/access-rules";
-import type { CheckoutRequest } from "@/lib/payments/types";
+import { createOrder } from "@/lib/server/orders";
+import type { CheckoutRequest, Order } from "@/lib/payments/types";
 
 // Creates a server-side signed order. DISABLED until payments are live
 // (PAYMENTS_LIVE=1) and AUTH-ONLY — the userId is taken ONLY from the verified
@@ -42,8 +43,26 @@ export async function POST(req: Request) {
             rulesForLab(lab?.level ?? "Beginner", lab?.free ?? false).windowHours * 3600 * 1000
         ).toISOString();
 
-  // Embed all the grant-relevant data in the signed payload.
+  // Persist the order SERVER-SIDE — this record (not any client-supplied
+  // payload) is what the real-provider webhook validates the payment against
+  // (amount/currency match + idempotent created->paid). The provider echoes
+  // this orderId back in its event, and the grant uses the persisted user/plan.
   const orderId = "order_" + Math.random().toString(36).slice(2, 12);
+  const order: Order = {
+    id: orderId,
+    userId,
+    labSlug: body.labSlug ?? null,
+    plan: body.plan,
+    amountMinor,
+    currency,
+    status: "created",
+    createdAt: new Date().toISOString(),
+  };
+  await createOrder(order);
+
+  // The signed payload below is ONLY consumed by the dev simulator (mock-pay,
+  // 404 in prod). The production webhook ignores it entirely and re-derives the
+  // access window at fulfillment time from the persisted order.
   const payload = JSON.stringify({
     orderId,
     userId,

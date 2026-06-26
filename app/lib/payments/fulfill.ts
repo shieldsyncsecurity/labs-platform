@@ -1,10 +1,14 @@
 import { verify } from "./signature";
 import { grantEntitlement } from "@/lib/server/store";
 
-// The security-critical core, shared by the simulated gateway (mock-pay route)
-// and the real provider webhook route. Verifies the signed payload, then
-// idempotently grants the entitlement for the ORDER'S user (never a client-
-// claimed user — the order was created server-side at checkout).
+// DEV SIMULATOR ONLY — used solely by the mock-pay route (ALLOW_MOCK_PAY,
+// hard-404 in production). This verifies an INTERNALLY mock-signed payload, so
+// it is inherently replayable by anyone who can obtain that payload and MUST
+// NOT back the real-provider trust path. The production webhook
+// (app/api/payments/webhook) does NOT import this — it verifies the provider's
+// own signature (lib/payments/provider.ts) against a server-persisted order
+// (lib/server/orders.ts) with amount + idempotency checks. Do not re-wire the
+// webhook to this function.
 //
 // NOTE: Orders are embedded directly in the signed payload rather than stored
 // in a separate in-memory map. This avoids cross-Worker-instance state loss on

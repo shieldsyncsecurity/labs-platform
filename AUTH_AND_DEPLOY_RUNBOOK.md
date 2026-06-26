@@ -1,6 +1,6 @@
 # ShieldSync Labs — Auth & Deploy Runbook
 
-> Last updated: 2026-06-24. Living doc. No secret **values** live here on purpose —
+> Last updated: 2026-06-25. Living doc. No secret **values** live here on purpose —
 > only their names and where they're stored. Actual values: `app/.env.local`
 > (gitignored, local) and Cloudflare Worker secrets (prod).
 >
@@ -12,6 +12,16 @@
 > live-lab restore** landed; an **admin ratings readout** shipped; the engine IAM was
 > **narrowed**; `SESSION_SECRET` was **rotated**; the grader **false-pass** was fixed.
 > Two deploy gotchas were learned (CI-token account, ISP-DNS on Function URLs).
+>
+> **2026-06-25 — payment trust-path hardening (pre-go-live):** the payment-confirmation
+> path was re-architected so it can't be replayed into a self-grant. `/api/payments/checkout`
+> is auth-only (session sub, never `body.userId`); the real-provider `/api/payments/webhook`
+> now verifies the **provider** secret (`RAZORPAY_WEBHOOK_SECRET`), NOT the internal mock
+> secret, and grants only against a **server-persisted order** (amount/currency match +
+> idempotent `created->paid`). The old internally-signed, client-replayable fulfill path is
+> now dev-simulator-only. Verified by curl replay (a checkout/mock-signed payload -> 400,
+> never a grant). Still gated OFF in prod (`PAYMENTS_LIVE` unset) and needs the engine
+> `/orders` endpoints before go-live. See **section 6d**.
 
 This is the operational reference for the **ShieldSync Labs platform**
 (`labs.shieldsyncsecurity.com`) — the hands-on AWS security labs product. It covers
@@ -44,7 +54,8 @@ STALE — THIS file is the source of truth.**
 | Pool scaling past 5 accounts | BLOCKED | AWS org account cap = 5 (at limit); needs a Support quota increase (your action). See section 9 |
 | `SESSION_SECRET` rotation | DONE | rotated 2026-06-22 (wrangler secret put; sessions invalidated) |
 | `COGNITO_CLIENT_SECRET` rotation | PENDING | no in-place rotation -> needs a NEW app client + re-test (your action; not web-exposed -> lower urgency). See section 9 |
-| Real Razorpay | deferred | mock gateway off in prod; real blocked on GST (~1 mo). Paid tier not sellable until this + a live payment path |
+| Payment trust path (bypass fix) | HARDENED 2026-06-25 | checkout is auth-only; webhook verifies the **provider** secret (not the mock one) against a server-persisted order w/ amount + idempotency checks; old replayable fulfill path is dev-sim-only. Still gated OFF (`PAYMENTS_LIVE` unset). See 6d |
+| Real Razorpay | deferred | mock gateway off in prod; real blocked on GST (~1 mo). Paid tier not sellable until this + a live payment path + engine `/orders` endpoints (see 6d) |
 
 **Lab catalogue = exactly 2 labs, both live + graded: `s3-misconfiguration-audit`
 (free, Beginner) + `iam-privilege-escalation` (paid, Intermediate).** The 4 not-ready
@@ -244,6 +255,17 @@ printf '%s' '<value>' | npx wrangler secret put SESSION_SECRET    # via Bash too
 `https://lewssnjjhi.execute-api.us-east-1.amazonaws.com` (NOT a Lambda Function URL —
 see the ISP-DNS gotcha in section 4).
 
+**Payments (ALL UNSET in prod until go-live — the flow is dormant):** documented in
+`app/.env.example`. See section 6d for the trust model.
+- `PAYMENTS_LIVE` (non-secret) — master switch. Unset -> `/checkout` 503 + `/webhook` 404.
+- `RAZORPAY_WEBHOOK_SECRET` (**secret**) — the REAL provider webhook secret; the webhook
+  verifies `X-Razorpay-Signature` with this. Required (>=16 chars) before `PAYMENTS_LIVE=1`;
+  if unset the webhook fails closed and grants nothing.
+- `MOCK_PAYMENT_SECRET` (**secret**) — signs dev-simulator order tokens ONLY (mock-pay).
+  NOT a provider secret; deliberately never shared with the webhook trust path.
+- `ALLOW_MOCK_PAY` (non-secret) — dev/preview only; enables the simulated gateway
+  (`/api/payments/mock-pay`). MUST stay unset in prod (it's a "mark this paid" button).
+
 **DynamoDB tables (acct 750294427884, all PAY_PER_REQUEST):**
 `ShieldSyncLabAccounts`, `ShieldSyncLabSessions`, `ShieldSyncLabUsers`,
 `ShieldSyncLabEntitlements`, `ShieldSyncLabRatings`,
@@ -318,6 +340,55 @@ see the ISP-DNS gotcha in section 4).
   `load-test-waitroom.mjs` (seed pool -> assert 503/queue, auto-cleanup),
   `demo-waitroom.mjs` (fill/free/clean for live wait-room demos),
   `create-queue-table.mjs` (one-shot table create + TTL).
+
+---
+
+## 6d. Payment trust model (bypass fix, 2026-06-25)
+
+**Why:** a security review found a latent payment-bypass chain. It was already dormant
+in prod (checkout auth + `PAYMENTS_LIVE` gating were in place), but the moment
+`PAYMENTS_LIVE=1` were set for go-live it would have re-opened: the webhook fulfilled
+from a **self-describing, client-replayable payload** that was signed with the SAME
+`MOCK_PAYMENT_SECRET` used to sign checkout tokens — so anyone could replay a checkout
+response into the webhook and self-grant all-access. Re-architected so that's impossible
+by construction.
+
+**The trust path now (do NOT weaken):**
+1. **`/api/payments/checkout`** (`app/app/api/payments/checkout/route.ts`) — auth-only
+   (`getServerUser()`; uses the session sub, never `body.userId`), gated by `PAYMENTS_LIVE`.
+   Persists a **server-side order** (`status:"created"`) via `lib/server/orders.ts`. The
+   signed payload it still returns is consumed ONLY by the dev simulator (mock-pay).
+2. **`/api/payments/webhook`** (the real-provider path) verifies the **provider** secret
+   `RAZORPAY_WEBHOOK_SECRET` over the raw body via `lib/payments/provider.ts` —
+   **never** `MOCK_PAYMENT_SECRET`. A checkout/mock-signed payload therefore can't validate
+   (wrong secret + wrong event shape). It then validates against the persisted order
+   (amount + currency must match) and grants only on an **idempotent `created->paid`
+   transition**, so a replayed delivery can't double-grant. Fails CLOSED at every step.
+3. **`lib/payments/fulfill.ts`** (the old internally-signed verify+fulfill) is now
+   **dev-simulator-only** — used solely by `mock-pay` (404 in prod). It must never back the
+   real webhook again.
+
+**Files:** new `lib/payments/provider.ts` (real-secret verify), new `lib/server/orders.ts`
+(order store), rewritten `webhook/route.ts`, `checkout/route.ts` (persists order),
+`fulfill.ts` (scoped to dev), `.env.example` (payment vars).
+
+**⚠️ Engine prerequisite before `PAYMENTS_LIVE=1` (NOT yet built — separate engine deploy):**
+the order store calls engine endpoints that don't exist yet. Add to `engine/handler.mjs`
+(behind the `x-engine-token` guard, DynamoDB-backed like `/entitlements`):
+- `POST /orders` — persist `{id,userId,labSlug,plan,amountMinor,currency,status:"created",createdAt}`
+- `GET /orders?orderId=` — return `{order}`
+- `POST /orders/paid` — atomic CAS `created->paid` (idempotent), returns `{transitioned:boolean}`
+
+Until these land, `getOrder()` returns null and the webhook rejects `"unknown order"` —
+safe (no grant), but real fulfillment won't work, which is fine while payments are off.
+A new DynamoDB table (e.g. `ShieldSyncLabOrders`, TTL ~90d) is needed for them.
+
+**Verified (curl replay, dev, `PAYMENTS_LIVE=1`):**
+- unauthenticated checkout `{plan:monthly,userId:attacker}` -> **401** (can't even mint a token)
+- replay a mock-secret-signed checkout payload to the webhook -> **400 `invalid signature`**
+  (with `RAZORPAY_WEBHOOK_SECRET` both unset AND set — the mock secret can't forge it)
+- a correctly provider-signed event with no matching order -> **400 `unknown order`** (fails closed)
+- tampered provider signature -> **400 `invalid signature`**
 
 ---
 
@@ -401,7 +472,12 @@ Engine logs: CloudWatch `/aws/lambda/ShieldSyncEngine` (assume into 750 first).
 - **Razorpay / paid tier (deferred, ~1 mo, blocked on GST):** mock-pay is OFF in prod,
   so **only the free lab is a working purchasable product right now**. Paid labs need a
   live payment path before they're sellable. The wait-room "skip the line" upsell is
-  intentionally not wired until then (it would dead-end).
+  intentionally not wired until then (it would dead-end). The webhook **trust model is
+  already hardened** (section 6d) — but before `PAYMENTS_LIVE=1`, three things must land:
+  (1) the engine `/orders` endpoints + `ShieldSyncLabOrders` table (6d), (2) a real Razorpay
+  account + `RAZORPAY_WEBHOOK_SECRET` set as a Worker secret, (3) a real Razorpay adapter in
+  `lib/payments/provider.ts` (the current parser targets the Razorpay event shape but is
+  untested against live events). Do NOT set `PAYMENTS_LIVE=1` until all three are done.
 - **Cognito Google attribute mapping is mis-wired but INERT — do NOT "fix" casually:**
   `family_name <- given_name`, `given_name`/`email_verified` unmapped. It's load-bearing
   (keeps the required `family_name` populated for federated creation, which happens
