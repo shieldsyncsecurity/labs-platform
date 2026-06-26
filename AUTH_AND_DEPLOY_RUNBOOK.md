@@ -270,7 +270,8 @@ see the ISP-DNS gotcha in section 4).
 `ShieldSyncLabAccounts`, `ShieldSyncLabSessions`, `ShieldSyncLabUsers`,
 `ShieldSyncLabEntitlements`, `ShieldSyncLabRatings`,
 `ShieldSyncLabUserLocks` (H3 per-user launch lock, TTL on `ttl`),
-`ShieldSyncLabQueue` (wait-room place-in-line, TTL on `ttl`).
+`ShieldSyncLabQueue` (wait-room place-in-line, TTL on `ttl`),
+`ShieldSyncLabOrders` (payment orders, pk `orderId`, TTL on `ttl` ~90d — §6d).
 **EventBridge crons (acct 750):** `ShieldSyncReaper` (`rate(3 min)`->reap),
 `ShieldSyncWarmer` (`rate(10 min)`->warm).
 
@@ -372,16 +373,20 @@ by construction.
 (order store), rewritten `webhook/route.ts`, `checkout/route.ts` (persists order),
 `fulfill.ts` (scoped to dev), `.env.example` (payment vars).
 
-**⚠️ Engine prerequisite before `PAYMENTS_LIVE=1` (NOT yet built — separate engine deploy):**
-the order store calls engine endpoints that don't exist yet. Add to `engine/handler.mjs`
-(behind the `x-engine-token` guard, DynamoDB-backed like `/entitlements`):
-- `POST /orders` — persist `{id,userId,labSlug,plan,amountMinor,currency,status:"created",createdAt}`
-- `GET /orders?orderId=` — return `{order}`
-- `POST /orders/paid` — atomic CAS `created->paid` (idempotent), returns `{transitioned:boolean}`
+**✅ Engine order store — BUILT + DEPLOYED + VERIFIED (2026-06-25, commit `8dd205a`):**
+the three token-guarded routes the order store calls now exist in `engine/handler.mjs`
+(+ `createOrder`/`getOrder`/`markOrderPaid` in `labinfra.mjs`), backed by the new
+**`ShieldSyncLabOrders`** table (pk `orderId`, 90-day TTL; IAM policy grants it):
+- `POST /orders` — persist the order (status forced `"created"`; won't overwrite a PAID one)
+- `GET /orders?orderId=` — return `{order}` (null if absent → webhook fails closed)
+- `POST /orders/paid` — atomic conditional `created->paid` CAS → `{transitioned}` (true only
+  for the call that flipped it, so out of N webhook retries exactly one grants)
 
-Until these land, `getOrder()` returns null and the webhook rejects `"unknown order"` —
-safe (no grant), but real fulfillment won't work, which is fine while payments are off.
-A new DynamoDB table (e.g. `ShieldSyncLabOrders`, TTL ~90d) is needed for them.
+Verified live 6/6: create→get(created)→paid(true)→replay(false)→paid keeps the 1st
+paymentId→unknown order returns null. **Remaining before `PAYMENTS_LIVE=1` is now ONLY
+config/provider:** a real Razorpay/Paytm account + `RAZORPAY_WEBHOOK_SECRET` Worker secret
++ the real provider adapter in `lib/payments/provider.ts` (untested vs live events). The
+whole server-side trust path is code-complete.
 
 **Verified (curl replay, dev, `PAYMENTS_LIVE=1`):**
 - unauthenticated checkout `{plan:monthly,userId:attacker}` -> **401** (can't even mint a token)
