@@ -763,9 +763,22 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
           {grade && (grade.gradable ? (
             <div className="mt-3">
               <p className={`text-sm font-bold ${grade.passed ? "text-[#15803d]" : "text-ink"}`}>
+                {(() => {
+                  const done = grade.criteria.filter((c) => c.passed && !c.unknown).length;
+                  const total = grade.criteria.length;
+                  return grade.passed
+                    ? "🎉 All fixes verified — nicely done!"
+                    : done === 0
+                    ? "No fixes done yet"
+                    : `${done} of ${total} fixes verified — ${total - done} to go`;
+                })()}
+              </p>
+              <p className="mt-1 text-xs text-muted">
                 {grade.passed
-                  ? "🎉 All checks passed — nicely done!"
-                  : `${grade.criteria.filter((c) => c.passed && !c.unknown).length}/${grade.criteria.length} checks passing — keep going`}
+                  ? "Your live account now meets every objective in this lab."
+                  : grade.criteria.filter((c) => c.passed && !c.unknown).length === 0
+                  ? "Open the AWS console above and work through the guide, then check again. ✅ = verified done · ⬜ = still to do."
+                  : "✅ = verified done · ⬜ = still to do. Finish the ⬜ items in the console, then re-check."}
               </p>
               {grade.criteria.some((c) => c.unknown) && (
                 <p className="mt-1 text-xs text-[#92400e]">⚠ Some checks couldn&apos;t run (a temporary AWS hiccup) — click “Check my work” again.</p>

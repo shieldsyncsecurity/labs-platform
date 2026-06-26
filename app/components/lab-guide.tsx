@@ -1,19 +1,114 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth/context";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+type Track = "console" | "cli";
+type Segment = { kind: "common" | Track; text: string };
+
+/**
+ * Split the guide into common prose + per-track (Console / CLI) blocks so the
+ * learner can pick ONE style instead of wading through both stacked inline.
+ * A track block runs from its 🖱️/⌨️ marker line until the next marker, the next
+ * heading ("## …"), or a "---" rule. Fenced code is respected so a "#" or emoji
+ * inside a ``` block is never treated as a delimiter.
+ */
+function splitTracks(md: string): Segment[] {
+  const lines = md.split("\n");
+  const segs: Segment[] = [];
+  let cur: Segment = { kind: "common", text: "" };
+  let inFence = false;
+  const push = () => {
+    const text = cur.text.replace(/\n+$/, "");
+    if (text.trim()) segs.push({ kind: cur.kind, text });
+  };
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) inFence = !inFence;
+    if (!inFence) {
+      const isConsole = /^🖱️/.test(line);
+      const isCli = /^⌨️/.test(line);
+      const isBreak = /^#{1,6}\s/.test(line) || /^---\s*$/.test(line);
+      if (isConsole || isCli) {
+        push();
+        cur = { kind: isConsole ? "console" : "cli", text: line + "\n" };
+        continue;
+      }
+      if (isBreak && cur.kind !== "common") {
+        push();
+        cur = { kind: "common", text: line + "\n" };
+        continue;
+      }
+    }
+    cur.text += line + "\n";
+  }
+  push();
+  return segs;
+}
+
+function TrackToggle({ track, onPick }: { track: Track; onPick: (t: Track) => void }) {
+  const seg = (active: boolean) =>
+    `rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+      active ? "bg-brand text-white shadow-sm" : "text-ink-soft hover:bg-surface"
+    }`;
+  return (
+    <div
+      className="mb-6 flex items-center gap-1 rounded-xl border border-line bg-canvas p-1"
+      role="tablist"
+      aria-label="Instruction style"
+    >
+      <button role="tab" aria-selected={track === "console"} onClick={() => onPick("console")} className={seg(track === "console")}>
+        🖱️ Console
+      </button>
+      <button role="tab" aria-selected={track === "cli"} onClick={() => onPick("cli")} className={seg(track === "cli")}>
+        ⌨️ CLI
+      </button>
+      <span className="ml-auto pr-2 text-xs text-muted">Pick your style — switch anytime</span>
+    </div>
+  );
+}
+
 export function LabGuide({ slug, instructions }: { slug: string; instructions: string }) {
   const { user, hasAccess, loading } = useAuth();
+  const [track, setTrack] = useState<Track>("console"); // default to point-and-click (beginner-friendly)
+
+  useEffect(() => {
+    try {
+      const t = localStorage.getItem("ss-lab-track");
+      if (t === "cli" || t === "console") setTrack(t);
+    } catch {}
+  }, []);
+  const pick = (t: Track) => {
+    setTrack(t);
+    try { localStorage.setItem("ss-lab-track", t); } catch {}
+  };
 
   // Free labs and already-paid users get immediate access.
   // hasAccess() returns true for free labs without needing entitlements.
   if (hasAccess(slug)) {
+    const segs = splitTracks(instructions);
+    const hasTracks = segs.some((s) => s.kind !== "common");
     return (
       <article className="lab-md rounded-2xl border border-line bg-surface p-6 sm:p-7">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{instructions}</ReactMarkdown>
+        {hasTracks && <TrackToggle track={track} onPick={pick} />}
+        {segs.map((s, i) => {
+          if (s.kind === "common") {
+            return (
+              <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
+                {s.text}
+              </ReactMarkdown>
+            );
+          }
+          if (s.kind !== track) return null;
+          // Visually group the chosen method block so steps stay scannable.
+          return (
+            <div key={i} className="ss-track">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.text}</ReactMarkdown>
+            </div>
+          );
+        })}
       </article>
     );
   }

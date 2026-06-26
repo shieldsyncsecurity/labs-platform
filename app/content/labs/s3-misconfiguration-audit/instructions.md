@@ -13,11 +13,11 @@ You've got two things side by side:
 
 > ⚠️ **AWS allows only one console session per browser.** If you're already signed into your *own* AWS account, the lab tab will say *"you must log out first."* Two easy fixes: open the lab console in an **incognito / private window** (use the **Copy URL for incognito** button next to the console link), or sign out of your own AWS first. This trips up almost everyone once — it's not you.
 
-**There are two ways to do every fix below — pick whichever you prefer:**
-- 🖱️ **Console (point-and-click)** — do it in the AWS web UI. Best if you're newer to AWS.
-- ⌨️ **CLI** — run commands in **CloudShell** (the `>_` terminal icon in the AWS console's top bar — no setup, already signed in as you). Faster once you're comfortable.
+**There are two ways to do every fix below — pick your style with the `🖱️ Console / ⌨️ CLI` switch at the top of this guide, and switch anytime:**
+- **🖱️ Console** — point-and-click in the AWS web UI. Best if you're newer to AWS.
+- **⌨️ CLI** — run commands in **CloudShell** (the `>_` terminal icon in the AWS console's top bar — no setup, already signed in as you). Faster once you're comfortable.
 
-When you've made the fixes, come back here and click **Check my work** — it inspects your *live* account and shows, per objective, what passed.
+When you've made the fixes, come back here and click **Check my work** — it inspects your *live* account and shows, per objective, what's done and what's left.
 
 ## Scenario
 

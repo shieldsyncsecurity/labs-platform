@@ -151,6 +151,17 @@ a {
   margin: 20px 0;
 }
 
+/* Per-method (Console / CLI) block in a lab guide — a light accent rail so the
+   chosen track reads as one grouped unit instead of run-on prose. */
+.lab-md .ss-track {
+  border-left: 3px solid var(--color-line-strong);
+  padding-left: 14px;
+  margin: 12px 0 16px;
+}
+.lab-md .ss-track > p:first-child {
+  margin-top: 4px;
+}
+
 /* Scanning indeterminate progress bar (lab build / wipe states) */
 @keyframes ss-scan {
   0%   { left: -38%; }
