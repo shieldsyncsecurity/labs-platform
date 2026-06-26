@@ -305,7 +305,8 @@ export async function handler(event) {
       // can't starve paying users — paid launches skip this and use the rest.
       if (rules.free) {
         // Multi-account guard: cap FREE launches per network (defeats "many Google
-        // accounts, one IP" farming of the per-user 1/48h free cap).
+        // accounts, one IP" farming of the per-user 1/24h free cap). The IP window
+        // stays 48h (broader abuse net) even though the per-user cooldown is 24h.
         if (ipHash && (await freeIpCount(ipHash, 48)) >= 3) {
           await releaseUserLock(uid);
           metric({ Launch: 1 }, { Outcome: "freeip" });

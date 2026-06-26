@@ -55,9 +55,10 @@ const LEVEL_RULES = {
   Advanced: { sessionMinutes: 120, maxLaunches: 2, windowHours: 48 },
 };
 
-// The FREE lab is a lead magnet: ONE run per user / 48h (tighter than paid
-// Beginner's 3/72h). Session length stays Beginner's 30 min.
-const FREE_RULE = { sessionMinutes: 30, maxLaunches: 1, windowHours: 48 };
+// The FREE lab is a lead magnet: ONE run per user / 24h. Pre-launch we optimize
+// for a great first try (a 30-min beginner lab is easy to run out of, so "come
+// back tomorrow" beats "in two days"); tighten via FREE_POOL_PCT once paid is live.
+const FREE_RULE = { sessionMinutes: 30, maxLaunches: 1, windowHours: 24 };
 
 // Whitelist for lab slugs to block path traversal — labSlug is interpolated into
 // fs paths (lab.json, template.yaml) and a CFN stack name, so it must be safe.

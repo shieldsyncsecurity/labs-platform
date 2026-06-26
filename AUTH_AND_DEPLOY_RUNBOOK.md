@@ -49,7 +49,7 @@ STALE — THIS file is the source of truth.**
 | Admin ratings readout | LIVE | server-gated `/admin/ratings` (admins = `ADMIN_USER_IDS` Cognito subs) -> engine `/ratings/summary` aggregates `ShieldSyncLabRatings` per lab |
 | Lab account pool | CLEAN | 3 sandboxes `available`. `FREE_POOL_PCT = 1.0` (INTERIM — free can use the whole pool until paid launches; revert to ~0.3 then) -> 3 concurrent free |
 | Lab launch / teardown | VERIFIED | warm hit -> instant; cold ~72s; teardown = aws-nuke -> `available`. Teardown-during-cold-deploy race fixed (conditional `status=leasing` write) |
-| Access rules (session length + launch caps) | LIVE | per-tier; free = 1 launch / 48h, surfaced in the UI (idle chip + limit msg + marketing lab page). See section 6b |
+| Access rules (session length + launch caps) | LIVE | per-tier; free = 1 launch / **24h** (was 48h — loosened 2026-06-25 for a better first try), surfaced in the UI (idle chip + limit msg + marketing lab page). See section 6b |
 | Auto-grader ("Check my work") | LIVE | scores a live lab vs `successCriteria`; false-pass fixed (only expected-absence errors count clean; transient AWS errors -> `unknown`, never pass) |
 | Pool scaling past 5 accounts | BLOCKED | AWS org account cap = 5 (at limit); needs a Support quota increase (your action). See section 9 |
 | `SESSION_SECRET` rotation | DONE | rotated 2026-06-22 (wrangler secret put; sessions invalidated) |
@@ -287,7 +287,7 @@ see the ISP-DNS gotcha in section 4).
 
 | Tier | Session length | Launches | Window |
 |---|---|---|---|
-| **Free lab** (`free:true`, `s3`) | 30 min | **1x** | 48 h |
+| **Free lab** (`free:true`, `s3`) | 30 min | **1x** | 24 h |
 | **Beginner** (paid) | 30 min | 3x | 72 h |
 | **Intermediate** (`iam`) | 60 min | 2x | 48 h |
 | **Advanced** | 120 min | 2x | 48 h |
@@ -296,15 +296,16 @@ see the ISP-DNS gotcha in section 4).
 - **Launch limit** = rolling count of a user's runs for that lab (`launchCount()`),
   excluding failed deploys. Over the cap -> engine **429 `LIMIT_REACHED`**. Reconnecting
   to an *active* session doesn't count. **The cap is surfaced in the UI** so it's not a
-  surprise: LabPanel idle chip ("Free lab - 1 launch every 48h") + the limit-reached
-  message (rolling-window wording) + the marketing lab hero chip ("Free - 1 launch / 48h").
+  surprise: LabPanel idle chip ("Free lab - 1 launch every 24h") + the limit-reached
+  message (rolling-window wording) + the marketing lab hero chip ("Free - 1 launch / 24h").
+  (All UI copy is DATA-DRIVEN off the rule, so changing windowHours updates it everywhere.)
 - **Free-pool cap** (`FREE_POOL_PCT` in labinfra): free labs may occupy at most this
   share of the pool at once; over it -> **503 `FREE_AT_CAPACITY`**. **Currently 1.0
   (INTERIM)** — paid isn't live, so free uses the whole pool (3 accts -> 3 concurrent
   free). **Revert to ~0.3 once paid launches** so a free rush can't starve payers.
 - **Reset dev counter for testing:** `node engine/try-reset-rate.mjs <slug> <hours>`
   flips already-ended sessions to `status=error` so they stop counting (safe: never
-  touches live sessions). Needed because the free cap (1/48h) trips fast during testing.
+  touches live sessions). Needed because the free cap (1/24h) trips fast during testing.
 
 ---
 
@@ -451,7 +452,7 @@ What broke and how it was fixed, in order:
 | Login works but no row in `ShieldSyncLabUsers` | Fire-and-forget `fetch` cancelled on Workers | Wrap the side-effect in `after()` |
 | Lab launch -> `CREATE_FAILED` repeatedly | Account `available` in DDB but holds a stale stack | Nuke the stale stacks, reconcile DDB, run the reaper. Template is NOT the problem |
 | Launch session -> `error`, log `ENOENT .../labs/<slug>/template.yaml` | `deploy.ps1` packaged templates under mangled paths | Fix rel-path calc, redeploy, verify `engine.zip` entries |
-| "You've used all your launches" during testing | Free cap = 1 launch / 48h hit | `node engine/try-reset-rate.mjs s3-misconfiguration-audit 72` (flips ended sessions to error) |
+| "You've used all your launches" during testing | Free cap = 1 launch / 24h hit | `node engine/try-reset-rate.mjs s3-misconfiguration-audit 72` (flips ended sessions to error) |
 | Launch reconnects instead of showing the wait-room | The user already has a live session for that lab (the already-active check runs before the capacity gate) | End the live lab first; or it's working as designed |
 
 Read live Worker logs: `npx wrangler tail --format pretty` (from `app/`).
