@@ -2,8 +2,22 @@
 
 **Level:** Beginner · **Free lab** · **~30 min** · Region: us-east-1
 
-> You're working in your own throwaway AWS account. You have console + CloudShell
-> access. Everything here is auto-destroyed when your session ends — experiment freely.
+## Before you start — your workspace (30-second read)
+
+You've got two things side by side:
+
+- **This guide** — the scenario, the steps, and the **Check my work** button (right-hand panel).
+- **A real, throwaway AWS account** — yours for this session, wiped clean when you finish. Nothing here can cost money or touch anything real, so click around freely.
+
+**To open your AWS account:** click **Open AWS console** (top of the right panel). It opens the real AWS Console in a **new browser tab**.
+
+> ⚠️ **AWS allows only one console session per browser.** If you're already signed into your *own* AWS account, the lab tab will say *"you must log out first."* Two easy fixes: open the lab console in an **incognito / private window** (use the **Copy URL for incognito** button next to the console link), or sign out of your own AWS first. This trips up almost everyone once — it's not you.
+
+**There are two ways to do every fix below — pick whichever you prefer:**
+- 🖱️ **Console (point-and-click)** — do it in the AWS web UI. Best if you're newer to AWS.
+- ⌨️ **CLI** — run commands in **CloudShell** (the `>_` terminal icon in the AWS console's top bar — no setup, already signed in as you). Faster once you're comfortable.
+
+When you've made the fixes, come back here and click **Check my work** — it inspects your *live* account and shows, per objective, what passed.
 
 ## Scenario
 
@@ -32,16 +46,19 @@ The Session Engine has filled in your environment's real names:
 
 ## Step 1 — Recon: prove the exposure
 
-```bash
-# List your lab buckets
-aws s3api list-buckets --query "Buckets[?starts_with(Name,'sslab-')].Name"
+First, see what's exposed.
 
-# Which are public? (run for each bucket)
+🖱️ **Console:** open the **S3** service. You'll see buckets named `sslab-data-…` and `sslab-assets-…`. Click the **data** bucket → **Permissions** tab → notice **"Block public access" = Off** and a **Bucket policy** that grants public read. Then the **assets** bucket → **Permissions** → its **Object Ownership / ACL** grants access to **"Everyone (public access)."** In the bucket list, AWS even flags both as **"Publicly accessible."**
+
+⌨️ **CLI (CloudShell):**
+
+```bash
+aws s3api list-buckets --query "Buckets[?starts_with(Name,'sslab-')].Name"
 aws s3api get-bucket-policy-status --bucket <data-bucket>      # -> IsPublic: true
 aws s3api get-bucket-acl          --bucket <assets-bucket>     # -> a grant to AllUsers
 ```
 
-Confirm anonymous read actually works (no credentials):
+Prove anonymous read actually works — no credentials needed:
 
 ```bash
 curl -s "https://<data-bucket>.s3.amazonaws.com/customers.csv"   # you'll see the fake data
@@ -49,8 +66,16 @@ curl -s "https://<data-bucket>.s3.amazonaws.com/customers.csv"   # you'll see th
 
 ## Step 2 — Shut the public access
 
-Belt **and** braces — turn on Block Public Access at the **account** level (catches
+Belt **and** braces: turn on **Block Public Access** at the **account** level (catches
 future mistakes too) and the **bucket** level, then remove the actual public grants.
+
+🖱️ **Console:**
+1. **Account-wide guardrail:** S3 console → left nav → **"Block Public Access settings for this account"** → **Edit** → tick **all four** boxes → **Save** (type `confirm`).
+2. **Data bucket — remove the public policy:** S3 → the **data** bucket → **Permissions** → **Bucket policy** → **Delete**.
+3. **Assets bucket — kill the public ACL:** S3 → the **assets** bucket → **Permissions** → **Object Ownership** → **Edit** → choose **"ACLs disabled (Bucket owner enforced)"** → **Save**.
+4. **Per-bucket Block Public Access (do BOTH buckets):** each bucket → **Permissions** → **Block public access (bucket settings)** → **Edit** → tick **all four** → **Save**.
+
+⌨️ **CLI:**
 
 ```bash
 ACCT=$(aws sts get-caller-identity --query Account --output text)
@@ -71,19 +96,23 @@ aws s3api put-public-access-block --bucket <bucket> \
   --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 ```
 
-Re-run the `curl` from Step 1 — it should now be **AccessDenied**.
+Re-run the `curl` from Step 1 — it should now be **AccessDenied**. ✅
 
 ## Step 3 — Require encryption at rest
 
-Turn on default encryption **and** add a bucket policy that *rejects* any
-unencrypted upload (the grader looks for the explicit deny):
+Turn on default encryption **and** add a bucket policy that *rejects* any unencrypted
+upload (the grader looks for the explicit **Deny**).
+
+🖱️ **Console:** each bucket → **Properties** tab → **Default encryption** → **Edit** → **Server-side encryption with Amazon S3 managed keys (SSE-S3)** → **Save**. (The "reject unencrypted uploads" **Deny** goes in the bucket policy you'll set in Step 4.)
+
+⌨️ **CLI:**
 
 ```bash
 aws s3api put-bucket-encryption --bucket <bucket> \
   --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
 ```
 
-Add this statement to each bucket's policy (Step 4 shows the combined policy):
+The Deny statement (included in Step 4's combined policy):
 
 ```json
 { "Sid":"DenyUnEncryptedPuts","Effect":"Deny","Principal":"*",
@@ -93,8 +122,15 @@ Add this statement to each bucket's policy (Step 4 shows the combined policy):
 
 ## Step 4 — Require TLS (HTTPS) — and apply the combined policy
 
-A single hardened bucket policy can carry both the encryption and TLS denies.
-Save as `secure-policy.json` (substitute the bucket name), then apply to **each** bucket:
+One hardened bucket policy carries **both** the encryption-required and TLS-only denies.
+
+🖱️ **Console:** each bucket → **Permissions** → **Bucket policy** → **Edit** → paste the JSON below (replace every `<bucket>` with that bucket's name) → **Save changes**.
+
+⌨️ **CLI:** save it as `secure-policy.json`, then apply to **each** bucket:
+
+```bash
+aws s3api put-bucket-policy --bucket <bucket> --policy file://secure-policy.json
+```
 
 ```json
 { "Version":"2012-10-17","Statement":[
@@ -107,13 +143,13 @@ Save as `secure-policy.json` (substitute the bucket name), then apply to **each*
 ]}
 ```
 
-```bash
-aws s3api put-bucket-policy --bucket <bucket> --policy file://secure-policy.json
-```
-
 ## Step 5 — Least-privilege the IAM user
 
 `auditor` should only read the two lab buckets — not `s3:*` on everything.
+
+🖱️ **Console:** open the **IAM** service → **Users** → **auditor** → **Permissions** tab. Find the inline policy named **`s3-full-access-everywhere`** → expand it → **Remove**. Then **Add permissions** → **Create inline policy** → **JSON** tab → paste the scoped policy below → **Next** → name it `s3-read-lab-buckets` → **Create policy**.
+
+⌨️ **CLI:**
 
 ```bash
 # Remove the over-broad inline policy
@@ -135,7 +171,15 @@ aws iam put-user-policy --user-name auditor --policy-name s3-read-lab-buckets \
 
 ---
 
-## Verify you passed
+## Check your work
+
+Click **Check my work** in the right-hand panel — it inspects your **live** account
+against the four objectives and shows ✅ / ⬜ per item. If something's still ⬜, the
+matching step above tells you what's left open. (Prefer to spot-check yourself?)
+
+🖱️ **Console:** each bucket's list row should now read **"Not public"**; IAM → auditor shows only the scoped `s3-read-lab-buckets` policy.
+
+⌨️ **CLI:**
 
 ```bash
 aws s3api get-bucket-policy-status --bucket <bucket>          # IsPublic: false (both)
@@ -145,8 +189,8 @@ aws iam get-user-policy --user-name auditor --policy-name s3-read-lab-buckets   
 
 ## Hints
 
-- `get-bucket-policy-status` is the fastest "is it public?" check.
-- Account-level Block Public Access overrides any bucket that tries to be public — it's your strongest single control.
+- The bucket list's **"Publicly accessible"** flag (and `get-bucket-policy-status`) is the fastest "is it public?" check.
+- **Account-level** Block Public Access overrides any bucket that tries to be public — it's your strongest single control.
 - Default encryption ≠ *required* encryption. Only the `Deny` policy forces callers to ask for it.
 - Scope IAM to the buckets, not to `*` — wildcards are how one leaked key becomes a full breach.
 
