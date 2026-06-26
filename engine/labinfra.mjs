@@ -23,7 +23,7 @@ import {
   waitUntilStackCreateComplete,
 } from "@aws-sdk/client-cloudformation";
 import { IAMClient, PutRolePolicyCommand } from "@aws-sdk/client-iam";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -230,9 +230,13 @@ async function ddb() {
 }
 
 function rid(n = 10) {
+  // CSPRNG-backed (was Math.random) — used for session/order ids. Ownership is
+  // enforced separately so this isn't an access control, but predictable session
+  // ids are poor practice (audit L1).
   const a = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const bytes = randomBytes(n);
   let s = "";
-  for (let i = 0; i < n; i++) s += a[Math.floor(Math.random() * a.length)];
+  for (let i = 0; i < n; i++) s += a[bytes[i] % a.length];
   return s;
 }
 
@@ -358,7 +362,12 @@ export async function launchCount(userId, labSlug, windowHours) {
 
 export function hashIp(ip) {
   if (!ip) return null;
-  return createHash("sha256").update("shieldsync:" + String(ip)).digest("hex").slice(0, 32);
+  // Salt with a per-deployment SECRET (the engine shared secret, which lives only
+  // in the Lambda env — not in source) so the hash isn't brute-forceable from the
+  // code over the small IPv4 space (audit L2). Falls back to a constant in local
+  // dev. Changing the salt just resets the rolling per-IP counters once.
+  const salt = process.env.ENGINE_SHARED_SECRET || "shieldsync-dev";
+  return createHash("sha256").update(salt + ":" + String(ip)).digest("hex").slice(0, 32);
 }
 
 async function sessionsForIp(ipHash) {
