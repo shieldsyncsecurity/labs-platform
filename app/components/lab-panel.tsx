@@ -71,6 +71,17 @@ function useStaggeredLog(log: typeof BUILD_LOG) {
   return shown;
 }
 
+// Seconds since mount — used to reassure during a cold build (which can run
+// ~90s–2min) so the wait never reads as "stuck".
+function useElapsed() {
+  const [s, setS] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setS((v) => v + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return s;
+}
+
 type Objective = { id: string; description: string };
 type Session = { status: string; expiresAt?: string | null; accountId?: string; error?: string };
 
@@ -83,19 +94,32 @@ const card = "rounded-2xl border border-line bg-surface p-5";
 
 function LeasingCard({ onCancel }: { onCancel?: () => void }) {
   const shown = useStaggeredLog(BUILD_LOG);
+  const elapsed = useElapsed();
+  // Reassurance escalates with elapsed time so a slow cold build (a fresh AWS
+  // account + CloudFormation can take 1–2 min) never looks frozen.
+  const reassure =
+    elapsed < 20
+      ? "us-east-1 · isolated AWS account · you can leave this tab — it'll be ready when you're back."
+      : elapsed < 70
+      ? "We're spinning up a brand-new, isolated AWS account just for you — a cold build usually takes 1–2 minutes. This is normal, hang tight."
+      : "Still working — some builds take a little longer than others. We haven't lost you; feel free to leave this tab and come back.";
   return (
     <div className={card} role="status" aria-live="polite">
-      <div className="flex items-center gap-2.5">
-        <span className="h-2 w-2 flex-none rounded-full bg-brand animate-pulse" />
-        <span className="text-sm font-bold text-ink">Building your lab</span>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <span className="h-2 w-2 flex-none rounded-full bg-brand animate-pulse" />
+          <span className="text-sm font-bold text-ink">Building your lab</span>
+        </div>
+        {/* Live elapsed counter — visible proof it's progressing, not hung. */}
+        <span className="font-mono text-xs font-semibold tabular-nums text-muted" aria-hidden>
+          {fmt(elapsed)}
+        </span>
       </div>
       <TerminalLog lines={BUILD_LOG} shown={shown} color="green" />
       <div className="ss-bar-track mt-3">
         <div className="ss-bar-fill ss-bar-brand" />
       </div>
-      <p className="mt-2.5 text-xs text-muted">
-        us-east-1 · isolated AWS account · you can leave this tab — it&apos;ll be ready when you&apos;re back
-      </p>
+      <p className="mt-2.5 text-xs text-muted">{reassure}</p>
       {onCancel && (
         <button onClick={onCancel} className="mt-3 text-sm font-semibold text-muted hover:text-ink">
           Cancel

@@ -5,6 +5,7 @@ import { LABS, getLab } from "@/lib/labs";
 import { labInstructions, labObjectives } from "@/lib/lab-content";
 import { LabPanel } from "@/components/lab-panel";
 import { LabGuide } from "@/components/lab-guide";
+import { LabIntro } from "@/components/lab-intro";
 
 type Objective = { id: string; description: string };
 
@@ -43,6 +44,8 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
       </div>
       <h1 className="mt-3 text-3xl font-extrabold text-ink">{lab.title}</h1>
       <p className="mt-2 max-w-3xl text-lg text-ink-soft">{lab.summary}</p>
+
+      {lab.ready && <LabIntro />}
 
       <div className="mt-7 grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* guide */}
