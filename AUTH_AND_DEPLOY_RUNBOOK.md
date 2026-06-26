@@ -398,6 +398,72 @@ whole server-side trust path is code-complete.
 
 ---
 
+## 6e. Launch-hardening, observability & UX (2026-06-25 session)
+
+Everything below is **deployed + verified**. Grouped by area.
+
+### Observability (engine → CloudWatch)
+- **EMF metrics** (`engine/metrics.mjs`, `metric()`): logs Embedded-Metric-Format JSON to
+  stdout → CloudWatch auto-extracts under namespace **`ShieldSyncLabs`** (no PutMetricData,
+  no extra IAM, ~free). Emitted across handler/labinfra: `Deploy{success,failed}` +
+  `ColdDeploySeconds`, `Teardown{success,failed}`, `Launch{cold,warm,freebusy,nocapacity,limit,ratelimited,freeip}`,
+  `PoolAvailable/Leased/Stuck`, `WarmRun`/`ReapRun` heartbeats, `Healed`, `EngineError`.
+  `poolCounts()` added to labinfra.
+- **Setup script** `engine/deploy/setup-observability.mjs` (idempotent, run from engine/):
+  creates SNS topic **`ShieldSyncLabsAlerts`** + email sub to **info@** (CONFIRMED),
+  a **`ShieldSyncLabs` CloudWatch dashboard**, and **8 alarms** → SNS: Deploy/Teardown-failed,
+  EngineError, Lambda Errors, **PoolStarvation** (0 free ~15min), **PoolStuck** (drifted acct),
+  **Reaper/Warmer-Stalled** (missing-heartbeat = cron died). Dashboard: CloudWatch → Dashboards
+  → `ShieldSyncLabs` (us-east-1; sign into 750). Snapshots: `observability-snapshots/*.png`.
+- **Org cost tripwire:** AWS Budget **`ShieldSync-Org-Monthly-Cost`** in mgmt acct **851**
+  ($100/mo; alerts $50/$90/forecast>$100 → info@), on top of per-acct $10 budgets.
+
+### Reliability
+- **Pool self-heal** `healPool()` (labinfra) runs each reap (~3min): reclaims drifted accounts
+  — leased-but-session-settled → `releaseAccount`; hung cold deploy (session "leasing" >12min)
+  → `teardown`. Conservative; leaves ambiguous cases to the PoolStuck alarm. Emits `Healed`.
+- **Deploy resilience:** CFN + STS clients use `maxAttempts:5 retryMode:"adaptive"` (ride out
+  throttling under bursts); `CreateStack OnFailure` `DO_NOTHING`→**`DELETE`** (failed stacks
+  auto-clean, account recycles, name free on retry).
+- **Concurrent cold-launch stress test** `engine/load-test-concurrent.mjs` — 5 simultaneous IAM
+  launches (warmer only warms s3 → forces cold): **10/10** — exactly 3 lease on distinct accounts
+  (no double-lease), 2 clean `NO_CAPACITY`, 3 cold deploys ~83–110s no CREATE_FAILED, concurrent
+  teardown restores the pool. **Capacity insight:** teardown recycle ~5–6min, so a burst drops
+  usable free capacity to ~0 for minutes — the real argument for the AWS account-limit increase.
+
+### Abuse guards (per-user AND per-IP — see also §6b)
+- App forwards Cloudflare **`CF-Connecting-IP`** → engine `hashIp()` (salted sha256, **raw IP
+  never stored**) → two `/launch` checks: **rate cap ≥8 launches/10min/IP → 429 `RATE_LIMITED`**;
+  **free multi-account guard ≥3 free/48h/IP → 429 `FREE_IP_LIMIT`**. Together with the per-user
+  cooldown (Cognito sub) + H3 lock = both layers. (VPN-retry on the SAME account is stopped by
+  the per-user cap, which keys on the sub not the IP.) `ipHash` on session rows; `ipLaunchCount`/
+  `freeIpCount` in labinfra. **Cloudflare WAF rate-limit rule** on `/api/launch` (10 req/10s/IP,
+  Block 10s) added in the dashboard (Free-plan period = 10s).
+- **Error-UX:** `launcherror` + `nocapacity` cards now reassure + offer **Try again + Contact
+  support** (`SUPPORT_URL` = shieldsyncsecurity.com/contact); 429 cards branch on RATE_LIMITED /
+  FREE_IP_LIMIT / LIMIT_REACHED. **"Open AWS console" no longer fails silently** — shows
+  "Opening console…" then an inline error (try again / incognito / contact) if the mint fails.
+- **Audit lows fixed:** sessionId is CSPRNG (`randomBytes`, was Math.random); `hashIp` salt is the
+  per-deployment `ENGINE_SHARED_SECRET` (not a source constant).
+
+### Lab content / catalogue UX
+- **Beginner-friendly s3 guide:** every fix now shows **🖱️ Console click-path AND ⌨️ CLI**, plus a
+  "Before you start" orientation (two panes, open-console, the one-AWS-session-per-browser gotcha,
+  console-vs-CloudShell, Check-my-work). **Free cooldown 48h→24h** (§6b).
+- **⚙️ Lab-content workflow (IMPORTANT):** the app renders `app/lib/lab-content.ts`, which is now
+  **generated** from `app/content/labs/<slug>/{instructions.md,lab.json}` by
+  **`app/scripts/build-lab-content.mjs`**. To edit a lab guide: edit the `.md`, run
+  `node scripts/build-lab-content.mjs` (from app/), commit both. (Don't hand-edit lab-content.ts.)
+- **SOC demoted to "Coming soon" (marketing repo, cross-repo):** SIEM/SOAR were advertised + priced
+  + checkout-able but the 4 SOC slugs 404 — a dead-end. Now: homepage badges "Coming soon", wizard
+  SOC track disabled + `?track=soc` neutralized, SOC `/labs/[slug]` pages show Coming-soon + drop
+  the false grader promise, `/labs/soc` CTAs → "Get notified". AWS funnel untouched.
+
+### New DynamoDB tables this session
+`ShieldSyncLabOrders` (payments, §6d). (Plus `ShieldSyncLabUserLocks` + `ShieldSyncLabQueue` earlier.)
+
+---
+
 ## 7. Launch-hardening incident log (June 2026)
 
 What broke and how it was fixed, in order:
