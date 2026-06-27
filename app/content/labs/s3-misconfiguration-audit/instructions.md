@@ -2,6 +2,25 @@
 
 **Level:** Beginner · **Free lab** · **~30 min** · Region: us-east-1
 
+## The scenario
+
+A small team shipped fast and left their S3 estate exposed. Two buckets are
+world-readable, neither enforces encryption or HTTPS, and a service account has
+`s3:*` on every resource. Your job: **find the problems and fix them in place.**
+
+## What you'll do
+
+By the end you'll have closed four real misconfigurations — exactly what the **Check my work** grader verifies:
+
+1. **No public buckets** — no anonymous read on any lab bucket.
+2. **Encryption required** — each bucket denies unencrypted `PutObject`.
+3. **TLS only** — each bucket denies non-HTTPS requests.
+4. **Least-privilege IAM** — the `auditor` user no longer has `s3:*` on `*`.
+
+**Launch the lab** (panel on the right) to spin up your own isolated AWS account — the full step-by-step walkthrough unlocks the moment it's ready.
+
+<!-- ss:walkthrough -->
+
 ## Before you start — your workspace (30-second read)
 
 You've got two things side by side:
@@ -13,19 +32,11 @@ You've got two things side by side:
 
 > ⚠️ **AWS allows only one console session per browser.** If you're already signed into your *own* AWS account, the lab tab will say *"you must log out first."* Two easy fixes: open the lab console in an **incognito / private window** (use the **Copy URL for incognito** button next to the console link), or sign out of your own AWS first. This trips up almost everyone once — it's not you.
 
-**There are two ways to do every fix below — pick your style with the `🖱️ Console / ⌨️ CLI` switch at the top of this guide, and switch anytime:**
+**Two ways to do every fix — pick your style with the `🖱️ Console / ⌨️ CLI` switch just above, and flip it anytime:**
 - **🖱️ Console** — point-and-click in the AWS web UI. Best if you're newer to AWS.
 - **⌨️ CLI** — run commands in **CloudShell** (the `>_` terminal icon in the AWS console's top bar — no setup, already signed in as you). Faster once you're comfortable.
 
-When you've made the fixes, come back here and click **Check my work** — it inspects your *live* account and shows, per objective, what's done and what's left.
-
-## Scenario
-
-A small team shipped fast and left their S3 estate exposed. Two buckets are
-world-readable, neither enforces encryption or HTTPS, and a service account has
-`s3:*` on every resource. Your job: **find the problems and fix them in place.**
-
-The Session Engine has filled in your environment's real names:
+Your environment's real names (the Session Engine fills these in):
 
 | What | Value |
 |---|---|
@@ -34,13 +45,6 @@ The Session Engine has filled in your environment's real names:
 | Over-privileged user | `auditor` (path `/lab/`) |
 
 > Don't delete the buckets — you're graded on **fixing** them, not removing them.
-
-## Your mission (the grader checks these)
-
-1. **No public buckets** — no anonymous read on any lab bucket.
-2. **Encryption required** — each bucket denies unencrypted `PutObject`.
-3. **TLS only** — each bucket denies non-HTTPS requests.
-4. **Least-privilege IAM** — `auditor` no longer has `s3:*` on `*`.
 
 ---
 

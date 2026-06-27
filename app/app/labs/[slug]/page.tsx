@@ -6,12 +6,21 @@ import { labInstructions, labObjectives } from "@/lib/lab-content";
 import { LabPanel } from "@/components/lab-panel";
 import { LabGuide } from "@/components/lab-guide";
 import { LabIntro } from "@/components/lab-intro";
+import { LabWorkspaceProvider } from "@/components/lab-workspace";
 
 type Objective = { id: string; description: string };
 
 export function generateStaticParams() {
   return LABS.map((l) => ({ slug: l.slug }));
 }
+
+// Revalidate the prerendered HTML every 5 min instead of Next's default 1-year
+// static cache. The page body inlines hash-named JS/CSS chunk URLs, so a 1-year
+// `s-maxage` meant a returning visitor kept loading STALE HTML pointing at OLD
+// chunks — every deploy was invisible to warm clients until the cache expired.
+// A short window makes new deploys reach users within minutes; the hashed assets
+// themselves stay immutably cached.
+export const revalidate = 300;
 
 export async function generateMetadata({
   params,
@@ -47,33 +56,35 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
 
       {lab.ready && <LabIntro />}
 
-      <div className="mt-7 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* guide */}
-        <div className="lg:col-span-2">
-          {lab.ready && instructions ? (
-            <LabGuide slug={lab.slug} instructions={instructions} />
-          ) : (
-            <div className="rounded-2xl border border-line bg-canvas p-6 text-base text-ink-soft">
-              {lab.ready ? "Guide not available yet." : "This lab is coming soon."}
-            </div>
-          )}
-        </div>
+      <LabWorkspaceProvider>
+        <div className="mt-7 grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {/* guide */}
+          <div className="lg:col-span-2">
+            {lab.ready && instructions ? (
+              <LabGuide slug={lab.slug} instructions={instructions} />
+            ) : (
+              <div className="rounded-2xl border border-line bg-canvas p-6 text-base text-ink-soft">
+                {lab.ready ? "Guide not available yet." : "This lab is coming soon."}
+              </div>
+            )}
+          </div>
 
-        {/* sticky workspace panel — cap to viewport height + scroll internally so the
-            bottom controls (End / Check my work) stay reachable on short windows */}
-        <div className="lg:col-span-1">
-          <div className="lg:sticky lg:top-6 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-1">
-            <LabPanel slug={lab.slug} objectives={objectives} ready={lab.ready} />
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {lab.tags.map((t) => (
-                <span key={t} className="rounded-md border border-line px-2 py-0.5 font-mono text-xs text-muted">
-                  {t}
-                </span>
-              ))}
+          {/* sticky workspace panel — cap to viewport height + scroll internally so the
+              bottom controls (End / Check my work) stay reachable on short windows */}
+          <div className="lg:col-span-1">
+            <div className="lg:sticky lg:top-6 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-1">
+              <LabPanel slug={lab.slug} objectives={objectives} ready={lab.ready} />
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {lab.tags.map((t) => (
+                  <span key={t} className="rounded-md border border-line px-2 py-0.5 font-mono text-xs text-muted">
+                    {t}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </LabWorkspaceProvider>
     </div>
   );
 }

@@ -74,7 +74,10 @@ a {
   font-size: 19px;
   font-weight: 800;
   color: var(--color-ink);
-  margin: 26px 0 8px;
+  margin: 28px 0 10px;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-line);
+  scroll-margin-top: 16px;
 }
 .lab-md h3 {
   font-size: 16px;
@@ -161,13 +164,15 @@ a {
 .lab-md .ss-track > p:first-child {
   margin-top: 4px;
 }
-/* Both tracks render into the DOM; the toggle just flips which is shown via this
-   attribute on the article — instant, no React re-render of the markdown. Defaults
-   to Console (works pre-JS too, since the attribute is server-rendered). */
-.ss-guide[data-track="console"] .ss-track-cli {
+/* Both tracks render into the DOM; the toggle just flips which is shown via the
+   data-track attribute on the article — instant, no React re-render of the markdown.
+   Defaults to Console (works pre-JS too — the attribute is server-rendered).
+   The doubled `.lab-md.ss-guide` compound raises specificity so no base style and
+   no partially-stale bundle can out-rank the hide. */
+.lab-md.ss-guide[data-track="console"] .ss-track-cli {
   display: none;
 }
-.ss-guide[data-track="cli"] .ss-track-console {
+.lab-md.ss-guide[data-track="cli"] .ss-track-console {
   display: none;
 }
 

@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth/context";
 import { getLab } from "@/lib/labs";
 import { rulesForLab } from "@/lib/access-rules";
 import { CheckoutSheet } from "@/components/checkout-sheet";
+import { useLabWorkspace } from "@/components/lab-workspace";
 
 // Where "contact support" links go (the marketing contact page — WhatsApp + form).
 const SUPPORT_URL = "https://shieldsyncsecurity.com/contact";
@@ -168,6 +169,7 @@ function EndingCard() {
 
 export function LabPanel({ slug, objectives, ready }: { slug: string; objectives: Objective[]; ready: boolean }) {
   const { user, loading, hasAccess, refreshEntitlements } = useAuth();
+  const { setLaunched } = useLabWorkspace();
   const key = `lab:${slug}`;
   const [showCheckout, setShowCheckout] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -280,6 +282,13 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remaining, session?.status]);
+
+  // Tell the guide when a lab is live so it can reveal the full walkthrough
+  // (progressive disclosure). A live session = leasing/active/ending.
+  useEffect(() => {
+    const s = session?.status;
+    setLaunched(s === "leasing" || s === "active" || s === "ending");
+  }, [session?.status, setLaunched]);
 
   async function launch() {
     setFlash(null);

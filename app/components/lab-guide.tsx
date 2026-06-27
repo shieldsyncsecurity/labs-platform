@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth/context";
+import { useLabWorkspace } from "@/components/lab-workspace";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -10,7 +11,7 @@ type Track = "console" | "cli";
 type Segment = { kind: "common" | Track; text: string };
 
 /**
- * Split the guide into common prose + per-track (Console / CLI) blocks so the
+ * Split the walkthrough into common prose + per-track (Console / CLI) blocks so the
  * learner can pick ONE style instead of wading through both stacked inline.
  * A track block runs from its 🖱️/⌨️ marker line until the next marker, the next
  * heading ("## …"), or a "---" rule. Fenced code is respected so a "#" or emoji
@@ -48,6 +49,20 @@ function splitTracks(md: string): Segment[] {
   return segs;
 }
 
+// Split the source into the always-visible OVERVIEW and the launch-gated WALKTHROUGH.
+// Prefer an explicit "<!-- ss:walkthrough -->" sentinel; else fall back to the first
+// "## Step" heading; else everything is overview (no gating) so no lab can hide all
+// of its content by accident.
+function splitGuide(md: string): { overview: string; walkthrough: string } {
+  const sentinel = md.match(/<!--\s*ss:walkthrough\s*-->/);
+  if (sentinel && sentinel.index != null) {
+    return { overview: md.slice(0, sentinel.index), walkthrough: md.slice(sentinel.index + sentinel[0].length) };
+  }
+  const step = md.search(/^##\s+Step\b/m);
+  if (step >= 0) return { overview: md.slice(0, step), walkthrough: md.slice(step) };
+  return { overview: md, walkthrough: "" };
+}
+
 function TrackToggle({ track, onPick }: { track: Track; onPick: (t: Track) => void }) {
   const seg = (active: boolean) =>
     `rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
@@ -70,8 +85,23 @@ function TrackToggle({ track, onPick }: { track: Track; onPick: (t: Track) => vo
   );
 }
 
+// Shown in place of the walkthrough until the learner launches the lab.
+function LaunchGate() {
+  return (
+    <div className="mt-6 rounded-2xl border border-dashed border-brand/40 bg-brand/5 p-6 text-center">
+      <p className="text-2xl" aria-hidden>🚀</p>
+      <p className="mt-2 text-base font-extrabold text-ink">Launch the lab to unlock the walkthrough</p>
+      <p className="mx-auto mt-1 max-w-sm text-sm text-ink-soft">
+        Click <strong>Launch lab</strong> on the right to spin up your own isolated AWS account. The full
+        step-by-step guide (with 🖱️ Console and ⌨️ CLI for every fix) unlocks the moment it&apos;s ready.
+      </p>
+    </div>
+  );
+}
+
 export function LabGuide({ slug, instructions }: { slug: string; instructions: string }) {
   const { user, hasAccess, loading } = useAuth();
+  const { launched } = useLabWorkspace();
   const [track, setTrack] = useState<Track>("console"); // default to point-and-click (beginner-friendly)
 
   useEffect(() => {
@@ -85,14 +115,17 @@ export function LabGuide({ slug, instructions }: { slug: string; instructions: s
     try { localStorage.setItem("ss-lab-track", t); } catch {}
   };
 
-  // Render the markdown ONCE (memoized on the source) — both tracks go into the
-  // DOM and the toggle just flips which is visible via CSS (data-track on the
-  // article). Re-parsing ~15 ReactMarkdown blocks on every toggle made the switch
-  // feel broken/laggy; this makes it instant.
-  const { rendered, hasTracks } = useMemo(() => {
-    const segs = splitTracks(instructions);
+  // Parse the markdown ONCE (memoized on the source). Overview is always shown; the
+  // walkthrough renders both Console+CLI tracks into the DOM and the toggle flips
+  // which is visible purely via CSS (data-track on the article) — instant, no re-parse.
+  const { overviewNodes, walkthroughNodes, hasTracks, hasWalkthrough } = useMemo(() => {
+    const { overview, walkthrough } = splitGuide(instructions);
+    const overviewNodes = (
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{overview}</ReactMarkdown>
+    );
+    const segs = splitTracks(walkthrough);
     const has = segs.some((s) => s.kind !== "common");
-    const nodes = segs.map((s, i) =>
+    const walkthroughNodes = segs.map((s, i) =>
       s.kind === "common" ? (
         <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
           {s.text}
@@ -103,7 +136,7 @@ export function LabGuide({ slug, instructions }: { slug: string; instructions: s
         </div>
       )
     );
-    return { rendered: nodes, hasTracks: has };
+    return { overviewNodes, walkthroughNodes, hasTracks: has, hasWalkthrough: segs.length > 0 };
   }, [instructions]);
 
   // Free labs and already-paid users get immediate access.
@@ -111,8 +144,18 @@ export function LabGuide({ slug, instructions }: { slug: string; instructions: s
   if (hasAccess(slug)) {
     return (
       <article className="lab-md ss-guide rounded-2xl border border-line bg-surface p-6 sm:p-7" data-track={track}>
-        {hasTracks && <TrackToggle track={track} onPick={pick} />}
-        {rendered}
+        {overviewNodes}
+        {!hasWalkthrough ? null : launched ? (
+          <div className="ss-walkthrough">
+            <div className="mt-6 mb-5 flex items-center gap-2 rounded-lg border border-brand/30 bg-brand/5 px-3 py-2 text-sm font-semibold text-brand">
+              <span aria-hidden>✓</span> Lab launched — here&apos;s your full walkthrough
+            </div>
+            {hasTracks && <TrackToggle track={track} onPick={pick} />}
+            {walkthroughNodes}
+          </div>
+        ) : (
+          <LaunchGate />
+        )}
       </article>
     );
   }
