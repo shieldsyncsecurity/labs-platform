@@ -735,7 +735,12 @@ async function deployStack(execRoleArn, labSlug, stackName, tags = []) {
       Tags: tags,
     })
   );
-  await waitUntilStackCreateComplete({ client: cfn, maxWaitTime: 280 }, { StackName: stackName });
+  // 540s (cold deploys finish in ~80–110s; OnFailure=DELETE auto-cleans real
+  // failures). The old 280s could time out while the stack was STILL creating →
+  // it would later reach CREATE_COMPLETE on an account already re-pooled →
+  // account-named-bucket collision → CREATE_FAILED for the next customer. The
+  // wide margin (well under the 900s Lambda budget) makes that race vanishingly rare.
+  await waitUntilStackCreateComplete({ client: cfn, maxWaitTime: 540 }, { StackName: stackName });
   const desc = await cfn.send(new DescribeStacksCommand({ StackName: stackName }));
   const outputs = {};
   for (const o of desc.Stacks?.[0]?.Outputs ?? []) outputs[o.OutputKey] = o.OutputValue;
@@ -889,13 +894,47 @@ export async function mintConsoleUrl({ accountId, destination, durationSeconds =
  * roles), then return the account to the pool. Generates a per-account nuke
  * config on the fly. Lambda: ship the linux aws-nuke binary.
  */
+const STALE_TEARDOWN_MS = 12 * 60 * 1000; // a teardown older than this is presumed hung → reclaimable
+
 export async function teardown(sessionId) {
   const db = await ddb();
   const s = await db.send(new GetItemCommand({ TableName: SESSIONS_TABLE, Key: { sessionId: { S: sessionId } } }));
   if (!s.Item) throw new Error("session not found");
   const accountId = s.Item.accountId.S;
   const lockUserId = s.Item.userId?.S; // release the per-user launch lock at the end
-  await markSession(sessionId, "ending").catch(() => {});
+  // ATOMIC CLAIM: only ONE teardown may nuke a given account at a time. Flip to
+  // "ending" + stamp teardownAt, conditional on the session being live (active/
+  // leasing/ending) AND not already claimed within the staleness window. A second
+  // concurrent reaper/heal bails (no double aws-nuke); a genuinely hung teardown
+  // (>12min) becomes re-claimable so healPool can recover it. A settled
+  // (done/error) session is NOT re-nuked.
+  const claimAt = new Date().toISOString();
+  const staleBefore = new Date(Date.now() - STALE_TEARDOWN_MS).toISOString();
+  try {
+    await db.send(
+      new UpdateItemCommand({
+        TableName: SESSIONS_TABLE,
+        Key: { sessionId: { S: sessionId } },
+        UpdateExpression: "SET #s = :ending, teardownAt = :now",
+        ConditionExpression:
+          "(#s = :active OR #s = :leasing OR #s = :ending) AND (attribute_not_exists(teardownAt) OR teardownAt < :stale)",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: {
+          ":ending": { S: "ending" },
+          ":now": { S: claimAt },
+          ":active": { S: "active" },
+          ":leasing": { S: "leasing" },
+          ":stale": { S: staleBefore },
+        },
+      })
+    );
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") {
+      console.log(`[teardown] ${sessionId} already claimed/settled — skipping duplicate nuke`);
+      return { accountId, status: "already_in_progress" };
+    }
+    throw e;
+  }
 
   const a = await db.send(new GetItemCommand({ TableName: ACCOUNTS_TABLE, Key: { accountId: { S: accountId } } }));
   const execRoleArn = a.Item.execRoleArn.S;
@@ -1078,6 +1117,7 @@ export async function healPool() {
       const sres = await db.send(new GetItemCommand({ TableName: SESSIONS_TABLE, Key: { sessionId: { S: sid } } }));
       const st = sres.Item?.status?.S;
       const startedMs = sres.Item?.startedAt?.S ? new Date(sres.Item.startedAt.S).getTime() : 0;
+      const teardownMs = sres.Item?.teardownAt?.S ? new Date(sres.Item.teardownAt.S).getTime() : 0;
       if (st === "done" || st === "error") {
         await releaseAccount(accountId);
         healed.push(`${accountId}(settled:${st})`);
@@ -1086,8 +1126,16 @@ export async function healPool() {
         console.log(`  [heal] hung deploy — tearing down ${accountId} (session ${sid} leasing ${Math.round((now - startedMs) / 60000)}min)`);
         await teardown(sid);
         healed.push(`${accountId}(hung-deploy)`);
+      } else if (st === "ending" && teardownMs && now - teardownMs > HUNG_LEASING_MS) {
+        // STUCK TEARDOWN: a prior aws-nuke threw (or its worker died) before flipping
+        // the account back to "available", leaving the account leased forever — a
+        // permanent capacity loss on a 3-account pool. The stale teardownAt makes the
+        // claim re-acquirable, so retry the wipe.
+        console.log(`  [heal] stuck teardown — retrying nuke on ${accountId} (session ${sid} ending ${Math.round((now - teardownMs) / 60000)}min)`);
+        await teardown(sid);
+        healed.push(`${accountId}(stuck-ending)`);
       }
-      // active+non-expired (in use) and recent-leasing (deploy in flight) → skip
+      // active+non-expired (in use) and recent-leasing/ending (in flight) → skip
     } catch (e) {
       console.log(`  [heal] ${accountId} failed: ${e.message}`);
     }

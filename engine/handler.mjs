@@ -355,7 +355,13 @@ export async function handler(event) {
 
       if (leased.warm) {
         console.log(`[launch] WARM hit ${leased.sessionId} on ${leased.accountId}`);
-        invokeWorker("warm").catch(() => {}); // top the pool back up
+        // MUST await — a fire-and-forget invoke leaves a floating promise when the
+        // handler returns, which the Lambda runtime reports as
+        // "Runtime.NodeJsExit: a Promise that was never settled" on the NEXT
+        // invocation that reuses the frozen container (and stalls the warmer/reaper
+        // heartbeats → false WarmerStalled/ReaperStalled alarms). Awaiting only the
+        // async-dispatch (Event invoke) is fast; the warm work runs separately.
+        await invokeWorker("warm").catch(() => {});
       } else {
         console.log(`[launch] cold ${leased.sessionId} on ${leased.accountId} — deploying async`);
         await invokeWorker("deploy", {
@@ -420,7 +426,7 @@ export async function handler(event) {
       const s = await getSession(sessionId);
       if (!s) return resp(404, { error: "not found" });
       if ((ENGINE_SHARED_SECRET && !callerUserId) || (s.userId && s.userId !== callerUserId)) {
-        return resp(403, { error: "forbidden" });
+        return resp(404, { error: "not found" });
       }
       if (s.status !== "active") return resp(409, { error: "not ready", status: s.status });
       // Size the console session to the lab's remaining time so 60/120-min labs
@@ -438,7 +444,7 @@ export async function handler(event) {
       const s = await getSession(sessionId);
       if (!s) return resp(404, { error: "not found" });
       if ((ENGINE_SHARED_SECRET && !callerUserId) || (s.userId && s.userId !== callerUserId)) {
-        return resp(403, { error: "forbidden" });
+        return resp(404, { error: "not found" });
       }
       await markSession(sessionId, "ending").catch(() => {});
       await invokeWorker("teardown", { sessionId });
@@ -492,7 +498,7 @@ export async function handler(event) {
       const s = await getSession(sessionId);
       if (!s) return resp(404, { error: "not found" });
       if ((ENGINE_SHARED_SECRET && !callerUserId) || (s.userId && s.userId !== callerUserId)) {
-        return resp(403, { error: "forbidden" });
+        return resp(404, { error: "not found" });
       }
       if (s.status !== "active") return resp(409, { error: "not ready", status: s.status });
       try {
