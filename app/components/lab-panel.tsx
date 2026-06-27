@@ -405,18 +405,18 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sessionId }),
     })
-      .then(() => {
+      .then((r) => {
+        if (!r.ok) return; // engine refused — see catch-equivalent below
         // Engine has acknowledged — nuke runs in background; show "Lab ended" now
         setSession({ status: "done" });
         setSessionId(null); // stops polling
         try { sessionStorage.removeItem(key); } catch {}
       })
-      .catch(() => {
-        // Even on error, release the UI — reaper will clean up
-        setSession({ status: "done" });
-        setSessionId(null);
-        try { sessionStorage.removeItem(key); } catch {}
-      });
+      .catch(() => {});
+    // NOTE: on a non-OK response or network error we deliberately do NOT force
+    // "done" — claiming "wiped clean" while the account may still be live is the
+    // dangerous lie. We keep the optimistic "ending" view and leave polling on so
+    // the server's real status resolves it (the reaper backstops teardown).
   }
 
   function rate(value: "up" | "down") {
@@ -802,7 +802,9 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
               <p className={`text-sm font-bold ${grade.passed ? "text-[#15803d]" : "text-ink"}`}>
                 {(() => {
                   const done = grade.criteria.filter((c) => c.passed && !c.unknown).length;
-                  const total = grade.criteria.length;
+                  // Exclude un-runnable (unknown) checks from the denominator so a
+                  // transient AWS hiccup doesn't read as "more fixes left to do".
+                  const total = grade.criteria.filter((c) => !c.unknown).length;
                   return grade.passed
                     ? "🎉 All fixes verified — nicely done!"
                     : done === 0

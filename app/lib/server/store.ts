@@ -6,17 +6,23 @@ import { engineFetch } from "./engine";
 // x-engine-token shared secret is attached: the engine rejects token-less calls
 // in prod (401), which would silently break grant/read (paid labs unusable).
 
-export async function grantEntitlement(userId: string, e: Entitlement): Promise<void> {
+// Returns true only if the entitlement was actually persisted. The payment webhook
+// MUST check this — a swallowed failure here is "customer charged, no access".
+export async function grantEntitlement(userId: string, e: Entitlement): Promise<boolean> {
   try {
     const r = await engineFetch("/entitlements", {
       method: "POST",
       userId,
       body: { userId, labSlug: e.labSlug, kind: e.kind, accessUntil: e.accessUntil },
     });
-    if (!r.ok) console.error(`grantEntitlement: engine returned ${r.status}`);
+    if (!r.ok) {
+      console.error(`grantEntitlement: engine returned ${r.status}`);
+      return false;
+    }
+    return true;
   } catch {
-    // log but don't throw — best-effort; a retry will re-grant next purchase
     console.error("grantEntitlement: engine unreachable");
+    return false;
   }
 }
 

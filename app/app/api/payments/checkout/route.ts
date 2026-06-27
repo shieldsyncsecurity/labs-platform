@@ -25,10 +25,23 @@ export async function POST(req: Request) {
   const body = (await req.json()) as CheckoutRequest;
   const userId = sessionUser.id; // verified session only — never body.userId
 
-  if (!body.plan) {
-    return NextResponse.json({ error: "missing plan" }, { status: 400 });
+  // Validate the order target server-side — never price a client-supplied slug/plan
+  // blindly (an unknown slug used to fall back to Beginner pricing + mint an order).
+  const ALLOWED_PLANS = new Set(["per-lab", "monthly"]);
+  const ALLOWED_CCY = new Set(["INR", "USD"]);
+  if (!body.plan || !ALLOWED_PLANS.has(body.plan)) {
+    return NextResponse.json({ error: "invalid plan" }, { status: 400 });
   }
   const currency = body.currency ?? "INR";
+  if (!ALLOWED_CCY.has(currency)) {
+    return NextResponse.json({ error: "invalid currency" }, { status: 400 });
+  }
+  if (body.plan === "per-lab") {
+    const l = body.labSlug ? getLab(body.labSlug) : undefined;
+    if (!l || l.free || !l.ready) {
+      return NextResponse.json({ error: "invalid lab" }, { status: 400 });
+    }
+  }
   const amountMinor = priceFor(body.labSlug ?? null, body.plan, currency);
 
   // Access window: monthly = all-access for 30 days; per-lab = the lab's window
@@ -47,7 +60,7 @@ export async function POST(req: Request) {
   // payload) is what the real-provider webhook validates the payment against
   // (amount/currency match + idempotent created->paid). The provider echoes
   // this orderId back in its event, and the grant uses the persisted user/plan.
-  const orderId = "order_" + Math.random().toString(36).slice(2, 12);
+  const orderId = "order_" + crypto.randomUUID().replace(/-/g, "").slice(0, 16);
   const order: Order = {
     id: orderId,
     userId,

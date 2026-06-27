@@ -48,16 +48,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, reason: "amount mismatch" }, { status: 400 });
   }
 
-  // 3. Idempotent created->paid: only the winning transition grants access.
-  const transitioned = await markOrderPaid(order.id, evt.paymentId);
-  if (!transitioned) {
-    // Already paid (or the order store couldn't commit) — do NOT (re)grant.
-    // 200 so the provider stops retrying an event we've already handled.
-    return NextResponse.json({ ok: true, idempotent: true });
-  }
-
-  // Access window is derived HERE from the persisted order (mirrors /checkout
-  // and the engine's per-lab rules), so the client never dictates duration.
+  // 3. GRANT FIRST, then record the paid transition. The entitlement write is an
+  // idempotent upsert (keyed by userId+labSlug), so re-running on a provider retry
+  // is safe — but ordering grant BEFORE the order's created->paid CAS means a grant
+  // failure leaves the order NOT paid, so we can return 5xx and the provider RETRIES
+  // (instead of the old order — closes the "charged but no access, no self-heal" gap).
+  //
+  // Access window is derived HERE from the persisted order (mirrors /checkout and
+  // the engine's per-lab rules), so the client never dictates duration.
   const lab = order.labSlug ? getLab(order.labSlug) : undefined;
   const accessUntil =
     order.plan === "monthly"
@@ -67,11 +65,19 @@ export async function POST(req: Request) {
             rulesForLab(lab?.level ?? "Beginner", lab?.free ?? false).windowHours * 3600 * 1000
         ).toISOString();
 
-  await grantEntitlement(order.userId, {
+  const granted = await grantEntitlement(order.userId, {
     labSlug: order.plan === "monthly" ? "*" : order.labSlug ?? "",
     kind: order.plan === "monthly" ? "monthly" : "per-lab",
     accessUntil,
   });
+  if (!granted) {
+    // Do NOT mark the order paid and do NOT 200 — let the provider redeliver.
+    return NextResponse.json({ ok: false, reason: "grant failed, retry" }, { status: 503 });
+  }
+
+  // Record the paid transition for idempotency/audit (best-effort; the grant above
+  // is the source of truth for access). A replay re-grants idempotently then no-ops here.
+  await markOrderPaid(order.id, evt.paymentId);
 
   return NextResponse.json({ ok: true });
 }
