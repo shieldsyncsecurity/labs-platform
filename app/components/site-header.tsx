@@ -8,7 +8,7 @@ export function SiteHeader() {
 
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-surface/90 backdrop-blur">
-      <div className="mx-auto flex max-w-[1800px] items-center justify-between gap-2 px-4 py-3.5 sm:px-6 lg:px-10">
+      <div className="mx-auto flex max-w-[1536px] items-center justify-between gap-2 px-4 py-3.5 sm:px-6 lg:px-10">
         <Link href="/" className="flex shrink-0 items-center gap-2 font-extrabold text-ink">
           <span className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-brand text-sm text-white">S</span>
           <span className="whitespace-nowrap">

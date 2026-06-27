@@ -4,7 +4,7 @@ import { LabCard } from "@/components/lab-card";
 export default function CatalogPage() {
   const live = LABS.filter((l) => l.ready).length;
   return (
-    <div className="mx-auto max-w-[1800px] px-4 py-10 sm:px-6 lg:px-10">
+    <div className="mx-auto max-w-[1536px] px-4 py-10 sm:px-6 lg:px-10">
       <section className="mb-9">
         <p className="text-sm font-bold uppercase tracking-widest text-brand">AWS Security Labs</p>
         <h1 className="mt-2 max-w-3xl text-3xl font-extrabold leading-tight text-ink sm:text-4xl">
@@ -19,7 +19,7 @@ export default function CatalogPage() {
         </p>
       </section>
 
-      <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {LABS.map((lab) => (
           <LabCard key={lab.slug} lab={lab} />
         ))}

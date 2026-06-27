@@ -38,7 +38,7 @@ export default function DashboardPage() {
   const { user, loading, hasAccess } = useAuth();
 
   if (loading) {
-    return <div className="mx-auto max-w-[1800px] px-4 py-16 text-muted sm:px-6 lg:px-10">Loading…</div>;
+    return <div className="mx-auto max-w-[1536px] px-4 py-16 text-muted sm:px-6 lg:px-10">Loading…</div>;
   }
 
   if (!user) {
@@ -58,7 +58,7 @@ export default function DashboardPage() {
   const more = ready.filter((l) => !hasAccess(l.slug));
 
   return (
-    <div className="mx-auto max-w-[1800px] px-4 py-10 sm:px-6 lg:px-10">
+    <div className="mx-auto max-w-[1536px] px-4 py-10 sm:px-6 lg:px-10">
       <h1 className="text-2xl font-extrabold text-ink">Welcome back, {user.name.split(" ")[0]}</h1>
       <p className="mt-1 text-base text-ink-soft">Pick a lab and spin up your own isolated AWS account in a couple of minutes.</p>
 
@@ -72,7 +72,7 @@ export default function DashboardPage() {
           — the first beginner lab is free.
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {yours.map((lab) => (
             <LabCard key={lab.slug} lab={lab} owned />
           ))}
@@ -83,7 +83,7 @@ export default function DashboardPage() {
         <>
           <h2 className="mb-1 mt-10 text-lg font-extrabold text-ink">More to unlock</h2>
           <p className="mb-3 text-sm text-ink-soft">One-time purchase per lab — hands-on, auto-graded, fully isolated.</p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {more.map((lab) => (
               <LabCard key={lab.slug} lab={lab} owned={false} />
             ))}

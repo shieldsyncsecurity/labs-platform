@@ -70,7 +70,7 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
     // Wide shell: a ~88rem container with an asymmetric guide / fixed-rail grid so a
     // wide screen has no dead side gutters — surplus width flows to the guide, not to
     // empty margins. pb-24 leaves room for the mobile sticky action bar.
-    <div className="mx-auto max-w-[1800px] px-4 py-8 pb-24 sm:px-6 lg:px-10 lg:pb-8">
+    <div className="mx-auto max-w-[1536px] px-4 py-8 pb-24 sm:px-6 lg:px-10 lg:pb-8">
       <Link href="/" className="text-sm font-semibold text-muted hover:text-ink">
         ← All labs
       </Link>

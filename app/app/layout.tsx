@@ -33,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <SiteHeader />
           <main className="flex-1">{children}</main>
           <footer className="border-t border-line bg-surface">
-            <div className="mx-auto flex max-w-[1800px] flex-col gap-3 px-4 py-6 text-sm text-muted sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-10">
+            <div className="mx-auto flex max-w-[1536px] flex-col gap-3 px-4 py-6 text-sm text-muted sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-10">
               <span>ShieldSync Labs · hands-on cloud security · each lab runs in its own isolated, auto-destroyed AWS account.</span>
               <a href="https://shieldsyncsecurity.com" className="whitespace-nowrap font-semibold text-ink-soft hover:text-ink">
                 ← Back to ShieldSync.com
