@@ -51,7 +51,9 @@ const execFileAsync = promisify(execFile);
 //   maxLaunches / windowHours: how many runs a user gets in a rolling window.
 const LEVEL_RULES = {
   Beginner: { sessionMinutes: 30, maxLaunches: 3, windowHours: 72 },
-  Intermediate: { sessionMinutes: 60, maxLaunches: 2, windowHours: 48 },
+  // sessionMinutes MUST be >= the lab's estimatedActiveMinutes (IAM ~75 → 90). Keep
+  // in sync with app/lib/access-rules.ts.
+  Intermediate: { sessionMinutes: 90, maxLaunches: 2, windowHours: 48 },
   Advanced: { sessionMinutes: 120, maxLaunches: 2, windowHours: 48 },
 };
 
@@ -294,6 +296,11 @@ export async function lease(userId, labSlug, windowMinutes = 30, ipHash = null) 
       status: { S: warm ? "active" : "leasing" },
       startedAt: { S: new Date(now).toISOString() },
       expiresAt: { S: expiresAt },
+      // DynamoDB TTL: auto-delete the row 7 days after it expires. Keeps the table
+      // (and every Scan over it — launchCount/findActiveSession/reap) bounded to a
+      // rolling week instead of growing forever. 7d > the max launch window (72h) so
+      // it never deletes a row a rolling-window count still needs.
+      ttl: { N: String(Math.floor(new Date(expiresAt).getTime() / 1000) + 7 * 24 * 3600) },
       ...(ipHash ? { ipHash: { S: ipHash } } : {}),
     };
     if (warm && acct.warmStackName?.S) item.stackName = { S: acct.warmStackName.S };

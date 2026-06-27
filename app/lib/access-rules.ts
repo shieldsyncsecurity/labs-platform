@@ -8,7 +8,9 @@ export type AccessRule = { sessionMinutes: number; maxLaunches: number; windowHo
 
 export const ACCESS_RULES: Record<LabLevel, AccessRule> = {
   Beginner: { sessionMinutes: 30, maxLaunches: 3, windowHours: 72 },
-  Intermediate: { sessionMinutes: 60, maxLaunches: 2, windowHours: 48 },
+  // sessionMinutes MUST be >= the lab's estimatedActiveMinutes or learners get torn
+  // down mid-task. The IAM lab (Intermediate) is ~75 min → 90 gives a buffer.
+  Intermediate: { sessionMinutes: 90, maxLaunches: 2, windowHours: 48 },
   Advanced: { sessionMinutes: 120, maxLaunches: 2, windowHours: 48 },
 };
 
