@@ -77,7 +77,7 @@ a {
   margin: 28px 0 10px;
   padding-top: 18px;
   border-top: 1px solid var(--color-line);
-  scroll-margin-top: 16px;
+  scroll-margin-top: 72px; /* clear the sticky Console/CLI toggle on anchor jumps */
 }
 .lab-md h3 {
   font-size: 16px;
@@ -174,6 +174,126 @@ a {
 }
 .lab-md.ss-guide[data-track="cli"] .ss-track-console {
   display: none;
+}
+
+/* Reading width: cap PROSE for legibility on a wide guide column, but let code,
+   tables, step-cards and breadcrumbs use the full column (they read better wide). */
+.lab-md p,
+.lab-md h1,
+.lab-md h2,
+.lab-md h3,
+.lab-md blockquote,
+.lab-md > ul {
+  max-width: 72ch;
+}
+.lab-md pre,
+.lab-md table,
+.lab-md .ss-refcard,
+.lab-md .ss-track-console ol,
+.lab-md .ss-track-console ol p,
+.lab-md .ss-navpath {
+  max-width: none;
+}
+
+/* Reference card: the compact "your environment" block at the top of a
+   walkthrough (replaces the old orientation theory dump). */
+.lab-md .ss-refcard {
+  background: var(--color-canvas);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  padding: 14px 18px;
+  margin: 4px 0 22px;
+}
+.lab-md .ss-refcard > :first-child { margin-top: 0; }
+.lab-md .ss-refcard > :last-child { margin-bottom: 0; }
+.lab-md .ss-refcard table { margin: 10px 0; }
+
+/* Console step cards: turn a console block's ordered list into numbered cards
+   (CSS counter - robust even without per-li classes). */
+.lab-md .ss-track-console ol {
+  list-style: none;
+  padding-left: 0;
+  margin: 14px 0;
+  counter-reset: ss-step;
+}
+.lab-md .ss-track-console ol > li {
+  position: relative;
+  padding: 13px 16px 13px 52px;
+  margin: 10px 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+}
+.lab-md .ss-track-console ol > li::before {
+  counter-increment: ss-step;
+  content: counter(ss-step);
+  position: absolute;
+  left: 13px;
+  top: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  width: 26px;
+  border-radius: 9999px;
+  background: var(--color-brand);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+.lab-md .ss-track-console ol > li > :first-child { margin-top: 0; }
+.lab-md .ss-track-console ol > li > :last-child { margin-bottom: 0; }
+.lab-md .ss-track-console ol > li p { margin: 7px 0; }
+
+/* Breadcrumb nav-path rendered from the ">>" authoring convention */
+.ss-navpath {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+.ss-navseg-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ss-navseg {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 7px;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-line);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--color-ink-soft);
+}
+.ss-navseg-root {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: var(--color-brand-strong);
+  font-weight: 700;
+}
+.ss-navsep {
+  color: var(--color-muted);
+  font-weight: 700;
+}
+
+/* Click-target chip - looks like the button to press */
+.ss-uichip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 9px;
+  border-radius: 7px;
+  border: 1.5px solid var(--color-brand);
+  background: #eef2ff;
+  color: var(--color-brand-strong);
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 /* Scanning indeterminate progress bar (lab build / wipe states) */

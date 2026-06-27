@@ -731,6 +731,9 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
 
   if (status === "active") {
     const low = remaining > 0 && remaining < 300;
+    const graded = !!grade?.gradable;
+    const doneCount = graded ? grade!.criteria.filter((c) => c.passed && !c.unknown).length : 0;
+    const totalCount = graded ? grade!.criteria.filter((c) => !c.unknown).length : 0;
     return (
       <div className={card} role="status" aria-live="polite">
         <div className="flex items-center justify-between">
@@ -750,9 +753,14 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
             Couldn&apos;t open the console just yet — it may still be finishing setup. Give it a few seconds and click again, or use <strong>Copy URL for incognito</strong> below. Still stuck? <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer" className="underline">Contact support</a>.
           </p>
         )}
-        <div className="mt-2 rounded-lg border border-line bg-canvas p-3 text-sm text-ink-soft">
-          <p className="font-semibold text-ink">Already signed into AWS?</p>
-          <p className="mt-1">A browser holds one AWS session at a time. If you see “you must log out first,” open this in an <strong>incognito window</strong> (or log out of AWS first).</p>
+
+        {/* Incognito helper — demoted to a collapsed disclosure (it's only needed when
+            the browser already holds an AWS session; consoleError surfaces it inline too). */}
+        <details className="mt-2 rounded-lg border border-line bg-canvas px-3 py-2 text-sm text-ink-soft">
+          <summary className="cursor-pointer list-none font-semibold text-ink">
+            Console says “you must log out first”?
+          </summary>
+          <p className="mt-1.5">A browser holds one AWS session at a time. Open the lab in an <strong>incognito window</strong> (or sign out of your own AWS first):</p>
           <button
             onClick={copyConsoleUrl}
             disabled={copyStatus === "loading"}
@@ -767,87 +775,84 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
               : "Copy URL for incognito"}
           </button>
           <p className="mt-1 text-[11px] text-muted">
-            URL is time-boxed and only works once — paste it quickly into an incognito window.
+            Time-boxed and works once — paste it quickly into an incognito window.
           </p>
-        </div>
+        </details>
+
+        {/* The objectives ARE the scorecard: Check my work fills this very list in, so
+            it's obvious what the button does. (objective.id === grade criterion.id) */}
         {objectives.length > 0 && (
-          <div className="mt-5 border-t border-line pt-4">
-            <p className="text-xs font-bold uppercase tracking-wider text-muted">Objectives</p>
-            <ul className="mt-2 space-y-2">
-              {objectives.map((o) => (
-                <li key={o.id} className="flex gap-2 text-base text-ink-soft">
-                  {/* Proper circle: drawn as a 12×12 div with a 2px border so it
-                      stays crisp at any zoom — the unicode ○ glyph rendered
-                      effectively invisible. */}
-                  <span
-                    className="mt-1 flex-none h-3 w-3 rounded-full border-2 border-muted"
-                    aria-hidden="true"
-                  />
-                  <span>{o.description}</span>
-                </li>
-              ))}
+          <div className="mt-5 rounded-xl border border-line bg-canvas p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold uppercase tracking-wider text-muted">What you’re fixing</p>
+              {graded && (
+                <span className="font-mono text-xs font-bold text-brand">{doneCount}/{totalCount} done</span>
+              )}
+            </div>
+            <ul className="mt-3 space-y-2">
+              {objectives.map((o) => {
+                const c = graded ? grade!.criteria.find((x) => x.id === o.id) : undefined;
+                const state = !c ? "idle" : c.unknown ? "unknown" : c.passed ? "pass" : "todo";
+                return (
+                  <li key={o.id} className="flex gap-2 text-sm">
+                    <span
+                      className="mt-0.5 flex-none"
+                      role="img"
+                      aria-label={state === "pass" ? "Done:" : state === "unknown" ? "Couldn't check:" : state === "todo" ? "Not done yet:" : "Objective:"}
+                    >
+                      {state === "pass" ? "✅" : state === "unknown" ? "⚠️" : state === "todo" ? "⬜" : (
+                        <span className="inline-block h-3 w-3 rounded-full border-2 border-muted align-middle" />
+                      )}
+                    </span>
+                    <span className={`text-ink-soft ${state === "pass" ? "line-through opacity-70" : ""}`}>{o.description}</span>
+                  </li>
+                );
+              })}
             </ul>
+            <button
+              onClick={checkWork}
+              disabled={grading}
+              className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-bold text-white hover:bg-brand-strong disabled:opacity-60"
+            >
+              {grading ? "Checking your live account…" : grade ? "Re-check my work" : "Check my work"}
+            </button>
+            <p className="mt-2 text-center text-xs text-muted">
+              Grades your <strong>live</strong> AWS account against the {objectives.length} objectives above.
+            </p>
+            {grade && (grade.gradable ? (
+              <div className="mt-3 border-t border-line pt-3">
+                <p className={`text-sm font-bold ${grade.passed ? "text-[#15803d]" : "text-ink"}`}>
+                  {grade.passed
+                    ? "🎉 All fixes verified — nicely done!"
+                    : doneCount === 0
+                    ? "No fixes verified yet — work through the steps, then re-check."
+                    : `${doneCount} of ${totalCount} fixes verified — ${totalCount - doneCount} to go.`}
+                </p>
+                {!grade.passed && (
+                  <p className="mt-1 text-xs text-muted">✅ = verified done · ⬜ = still to do. Finish the ⬜ items in the console, then re-check.</p>
+                )}
+                {grade.criteria.some((c) => c.unknown) && (
+                  <p className="mt-1 text-xs text-[#92400e]">⚠ Some checks couldn&apos;t run (a temporary AWS hiccup) — click “Re-check my work”.</p>
+                )}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-muted">Auto-grading isn&apos;t available for this lab yet.</p>
+            ))}
           </div>
         )}
-        <div className="mt-5 border-t border-line pt-4">
-          <button
-            onClick={checkWork}
-            disabled={grading}
-            className="w-full rounded-xl bg-ink px-5 py-2.5 text-base font-semibold text-white hover:opacity-90 disabled:opacity-60"
-          >
-            {grading ? "Checking your work…" : "✓ Check my work"}
-          </button>
-          {grade && (grade.gradable ? (
-            <div className="mt-3">
-              <p className={`text-sm font-bold ${grade.passed ? "text-[#15803d]" : "text-ink"}`}>
-                {(() => {
-                  const done = grade.criteria.filter((c) => c.passed && !c.unknown).length;
-                  // Exclude un-runnable (unknown) checks from the denominator so a
-                  // transient AWS hiccup doesn't read as "more fixes left to do".
-                  const total = grade.criteria.filter((c) => !c.unknown).length;
-                  return grade.passed
-                    ? "🎉 All fixes verified — nicely done!"
-                    : done === 0
-                    ? "No fixes done yet"
-                    : `${done} of ${total} fixes verified — ${total - done} to go`;
-                })()}
-              </p>
-              <p className="mt-1 text-xs text-muted">
-                {grade.passed
-                  ? "Your live account now meets every objective in this lab."
-                  : grade.criteria.filter((c) => c.passed && !c.unknown).length === 0
-                  ? "Open the AWS console above and work through the guide, then check again. ✅ = verified done · ⬜ = still to do."
-                  : "✅ = verified done · ⬜ = still to do. Finish the ⬜ items in the console, then re-check."}
-              </p>
-              {grade.criteria.some((c) => c.unknown) && (
-                <p className="mt-1 text-xs text-[#92400e]">⚠ Some checks couldn&apos;t run (a temporary AWS hiccup) — click “Check my work” again.</p>
-              )}
-              <ul className="mt-2 space-y-2">
-                {grade.criteria.map((c) => {
-                  const state = c.unknown ? "unknown" : c.passed ? "pass" : "todo";
-                  return (
-                    <li key={c.id} className="flex gap-2 text-sm">
-                      <span
-                        className="mt-0.5 flex-none"
-                        role="img"
-                        aria-label={state === "unknown" ? "Couldn't check:" : state === "pass" ? "Passed:" : "Not done yet:"}
-                      >
-                        {state === "unknown" ? "⚠️" : state === "pass" ? "✅" : "⬜"}
-                      </span>
-                      <span className={`text-ink-soft ${state === "pass" ? "line-through" : ""}`}>
-                        {c.description}
-                        {state === "unknown" && <span className="text-[#92400e]"> — couldn’t verify</span>}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-muted">Auto-grading isn&apos;t available for this lab yet.</p>
-          ))}
-        </div>
+
         <button onClick={endLab} className="mt-3 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">End &amp; wipe lab</button>
+
+        {/* Mobile-only sticky action bar: on phones the rail sits below the whole guide,
+            so mirror the two primary actions at the bottom of the viewport. */}
+        <div className="fixed inset-x-0 bottom-0 z-30 flex gap-2 border-t border-line bg-surface/95 p-3 shadow-[0_-2px_10px_rgba(0,0,0,0.06)] backdrop-blur lg:hidden">
+          <button onClick={openConsole} disabled={consoleOpening} className="flex-1 rounded-xl border border-line px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-70">
+            {consoleOpening ? "Opening…" : "Open console ↗"}
+          </button>
+          <button onClick={checkWork} disabled={grading} className="flex-1 rounded-xl bg-brand px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+            {grading ? "Checking…" : grade ? "Re-check" : "Check my work"}
+          </button>
+        </div>
       </div>
     );
   }

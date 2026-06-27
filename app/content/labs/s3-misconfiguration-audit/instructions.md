@@ -21,38 +21,39 @@ By the end you'll have closed four real misconfigurations — exactly what the *
 
 <!-- ss:walkthrough -->
 
-## Before you start — your workspace (30-second read)
+:::refcard
+**Your environment** — the Session Engine fills in the real names.
 
-You've got two things side by side:
-
-- **This guide** — the scenario, the steps, and the **Check my work** button (right-hand panel).
-- **A real, throwaway AWS account** — yours for this session, wiped clean when you finish. Nothing here can cost money or touch anything real, so click around freely.
-
-**To open your AWS account:** click **Open AWS console** (top of the right panel). It opens the real AWS Console in a **new browser tab**.
-
-> ⚠️ **AWS allows only one console session per browser.** If you're already signed into your *own* AWS account, the lab tab will say *"you must log out first."* Two easy fixes: open the lab console in an **incognito / private window** (use the **Copy URL for incognito** button next to the console link), or sign out of your own AWS first. This trips up almost everyone once — it's not you.
-
-**Two ways to do every fix — pick your style with the `🖱️ Console / ⌨️ CLI` switch just above, and flip it anytime:**
-- **🖱️ Console** — point-and-click in the AWS web UI. Best if you're newer to AWS.
-- **⌨️ CLI** — run commands in **CloudShell** (the `>_` terminal icon in the AWS console's top bar — no setup, already signed in as you). Faster once you're comfortable.
-
-Your environment's real names (the Session Engine fills these in):
-
-| What | Value |
+| Role | Name |
 |---|---|
-| Public-via-**policy** bucket | `DataBucketName` |
-| Public-via-**ACL** bucket | `AssetsBucketName` |
+| Public via **policy** | `DataBucketName` |
+| Public via **ACL** | `AssetsBucketName` |
 | Over-privileged user | `auditor` (path `/lab/`) |
 
-> Don't delete the buckets — you're graded on **fixing** them, not removing them.
-
----
+⚠️ **Don't delete the buckets** — you're graded on *fixing* them in place, not removing them.
+:::
 
 ## Step 1 — Recon: prove the exposure
 
-First, see what's exposed.
+First, see what's exposed — no fixes yet, just confirm the problem.
 
-🖱️ **Console:** open the **S3** service. You'll see buckets named `sslab-data-…` and `sslab-assets-…`. Click the **data** bucket → **Permissions** tab → notice **"Block public access" = Off** and a **Bucket policy** that grants public read. Then the **assets** bucket → **Permissions** → its **Object Ownership / ACL** grants access to **"Everyone (public access)."** In the bucket list, AWS even flags both as **"Publicly accessible."**
+🖱️ **Console**
+
+1. **Open S3 and spot the public buckets.** The list flags both `sslab-data-…` and `sslab-assets-…` as **Publicly accessible**.
+
+   >> S3 › Buckets
+
+2. **Inspect the data bucket — public via a bucket policy.**
+
+   >> S3 › data bucket › Permissions
+
+   Note **Block public access = Off** and a **Bucket policy** that grants public read.
+
+3. **Inspect the assets bucket — public via an ACL.**
+
+   >> S3 › assets bucket › Permissions
+
+   Under **Object Ownership**, the ACL grants access to **Everyone (public access)**.
 
 ⌨️ **CLI (CloudShell):**
 
@@ -73,11 +74,31 @@ curl -s "https://<data-bucket>.s3.amazonaws.com/customers.csv"   # you'll see th
 Belt **and** braces: turn on **Block Public Access** at the **account** level (catches
 future mistakes too) and the **bucket** level, then remove the actual public grants.
 
-🖱️ **Console:**
-1. **Account-wide guardrail:** S3 console → left nav → **"Block Public Access settings for this account"** → **Edit** → tick **all four** boxes → **Save** (type `confirm`).
-2. **Data bucket — remove the public policy:** S3 → the **data** bucket → **Permissions** → **Bucket policy** → **Delete**.
-3. **Assets bucket — kill the public ACL:** S3 → the **assets** bucket → **Permissions** → **Object Ownership** → **Edit** → choose **"ACLs disabled (Bucket owner enforced)"** → **Save**.
-4. **Per-bucket Block Public Access (do BOTH buckets):** each bucket → **Permissions** → **Block public access (bucket settings)** → **Edit** → tick **all four** → **Save**.
+🖱️ **Console**
+
+1. **Turn on the account-wide guardrail first** — it catches future mistakes too.
+
+   >> S3 › Block Public Access settings for this account
+
+   Click [[Edit]], tick **all four** boxes, then [[Save]] (type `confirm`).
+
+2. **Remove the public policy on the data bucket.**
+
+   >> S3 › data bucket › Permissions › Bucket policy
+
+   Click [[Delete]].
+
+3. **Kill the public ACL on the assets bucket.**
+
+   >> S3 › assets bucket › Permissions › Object Ownership
+
+   Click [[Edit]], choose **ACLs disabled (Bucket owner enforced)**, then [[Save]].
+
+4. **Block Public Access on each bucket** (do **both**).
+
+   >> S3 › each bucket › Permissions › Block public access (bucket settings)
+
+   Click [[Edit]], tick **all four**, then [[Save]].
 
 ⌨️ **CLI:**
 
@@ -105,9 +126,16 @@ Re-run the `curl` from Step 1 — it should now be **AccessDenied**. ✅
 ## Step 3 — Require encryption at rest
 
 Turn on default encryption **and** add a bucket policy that *rejects* any unencrypted
-upload (the grader looks for the explicit **Deny**).
+upload (the grader looks for the explicit **Deny**). Here you flip on default encryption;
+the matching **Deny** ships in Step 4's combined policy.
 
-🖱️ **Console:** each bucket → **Properties** tab → **Default encryption** → **Edit** → **Server-side encryption with Amazon S3 managed keys (SSE-S3)** → **Save**. (The "reject unencrypted uploads" **Deny** goes in the bucket policy you'll set in Step 4.)
+🖱️ **Console**
+
+1. **Turn on default encryption for each bucket.**
+
+   >> S3 › each bucket › Properties › Default encryption
+
+   Click [[Edit]], choose **SSE-S3 (Amazon S3 managed keys)**, then [[Save]].
 
 ⌨️ **CLI:**
 
@@ -128,7 +156,13 @@ The Deny statement (included in Step 4's combined policy):
 
 One hardened bucket policy carries **both** the encryption-required and TLS-only denies.
 
-🖱️ **Console:** each bucket → **Permissions** → **Bucket policy** → **Edit** → paste the JSON below (replace every `<bucket>` with that bucket's name) → **Save changes**.
+🖱️ **Console**
+
+1. **Apply the hardened bucket policy to each bucket.**
+
+   >> S3 › each bucket › Permissions › Bucket policy
+
+   Click [[Edit]], paste the JSON below (replace every `<bucket>` with that bucket's name), then [[Save changes]].
 
 ⌨️ **CLI:** save it as `secure-policy.json`, then apply to **each** bucket:
 
@@ -151,7 +185,19 @@ aws s3api put-bucket-policy --bucket <bucket> --policy file://secure-policy.json
 
 `auditor` should only read the two lab buckets — not `s3:*` on everything.
 
-🖱️ **Console:** open the **IAM** service → **Users** → **auditor** → **Permissions** tab. Find the inline policy named **`s3-full-access-everywhere`** → expand it → **Remove**. Then **Add permissions** → **Create inline policy** → **JSON** tab → paste the scoped policy below → **Next** → name it `s3-read-lab-buckets` → **Create policy**.
+🖱️ **Console**
+
+1. **Remove the over-broad inline policy.**
+
+   >> IAM › Users › auditor › Permissions
+
+   Expand **`s3-full-access-everywhere`** and click [[Remove]].
+
+2. **Add a scoped read-only policy instead.**
+
+   >> IAM › Users › auditor › Add permissions › Create inline policy
+
+   Open the **JSON** tab, paste the scoped policy below, click [[Next]], name it `s3-read-lab-buckets`, then [[Create policy]].
 
 ⌨️ **CLI:**
 
@@ -179,9 +225,12 @@ aws iam put-user-policy --user-name auditor --policy-name s3-read-lab-buckets \
 
 Click **Check my work** in the right-hand panel — it inspects your **live** account
 against the four objectives and shows ✅ / ⬜ per item. If something's still ⬜, the
-matching step above tells you what's left open. (Prefer to spot-check yourself?)
+matching step above tells you what's left open. Prefer to spot-check yourself?
 
-🖱️ **Console:** each bucket's list row should now read **"Not public"**; IAM → auditor shows only the scoped `s3-read-lab-buckets` policy.
+🖱️ **Console**
+
+- Each bucket's list row now reads **Not public**.
+- **IAM › Users › auditor** shows only the scoped `s3-read-lab-buckets` policy.
 
 ⌨️ **CLI:**
 
