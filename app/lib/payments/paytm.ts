@@ -28,7 +28,9 @@ export function paytmConfig(): PaytmConfig {
     website: process.env.PAYTM_WEBSITE ?? "WEBSTAGING",
     industryType: process.env.PAYTM_INDUSTRY_TYPE ?? "Retail",
     channelId: process.env.PAYTM_CHANNEL_ID ?? "WEB",
-    baseUrl: env === "production" ? "https://securegw.paytm.in" : "https://securegw-stage.paytm.in",
+    // Paytm's CURRENT hosts (the legacy securegw[-stage].paytm.in returns a generic 501
+    // "System Error" for MIDs provisioned on the new platform — verified the hard way).
+    baseUrl: env === "production" ? "https://secure.paytmpayments.com" : "https://securestage.paytmpayments.com",
   };
 }
 
