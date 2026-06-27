@@ -184,7 +184,7 @@ a {
 .lab-md h3,
 .lab-md blockquote,
 .lab-md > ul {
-  max-width: 72ch;
+  max-width: 80ch;
 }
 .lab-md pre,
 .lab-md table,
