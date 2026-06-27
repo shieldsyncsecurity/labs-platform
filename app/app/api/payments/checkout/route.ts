@@ -1,17 +1,19 @@
 import { NextResponse } from "next/server";
-import { sign } from "@/lib/payments/signature";
 import { priceFor } from "@/lib/payments/pricing";
 import { getServerUser } from "@/lib/auth/session";
 import { getLab } from "@/lib/labs";
-import { rulesForLab, MONTHLY_ACCESS_DAYS } from "@/lib/access-rules";
 import { createOrder } from "@/lib/server/orders";
+import { initiateTransaction, paytmConfig } from "@/lib/payments/paytm";
 import type { CheckoutRequest, Order } from "@/lib/payments/types";
 
-// Creates a server-side signed order. DISABLED until payments are live
-// (PAYMENTS_LIVE=1) and AUTH-ONLY — the userId is taken ONLY from the verified
-// Cognito session, never from the client body (trusting body.userId let an
-// unauthenticated caller mint an order for any user — half of the payment-bypass
-// chain). When Paytm goes live this is replaced by server-persisted orders.
+// Start a Paytm checkout. AUTH-ONLY and gated behind PAYMENTS_LIVE.
+//  1. The order amount/plan/lab are validated + priced SERVER-SIDE (never the client's
+//     word) and the order is persisted (it's the source of truth the grant validates against).
+//  2. We ask Paytm to initiate the transaction and return a txnToken the browser's
+//     Paytm JS Checkout uses. The merchant KEY never leaves the server; only the MID
+//     (public) + txnToken go to the client.
+// Payment success is confirmed later, server-to-server, via /paytm/confirm (or /callback) —
+// the client's claim of "paid" is never trusted.
 const PAYMENTS_LIVE = process.env.PAYMENTS_LIVE === "1";
 
 export async function POST(req: Request) {
@@ -22,11 +24,10 @@ export async function POST(req: Request) {
   if (!sessionUser?.id) {
     return NextResponse.json({ error: "sign in required" }, { status: 401 });
   }
-  const body = (await req.json()) as CheckoutRequest;
+  const body = (await req.json().catch(() => ({}))) as CheckoutRequest;
   const userId = sessionUser.id; // verified session only — never body.userId
 
-  // Validate the order target server-side — never price a client-supplied slug/plan
-  // blindly (an unknown slug used to fall back to Beginner pricing + mint an order).
+  // Validate the order target server-side (never price a client-supplied slug/plan blindly).
   const ALLOWED_PLANS = new Set(["per-lab", "monthly"]);
   const ALLOWED_CCY = new Set(["INR", "USD"]);
   if (!body.plan || !ALLOWED_PLANS.has(body.plan)) {
@@ -44,22 +45,8 @@ export async function POST(req: Request) {
   }
   const amountMinor = priceFor(body.labSlug ?? null, body.plan, currency);
 
-  // Access window: monthly = all-access for 30 days; per-lab = the lab's window
-  // (free 48h / Beginner 72h / Intermediate·Advanced 48h). Must match the engine's
-  // per-lab launch window (engine/labinfra.mjs LEVEL_RULES/FREE_RULE).
-  const lab = body.labSlug ? getLab(body.labSlug) : undefined;
-  const accessUntil =
-    body.plan === "monthly"
-      ? new Date(Date.now() + MONTHLY_ACCESS_DAYS * 24 * 3600 * 1000).toISOString()
-      : new Date(
-          Date.now() +
-            rulesForLab(lab?.level ?? "Beginner", lab?.free ?? false).windowHours * 3600 * 1000
-        ).toISOString();
-
-  // Persist the order SERVER-SIDE — this record (not any client-supplied
-  // payload) is what the real-provider webhook validates the payment against
-  // (amount/currency match + idempotent created->paid). The provider echoes
-  // this orderId back in its event, and the grant uses the persisted user/plan.
+  // Persist the order (status forced "created" engine-side). This record — not any
+  // client value — is what the grant is validated + derived from.
   const orderId = "order_" + crypto.randomUUID().replace(/-/g, "").slice(0, 16);
   const order: Order = {
     id: orderId,
@@ -73,19 +60,30 @@ export async function POST(req: Request) {
   };
   await createOrder(order);
 
-  // The signed payload below is ONLY consumed by the dev simulator (mock-pay,
-  // 404 in prod). The production webhook ignores it entirely and re-derives the
-  // access window at fulfillment time from the persisted order.
-  const payload = JSON.stringify({
+  // Ask Paytm to initiate the transaction → txnToken for the JS checkout.
+  const cfg = paytmConfig();
+  if (!cfg.mid || !cfg.key) {
+    return NextResponse.json({ error: "payment config missing" }, { status: 503 });
+  }
+  const origin = new URL(req.url).origin;
+  const init = await initiateTransaction({
     orderId,
-    userId,
-    labSlug: body.labSlug ?? null,
-    plan: body.plan,
     amountMinor,
     currency,
-    accessUntil,
+    custId: userId,
+    callbackUrl: `${origin}/api/payments/paytm/callback?orderId=${encodeURIComponent(orderId)}`,
   });
-  const signature = sign(payload);
+  if (!init.ok || !init.txnToken) {
+    return NextResponse.json({ error: "could not start payment", detail: init.error }, { status: 502 });
+  }
 
-  return NextResponse.json({ orderId, signedPayload: payload, signature, amountMinor, currency });
+  // MID + host are public (used in the checkout JS URL); the merchant key is NOT returned.
+  return NextResponse.json({
+    orderId,
+    txnToken: init.txnToken,
+    mid: cfg.mid,
+    host: cfg.baseUrl,
+    amountMinor,
+    currency,
+  });
 }
