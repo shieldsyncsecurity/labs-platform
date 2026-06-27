@@ -28,7 +28,7 @@ The Session Engine gives you the leaked keys:
 2. **Primitive removed** — `LabDeployerPolicy` no longer grants `iam:AttachUserPolicy` (or other IAM-write) on `*`.
 3. **Still works** — the user keeps its legitimate read permissions.
 
----
+<!-- ss:walkthrough -->
 
 ## Setup — become the attacker
 

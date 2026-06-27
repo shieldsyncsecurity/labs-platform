@@ -121,10 +121,23 @@ function LaunchGate({ steps }: { steps: string[] }) {
   );
 }
 
-export function LabGuide({ slug, instructions }: { slug: string; instructions: string }) {
+export function LabGuide({
+  slug,
+  instructions,
+  gatedSlug,
+  stepTitles: stepTitlesProp,
+}: {
+  slug: string;
+  instructions: string;
+  /** Paid lab: the walkthrough is NOT in `instructions` — fetch it from the gated route. */
+  gatedSlug?: string;
+  /** Server-provided step headings for the launch-gate preview (works even when gated). */
+  stepTitles?: string[];
+}) {
   const { user, hasAccess, loading } = useAuth();
   const { launched } = useLabWorkspace();
   const [track, setTrack] = useState<Track>("console"); // default to point-and-click (beginner-friendly)
+  const [remoteWt, setRemoteWt] = useState<string | null>(null); // gated walkthrough, once fetched
 
   useEffect(() => {
     try {
@@ -137,35 +150,61 @@ export function LabGuide({ slug, instructions }: { slug: string; instructions: s
     try { localStorage.setItem("ss-lab-track", t); } catch {}
   };
 
-  // Parse the markdown ONCE (memoized on the source). Overview is always shown; the
-  // walkthrough renders both Console+CLI tracks into the DOM and the toggle flips
-  // which is visible purely via CSS (data-track on the article) — instant, no re-parse.
-  const { overviewNodes, walkthroughNodes, hasTracks, hasWalkthrough, stepTitles } = useMemo(() => {
+  // Paid labs: the walkthrough (answers + capture flag) is never shipped in the page
+  // payload. Fetch it from the entitlement-checked route once launched — launch already
+  // requires entitlement, and the route re-checks server-side.
+  useEffect(() => {
+    if (!gatedSlug || !launched || remoteWt !== null) return;
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/lab-content?slug=${encodeURIComponent(gatedSlug)}`, { cache: "no-store" });
+        const d = r.ok ? await r.json().catch(() => ({})) : {};
+        if (alive) setRemoteWt(typeof d.walkthrough === "string" ? d.walkthrough : "");
+      } catch {
+        if (alive) setRemoteWt("");
+      }
+    })();
+    return () => { alive = false; };
+  }, [gatedSlug, launched, remoteWt]);
+
+  // Overview is always local (parsed once). The walkthrough is local for free labs,
+  // fetched for paid. `wtSource === null` means "gated, not fetched yet".
+  const { overviewNodes, localWalkthrough } = useMemo(() => {
     const { overview, walkthrough } = splitGuide(instructions);
-    const overviewNodes = (
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{overview}</ReactMarkdown>
-    );
-    // Pull the "## Step N — Title" headings so the launch gate can preview the
-    // locked steps (the part after the dash, e.g. "Recon: prove the exposure").
-    const stepTitles: string[] = [];
-    const stepRe = /^##\s+Step\s+\d+\s*[—–-]\s*(.+?)\s*$/gm;
-    let m: RegExpExecArray | null;
-    while ((m = stepRe.exec(walkthrough)) !== null) stepTitles.push(m[1].trim());
-    const segs = splitTracks(walkthrough);
-    const has = segs.some((s) => s.kind !== "common");
-    const walkthroughNodes = segs.map((s, i) =>
+    return {
+      overviewNodes: <ReactMarkdown remarkPlugins={[remarkGfm]}>{overview}</ReactMarkdown>,
+      localWalkthrough: walkthrough,
+    };
+  }, [instructions]);
+
+  const wtSource = gatedSlug ? remoteWt : localWalkthrough;
+  const hasWalkthrough = gatedSlug ? true : localWalkthrough.trim().length > 0;
+
+  const { walkthroughNodes, hasTracks } = useMemo(() => {
+    const segs = splitTracks(wtSource ?? "");
+    const nodes = segs.map((s, i) =>
       s.kind === "common" ? (
-        <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
-          {s.text}
-        </ReactMarkdown>
+        <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>{s.text}</ReactMarkdown>
       ) : (
         <div key={i} className={`ss-track ss-track-${s.kind}`}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.text}</ReactMarkdown>
         </div>
       )
     );
-    return { overviewNodes, walkthroughNodes, hasTracks: has, hasWalkthrough: segs.length > 0, stepTitles };
-  }, [instructions]);
+    return { walkthroughNodes: nodes, hasTracks: segs.some((s) => s.kind !== "common") };
+  }, [wtSource]);
+
+  // Launch-gate step preview: prefer server-provided titles (so the preview works even
+  // when the walkthrough body is gated), else derive from a local walkthrough.
+  const stepTitles = useMemo(() => {
+    if (stepTitlesProp && stepTitlesProp.length) return stepTitlesProp;
+    const out: string[] = [];
+    const re = /^##\s+Step\s+\d+\s*[—–-]\s*(.+?)\s*$/gm;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(localWalkthrough)) !== null) out.push(m[1].trim());
+    return out;
+  }, [stepTitlesProp, localWalkthrough]);
 
   // Free labs and already-paid users get immediate access.
   // hasAccess() returns true for free labs without needing entitlements.
@@ -178,8 +217,14 @@ export function LabGuide({ slug, instructions }: { slug: string; instructions: s
             <div className="mt-6 mb-5 flex items-center gap-2 rounded-lg border border-brand/30 bg-brand/5 px-3 py-2 text-sm font-semibold text-brand">
               <span aria-hidden>✓</span> Lab launched — here&apos;s your full walkthrough
             </div>
-            {hasTracks && <TrackToggle track={track} onPick={pick} />}
-            {walkthroughNodes}
+            {wtSource === null ? (
+              <p className="text-sm text-muted">Loading the walkthrough&hellip;</p>
+            ) : (
+              <>
+                {hasTracks && <TrackToggle track={track} onPick={pick} />}
+                {walkthroughNodes}
+              </>
+            )}
           </div>
         ) : (
           <LaunchGate steps={stepTitles} />

@@ -10,6 +10,25 @@ import { LabWorkspaceProvider } from "@/components/lab-workspace";
 
 type Objective = { id: string; description: string };
 
+// Split a lab's markdown at the "<!-- ss:walkthrough -->" sentinel (fallback: first
+// "## Step"). For PAID labs we ship ONLY the overview into the public payload; the
+// walkthrough (answers + capture flag) is fetched later from an entitlement-checked
+// route. Step headings are NOT sensitive, so they're passed through for the launch-gate
+// preview even when the body is gated.
+function splitSentinel(md: string): [string, string] {
+  const m = md.match(/<!--\s*ss:walkthrough\s*-->/);
+  if (m && m.index != null) return [md.slice(0, m.index), md.slice(m.index + m[0].length)];
+  const step = md.search(/^##\s+Step\b/m);
+  return step >= 0 ? [md.slice(0, step), md.slice(step)] : [md, ""];
+}
+function extractStepTitles(walkthrough: string): string[] {
+  const out: string[] = [];
+  const re = /^##\s+Step\s+\d+\s*[—–-]\s*(.+?)\s*$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(walkthrough)) !== null) out.push(m[1].trim());
+  return out;
+}
+
 export function generateStaticParams() {
   return LABS.map((l) => ({ slug: l.slug }));
 }
@@ -37,8 +56,15 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
   const lab = getLab(slug);
   if (!lab) notFound();
 
-  const instructions = lab.ready ? (labInstructions[slug] ?? null) : null;
+  const full = lab.ready ? (labInstructions[slug] ?? null) : null;
+  const [overview, walkthrough] = full ? splitSentinel(full) : [null, ""];
   const objectives: Objective[] = lab.ready ? (labObjectives[slug] ?? []) : [];
+
+  // Paid labs: ship ONLY the overview to the client; gate the walkthrough behind the
+  // entitlement-checked /api/lab-content route. Free labs ship the full guide as before.
+  const gated = lab.ready && !lab.free;
+  const instructions = full ? (gated ? overview : full) : null;
+  const stepTitles = full ? extractStepTitles(walkthrough) : [];
 
   return (
     <div className="mx-auto max-w-6xl px-5 py-8">
@@ -61,7 +87,12 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
           {/* guide */}
           <div className="lg:col-span-2">
             {lab.ready && instructions ? (
-              <LabGuide slug={lab.slug} instructions={instructions} />
+              <LabGuide
+                slug={lab.slug}
+                instructions={instructions}
+                gatedSlug={gated ? lab.slug : undefined}
+                stepTitles={stepTitles}
+              />
             ) : (
               <div className="rounded-2xl border border-line bg-canvas p-6 text-base text-ink-soft">
                 {lab.ready ? "Guide not available yet." : "This lab is coming soon."}
