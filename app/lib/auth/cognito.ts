@@ -134,7 +134,8 @@ export async function makeSession(u: SessionUser): Promise<string> {
 export async function readSession(token: string): Promise<SessionUser | null> {
   try {
     const KEY = new TextEncoder().encode(cfg().SESSION_SECRET);
-    const { payload } = await jwtVerify(token, KEY);
+    // Pin the algorithm — never let a token dictate its own verification alg.
+    const { payload } = await jwtVerify(token, KEY, { algorithms: ["HS256"] });
     return {
       id: String(payload.sub ?? ""),
       email: String((payload as Record<string, unknown>).email ?? ""),

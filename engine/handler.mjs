@@ -375,6 +375,9 @@ export async function handler(event) {
       // lab? Lets ANY tab/device restore the running lab — not just the tab that
       // launched it (closes the sessionStorage-only per-tab gap).
       const labSlug = event.queryStringParameters?.labSlug;
+      // Prod: require an identified caller; never fall back to a shared "anon"
+      // bucket (an unauthenticated caller must not see anyone's live session).
+      if (ENGINE_SHARED_SECRET && !callerUserId) return resp(200, { session: null });
       const s = await findActiveSession(callerUserId || "anon", labSlug);
       return resp(200, { session: s });
     }
@@ -406,7 +409,7 @@ export async function handler(event) {
       if (!s) return resp(404, { error: "not found" });
       // Ownership: when the caller is identified, only return THEIR session.
       // (Anonymous local-dev callers see anything, matching prior behaviour.)
-      if (callerUserId && s.userId && s.userId !== callerUserId) {
+      if ((ENGINE_SHARED_SECRET && !callerUserId) || (s.userId && s.userId !== callerUserId)) {
         return resp(404, { error: "not found" });
       }
       return resp(200, s);
@@ -416,7 +419,7 @@ export async function handler(event) {
       const { sessionId } = parsed;
       const s = await getSession(sessionId);
       if (!s) return resp(404, { error: "not found" });
-      if (callerUserId && s.userId && s.userId !== callerUserId) {
+      if ((ENGINE_SHARED_SECRET && !callerUserId) || (s.userId && s.userId !== callerUserId)) {
         return resp(403, { error: "forbidden" });
       }
       if (s.status !== "active") return resp(409, { error: "not ready", status: s.status });
@@ -434,7 +437,7 @@ export async function handler(event) {
       const { sessionId } = parsed;
       const s = await getSession(sessionId);
       if (!s) return resp(404, { error: "not found" });
-      if (callerUserId && s.userId && s.userId !== callerUserId) {
+      if ((ENGINE_SHARED_SECRET && !callerUserId) || (s.userId && s.userId !== callerUserId)) {
         return resp(403, { error: "forbidden" });
       }
       await markSession(sessionId, "ending").catch(() => {});
@@ -488,7 +491,7 @@ export async function handler(event) {
       const { sessionId } = parsed;
       const s = await getSession(sessionId);
       if (!s) return resp(404, { error: "not found" });
-      if (callerUserId && s.userId && s.userId !== callerUserId) {
+      if ((ENGINE_SHARED_SECRET && !callerUserId) || (s.userId && s.userId !== callerUserId)) {
         return resp(403, { error: "forbidden" });
       }
       if (s.status !== "active") return resp(409, { error: "not ready", status: s.status });
@@ -512,8 +515,10 @@ export async function handler(event) {
     }
 
     if (method === "GET" && path === "/entitlements") {
-      const userId = event.queryStringParameters?.userId ?? null;
-      if (!userId) return resp(400, { error: "userId required" });
+      // Prod: serve ONLY the authenticated caller's entitlements — never a
+      // client-supplied ?userId (that allowed reading anyone's purchases).
+      const userId = ENGINE_SHARED_SECRET ? callerUserId : (callerUserId || event.queryStringParameters?.userId || null);
+      if (!userId) return resp(ENGINE_SHARED_SECRET ? 401 : 400, { error: ENGINE_SHARED_SECRET ? "unauthorized" : "userId required" });
       const items = await listEntitlements(userId);
       return resp(200, { entitlements: items });
     }

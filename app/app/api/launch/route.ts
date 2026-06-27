@@ -18,7 +18,13 @@ export async function POST(req: Request) {
   // Prefer the VERIFIED session id; never trust a client-supplied userId when a
   // real session exists. Falls back to the body id only in mock/offline mode.
   const sessionUser = await getServerUser();
-  const userId = sessionUser?.id ?? body.userId;
+  // Prod: only a verified session may launch. A client-supplied userId would let
+  // an unauthenticated caller burn a pool seat + pin rate-limit/lock counters on
+  // a victim id. The dev/offline path keeps the body fallback.
+  const userId = sessionUser?.id ?? (process.env.ENGINE_SHARED_SECRET ? null : body.userId);
+  if (process.env.ENGINE_SHARED_SECRET && !userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   const lab = labSlug ? getLab(labSlug) : undefined;
   if (!lab) return NextResponse.json({ error: "unknown lab" }, { status: 404 });
   if (!lab.ready) return NextResponse.json({ error: "lab not available" }, { status: 409 });
