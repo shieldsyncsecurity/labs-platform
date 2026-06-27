@@ -37,17 +37,26 @@ export async function getOrder(orderId: string): Promise<Order | null> {
   }
 }
 
-// Atomic, idempotent transition created -> paid. Returns true ONLY for the call
-// that actually flipped the status, so out of N webhook retries for the same
-// payment exactly one grants the entitlement. Any failure returns false, which
-// the webhook treats as "do not grant" (fail closed).
-export async function markOrderPaid(orderId: string, paymentId: string): Promise<boolean> {
+// Confirm a paid order at the engine: the engine re-validates amount/currency vs the
+// persisted order (#8), GRANTS the entitlement idempotently from the stored order, then
+// records created->paid (#7). `granted` is the success contract — the webhook only
+// returns ok when it's true; otherwise it 5xx's so the provider retries. Passing the
+// provider-reported amount/currency lets the engine cross-check at its own boundary.
+export async function markOrderPaid(
+  orderId: string,
+  paymentId: string,
+  amountMinor?: number,
+  currency?: string
+): Promise<{ transitioned: boolean; granted: boolean }> {
   try {
-    const r = await engineFetch("/orders/paid", { method: "POST", body: { orderId, paymentId } });
-    if (!r.ok) return false;
-    const data = (await r.json()) as { transitioned?: boolean };
-    return data.transitioned === true;
+    const r = await engineFetch("/orders/paid", {
+      method: "POST",
+      body: { orderId, paymentId, amountMinor, currency },
+    });
+    if (!r.ok) return { transitioned: false, granted: false };
+    const data = (await r.json()) as { transitioned?: boolean; granted?: boolean };
+    return { transitioned: data.transitioned === true, granted: data.granted === true };
   } catch {
-    return false;
+    return { transitioned: false, granted: false };
   }
 }

@@ -499,9 +499,27 @@ export async function handler(event) {
     }
 
     if (method === "POST" && path === "/orders/paid") {
-      const { orderId, paymentId } = parsed;
+      const { orderId, paymentId, amountMinor, currency } = parsed;
+      const order = await getOrder(orderId);
+      if (!order) return resp(404, { error: "order not found" });
+      // #8: re-validate the payment against the PERSISTED order at the engine's own
+      // trust boundary — don't take the caller's word on the amount. (The app webhook
+      // already verified the provider signature; this is defense in depth.)
+      if (amountMinor != null && (Number(amountMinor) !== order.amountMinor || (currency && currency !== order.currency))) {
+        console.warn(`[orders/paid] amount/currency mismatch on ${orderId}`);
+        return resp(400, { error: "amount mismatch" });
+      }
+      // #7: GRANT first (idempotent upsert), THEN record paid. A grant failure leaves
+      // the order unpaid so the provider retries (no "charged, no access"). The grant is
+      // derived from the STORED order — never a client-supplied userId/labSlug/window —
+      // and the access window is computed HERE from the engine's own rules (authoritative).
+      const labSlug = order.plan === "monthly" ? "*" : (order.labSlug ?? "");
+      const kind = order.plan === "monthly" ? "monthly" : "per-lab";
+      const windowH = order.plan === "monthly" ? 30 * 24 : rulesFor(order.labSlug || "").windowHours;
+      const accessUntil = new Date(Date.now() + windowH * 3600 * 1000).toISOString();
+      await grantEntitlement(order.userId, { labSlug, kind, accessUntil });
       const transitioned = await markOrderPaid(orderId, paymentId);
-      return resp(200, { transitioned });
+      return resp(200, { transitioned, granted: true });
     }
 
     if (method === "POST" && path === "/grade") {
