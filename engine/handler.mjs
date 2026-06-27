@@ -177,15 +177,26 @@ export async function handler(event) {
         // wave of expiries now recovers the pool in ~1x nuke time, not Nx — and no
         // single reap can time out mid-nuke and strand later accounts.
         const { activeChecked, expired } = await findExpiredSessions();
-        for (const sessionId of expired) {
+        // #23: bound the per-run fan-out. The account's TOTAL Lambda concurrency limit
+        // is only 10 (new-account default), shared by HTTP + every worker. A teardown
+        // worker holds a slot for minutes (aws-nuke), so an expiry wave that dispatched
+        // many at once would throttle the HTTP launch/console path. Cap at 4 (ample for
+        // the 3-account pool); the rest is caught next reap tick (~3min) and the atomic
+        // teardown claim makes a re-dispatch safe. ⚠️ Raise this only after the Lambda
+        // concurrency limit is raised alongside the pool.
+        const MAX_TEARDOWN_DISPATCH = 4;
+        const batch = expired.slice(0, MAX_TEARDOWN_DISPATCH);
+        for (const sessionId of batch) {
           await invokeWorker("teardown", { sessionId }).catch((e) =>
             console.error(`[reap] dispatch teardown ${sessionId} failed: ${e.message}`)
           );
         }
-        metric({ Reaped: expired.length });
+        const deferred = expired.length - batch.length;
+        if (deferred > 0) console.log(`[reap] deferred ${deferred} teardown(s) to next tick (fan-out cap ${MAX_TEARDOWN_DISPATCH})`);
+        metric({ Reaped: batch.length });
         console.log(
-          `[worker] reap: checked ${activeChecked}, expired ${expired.length}, dispatched ${expired.length}` +
-            (expired.length ? ` (${expired.join(", ")})` : "")
+          `[worker] reap: checked ${activeChecked}, expired ${expired.length}, dispatched ${batch.length}` +
+            (batch.length ? ` (${batch.join(", ")})` : "")
         );
       } catch (e) {
         console.error(`[worker] reap failed: ${e.message}`);

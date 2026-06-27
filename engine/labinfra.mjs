@@ -22,7 +22,7 @@ import {
   DescribeStacksCommand,
   waitUntilStackCreateComplete,
 } from "@aws-sdk/client-cloudformation";
-import { IAMClient, PutRolePolicyCommand } from "@aws-sdk/client-iam";
+import { IAMClient, PutRolePolicyCommand, DeleteRolePolicyCommand } from "@aws-sdk/client-iam";
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -1023,6 +1023,23 @@ export async function teardown(sessionId) {
       // generic long base64-ish blob (session tokens are usually >100 chars)
       .replace(/[A-Za-z0-9+/=_-]{60,}/g, "<redacted-token>");
     throw new Error(`aws-nuke failed: ${detail}`);
+  }
+
+  // #22: remove the one-shot revoke Deny we wrote at the START of this teardown so the
+  // NEXT tenant inherits a clean ShieldSyncLabUser role. aws-nuke deliberately preserves
+  // the control roles' inline policies, so without this the Deny would persist forever
+  // (inert, but dead state that contradicts the "fully wiped" contract). Best-effort —
+  // never block the account from returning to the pool.
+  try {
+    const iamCleanup = new IAMClient({
+      region: REGION,
+      credentials: { accessKeyId: c.AccessKeyId, secretAccessKey: c.SecretAccessKey, sessionToken: c.SessionToken },
+    });
+    await iamCleanup.send(
+      new DeleteRolePolicyCommand({ RoleName: "ShieldSyncLabUser", PolicyName: "ShieldSyncRevokeSessions" })
+    );
+  } catch (e) {
+    if (e.name !== "NoSuchEntity") console.log(`  [teardown] revoke-policy cleanup skipped on ${accountId}: ${e.name}`);
   }
 
   await db.send(

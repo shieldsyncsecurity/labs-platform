@@ -85,16 +85,38 @@ function TrackToggle({ track, onPick }: { track: Track; onPick: (t: Track) => vo
   );
 }
 
-// Shown in place of the walkthrough until the learner launches the lab.
-function LaunchGate() {
+// Shown in place of the walkthrough until the learner launches the lab. Left-aligned
+// to sit flush with the guide above, and it previews the actual locked steps so the
+// learner sees exactly what they'll unlock (a teaser, not an empty placeholder).
+function LaunchGate({ steps }: { steps: string[] }) {
   return (
-    <div className="mt-6 rounded-2xl border border-dashed border-brand/40 bg-brand/5 p-6 text-center">
-      <p className="text-2xl" aria-hidden>🚀</p>
-      <p className="mt-2 text-base font-extrabold text-ink">Launch the lab to unlock the walkthrough</p>
-      <p className="mx-auto mt-1 max-w-sm text-sm text-ink-soft">
-        Click <strong>Launch lab</strong> on the right to spin up your own isolated AWS account. The full
-        step-by-step guide (with 🖱️ Console and ⌨️ CLI for every fix) unlocks the moment it&apos;s ready.
-      </p>
+    <div className="not-prose mt-6 overflow-hidden rounded-2xl border border-line bg-surface">
+      <div className="border-b border-line bg-canvas px-5 py-4">
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="text-base">🔒</span>
+          <p className="text-base font-extrabold text-ink">Your step-by-step walkthrough</p>
+        </div>
+        <p className="mt-1 text-sm text-ink-soft">
+          Hit <strong>Launch lab</strong> on the right — your own isolated AWS account spins up and the full
+          guide opens right here, with 🖱️ Console and ⌨️ CLI for every fix.
+        </p>
+      </div>
+      {steps.length > 0 && (
+        <ol className="divide-y divide-line">
+          {steps.map((s, i) => (
+            <li key={i} className="flex items-center gap-3 px-5 py-2.5">
+              <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-canvas text-xs font-bold text-muted ring-1 ring-line">
+                {i + 1}
+              </span>
+              <span className="text-sm text-ink-soft">{s}</span>
+            </li>
+          ))}
+          <li className="flex items-center gap-3 px-5 py-2.5">
+            <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-canvas text-xs text-muted ring-1 ring-line" aria-hidden>✓</span>
+            <span className="text-sm text-muted">Check my work — auto-graded against your live account</span>
+          </li>
+        </ol>
+      )}
     </div>
   );
 }
@@ -118,11 +140,17 @@ export function LabGuide({ slug, instructions }: { slug: string; instructions: s
   // Parse the markdown ONCE (memoized on the source). Overview is always shown; the
   // walkthrough renders both Console+CLI tracks into the DOM and the toggle flips
   // which is visible purely via CSS (data-track on the article) — instant, no re-parse.
-  const { overviewNodes, walkthroughNodes, hasTracks, hasWalkthrough } = useMemo(() => {
+  const { overviewNodes, walkthroughNodes, hasTracks, hasWalkthrough, stepTitles } = useMemo(() => {
     const { overview, walkthrough } = splitGuide(instructions);
     const overviewNodes = (
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{overview}</ReactMarkdown>
     );
+    // Pull the "## Step N — Title" headings so the launch gate can preview the
+    // locked steps (the part after the dash, e.g. "Recon: prove the exposure").
+    const stepTitles: string[] = [];
+    const stepRe = /^##\s+Step\s+\d+\s*[—–-]\s*(.+?)\s*$/gm;
+    let m: RegExpExecArray | null;
+    while ((m = stepRe.exec(walkthrough)) !== null) stepTitles.push(m[1].trim());
     const segs = splitTracks(walkthrough);
     const has = segs.some((s) => s.kind !== "common");
     const walkthroughNodes = segs.map((s, i) =>
@@ -136,7 +164,7 @@ export function LabGuide({ slug, instructions }: { slug: string; instructions: s
         </div>
       )
     );
-    return { overviewNodes, walkthroughNodes, hasTracks: has, hasWalkthrough: segs.length > 0 };
+    return { overviewNodes, walkthroughNodes, hasTracks: has, hasWalkthrough: segs.length > 0, stepTitles };
   }, [instructions]);
 
   // Free labs and already-paid users get immediate access.
@@ -154,7 +182,7 @@ export function LabGuide({ slug, instructions }: { slug: string; instructions: s
             {walkthroughNodes}
           </div>
         ) : (
-          <LaunchGate />
+          <LaunchGate steps={stepTitles} />
         )}
       </article>
     );
