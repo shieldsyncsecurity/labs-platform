@@ -1,0 +1,56 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyExpensiveServices",
+      "Effect": "Deny",
+      "Action": [
+        "eks:*",
+        "elasticache:*",
+        "redshift:*",
+        "redshift-serverless:*",
+        "sagemaker:*",
+        "elasticmapreduce:*",
+        "lightsail:*",
+        "batch:*",
+        "apprunner:*",
+        "rds:CreateDBInstance",
+        "rds:CreateDBCluster",
+        "rds:RestoreDBInstanceFromDBSnapshot",
+        "rds:RestoreDBClusterFromSnapshot",
+        "elasticbeanstalk:CreateEnvironment",
+        "ecs:RunTask",
+        "ecs:CreateService",
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream",
+        "bedrock:CreateModelCustomizationJob"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyServerLaunchAndNetworking",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:RunInstances",
+        "ec2:RequestSpotInstances",
+        "ec2:RequestSpotFleet",
+        "ec2:CreateFleet",
+        "ec2:RunScheduledInstances",
+        "ec2:CreateVpc",
+        "ec2:CreateDefaultVpc",
+        "ec2:CreateSubnet",
+        "ec2:CreateDefaultSubnet",
+        "ec2:CreateInternetGateway",
+        "ec2:CreateEgressOnlyInternetGateway",
+        "ec2:CreateNatGateway",
+        "ec2:CreateVpcEndpoint",
+        "ec2:CreateVpcPeeringConnection",
+        "ec2:AcceptVpcPeeringConnection",
+        "ec2:CreateTransitGateway",
+        "ec2:CreateClientVpnEndpoint",
+        "ec2:AllocateAddress"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
