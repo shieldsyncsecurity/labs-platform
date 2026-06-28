@@ -1,7 +1,3 @@
-# S3 Misconfiguration & Data Exposure
-
-**Level:** Beginner · **Free lab** · **~30 min** · Region: us-east-1
-
 ## The scenario
 
 A small team shipped fast and left their S3 estate exposed. Two buckets are

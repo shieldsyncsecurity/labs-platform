@@ -1,7 +1,3 @@
-# IAM Privilege Escalation
-
-**Level:** Intermediate · **~75 min** · Region: us-east-1
-
 > You have admin access to this throwaway account via the console/CloudShell — that's
 > your *defender* seat. The lab also hands you a **separate, low-privileged identity**
 > (leaked keys) to attack with. Everything is auto-destroyed when your session ends.
