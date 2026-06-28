@@ -87,10 +87,14 @@ console.log(`Wrote ${CATALOG_OUT} (${catalog.length} labs)`);
 // and reads at console-mint to fence the learner's session to exactly what the lab
 // needs). A ready lab WITHOUT one would mint an UNSCOPED admin console, so fail the
 // build — this is the scalable guardrail as the catalog grows to 100 labs.
-// 2048 is the STS inline session-policy hard limit; the engine merges a ~300-char
-// control-plane guardrail-deny, so budget the lab part under ~1700.
-const SESSION_POLICY_LIMIT = 2048;
-const GUARDRAIL_BUDGET = 350;
+// STS PACKS (compresses) session policies and the PACKED size — not the 2048-char
+// plaintext limit — is the real ceiling. Empirically a ~1166-char bare doc already
+// blew the packed budget (PackedPolicyTooLarge), so gate conservatively on the bare
+// plaintext: keep each lab's learnerPolicy doc well under ~1000 chars, preferring
+// resource-scoped wildcards (e.g. s3:* on the lab buckets) over long action lists.
+// The AUTHORITATIVE check is engine/verify-leastpriv.mjs (assumes the role with the
+// real merged policy and probes allow/deny).
+const MAX_BARE_POLICY_CHARS = 1000;
 for (const slug of slugs) {
   if (!existsSync(join(LABS_ROOT, slug, "template.yaml"))) continue; // not ready → exempt
   const engineLabJson = join(LABS_ROOT, slug, "lab.json");
@@ -105,9 +109,8 @@ for (const slug of slugs) {
     );
   }
   const size = JSON.stringify({ Version: "2012-10-17", Statement: statements }).length;
-  const budget = SESSION_POLICY_LIMIT - GUARDRAIL_BUDGET;
-  if (size > budget) {
-    throw new Error(`[least-priv] "${slug}" learnerPolicy is ${size} chars; must stay under ${budget} (STS session-policy limit ${SESSION_POLICY_LIMIT} minus guardrail). Tighten it.`);
+  if (size > MAX_BARE_POLICY_CHARS) {
+    throw new Error(`[least-priv] "${slug}" learnerPolicy is ${size} chars; keep it under ${MAX_BARE_POLICY_CHARS} (STS packs session policies — a larger doc can exceed the packed limit; verify with engine/verify-leastpriv.mjs).`);
   }
-  console.log(`  [least-priv] ${slug}: learnerPolicy OK (${size} chars + guardrail < ${SESSION_POLICY_LIMIT})`);
+  console.log(`  [least-priv] ${slug}: learnerPolicy OK (${size} chars bare)`);
 }

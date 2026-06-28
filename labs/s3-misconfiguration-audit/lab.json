@@ -55,8 +55,8 @@
     { "Sid": "CloudShell", "Effect": "Allow", "Action": "cloudshell:*", "Resource": "*" },
     { "Sid": "Identity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" },
     { "Sid": "S3ListAndAccountBpa", "Effect": "Allow", "Action": ["s3:ListAllMyBuckets", "s3:GetAccountPublicAccessBlock", "s3:PutAccountPublicAccessBlock"], "Resource": "*" },
-    { "Sid": "S3LabBuckets", "Effect": "Allow", "Action": ["s3:ListBucket", "s3:GetBucketLocation", "s3:GetBucketPolicy", "s3:PutBucketPolicy", "s3:DeleteBucketPolicy", "s3:GetBucketPolicyStatus", "s3:GetBucketAcl", "s3:PutBucketAcl", "s3:GetBucketOwnershipControls", "s3:PutBucketOwnershipControls", "s3:GetBucketPublicAccessBlock", "s3:PutBucketPublicAccessBlock", "s3:GetEncryptionConfiguration", "s3:PutEncryptionConfiguration", "s3:GetObject", "s3:PutObject"], "Resource": ["arn:aws:s3:::sslab-*", "arn:aws:s3:::sslab-*/*"] },
-    { "Sid": "IamAuditorUser", "Effect": "Allow", "Action": ["iam:GetUser", "iam:GetUserPolicy", "iam:PutUserPolicy", "iam:DeleteUserPolicy", "iam:ListUserPolicies", "iam:ListAttachedUserPolicies"], "Resource": "arn:aws:iam::*:user/lab/*" },
+    { "Sid": "S3LabBuckets", "Effect": "Allow", "Action": "s3:*", "Resource": ["arn:aws:s3:::sslab-*", "arn:aws:s3:::sslab-*/*"] },
+    { "Sid": "IamLabUser", "Effect": "Allow", "Action": "iam:*", "Resource": "arn:aws:iam::*:user/lab/*" },
     { "Sid": "IamConsoleNav", "Effect": "Allow", "Action": "iam:ListUsers", "Resource": "*" }
   ],
 

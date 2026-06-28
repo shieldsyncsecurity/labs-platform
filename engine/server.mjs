@@ -127,7 +127,7 @@ const server = createServer(async (req, res) => {
       const s = await getSession(sessionId);
       if (!s) return send(res, 404, { error: "not found" });
       if (s.status !== "active") return send(res, 409, { error: "not ready", status: s.status });
-      const url = await mintConsoleUrl({ accountId: s.accountId });
+      const url = await mintConsoleUrl({ accountId: s.accountId, labSlug: s.labSlug });
       return send(res, 200, { consoleUrl: url.consoleUrl, expiresInSeconds: url.expiresInSeconds });
     }
 

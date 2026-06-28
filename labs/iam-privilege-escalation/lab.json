@@ -51,8 +51,8 @@
     { "Sid": "Identity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" },
     { "Sid": "Flag", "Effect": "Allow", "Action": "ssm:GetParameter", "Resource": "arn:aws:ssm:*:*:parameter/shieldsync/lab/flag" },
     { "Sid": "IamConsoleNav", "Effect": "Allow", "Action": ["iam:ListUsers", "iam:ListPolicies", "iam:SimulatePrincipalPolicy"], "Resource": "*" },
-    { "Sid": "IamLabUser", "Effect": "Allow", "Action": ["iam:GetUser", "iam:ListUserPolicies", "iam:GetUserPolicy", "iam:PutUserPolicy", "iam:DeleteUserPolicy", "iam:ListAttachedUserPolicies", "iam:AttachUserPolicy", "iam:DetachUserPolicy"], "Resource": "arn:aws:iam::*:user/lab/*" },
-    { "Sid": "IamManagedPolicy", "Effect": "Allow", "Action": ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion"], "Resource": "arn:aws:iam::*:policy/*" }
+    { "Sid": "IamLabUser", "Effect": "Allow", "Action": "iam:*", "Resource": "arn:aws:iam::*:user/lab/*" },
+    { "Sid": "IamLabPolicy", "Effect": "Allow", "Action": "iam:*", "Resource": "arn:aws:iam::*:policy/*" }
   ],
 
   "estimatedAwsCostInr": 1,
