@@ -22,11 +22,9 @@ The Session Engine gives you the leaked keys:
 | `VulnerablePolicyArn` | `LabDeployerPolicy` (the policy to fix) |
 | `FlagParameterName` | `/shieldsync/lab/flag` (read it once you're admin) |
 
-## Your mission (the grader checks these)
+## Your mission
 
-1. **Admin detached** — `pipeline-deployer` has no AdministratorAccess (managed or inline).
-2. **Primitive removed** — `LabDeployerPolicy` no longer grants `iam:AttachUserPolicy` (or other IAM-write) on `*`.
-3. **Still works** — the user keeps its legitimate read permissions.
+**Prove** the escalation by capturing the admin-only flag, then **close it**: detach the admin you attached, strip the dangerous IAM-write permission from the policy, and keep the user's legitimate reads working. **Check my work** verifies each fix against your *live* account — a real grader, not a static checklist (your progress shows in the panel on the right).
 
 <!-- ss:walkthrough -->
 

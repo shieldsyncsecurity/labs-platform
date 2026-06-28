@@ -10,12 +10,7 @@ world-readable, neither enforces encryption or HTTPS, and a service account has
 
 ## What you'll do
 
-By the end you'll have closed four real misconfigurations — exactly what the **Check my work** grader verifies:
-
-1. **No public buckets** — no anonymous read on any lab bucket.
-2. **Encryption required** — each bucket denies unencrypted `PutObject`.
-3. **TLS only** — each bucket denies non-HTTPS requests.
-4. **Least-privilege IAM** — the `auditor` user no longer has `s3:*` on `*`.
+You'll close **four real misconfigurations** — public buckets, missing encryption, non-TLS access, and an over-broad IAM user. **Check my work** then verifies each fix against your *live* AWS account — a real grader, not a static checklist. (Your live progress shows in the panel on the right.)
 
 **Launch the lab** (panel on the right) to spin up your own isolated AWS account — the full step-by-step walkthrough unlocks the moment it's ready.
 

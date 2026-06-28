@@ -75,15 +75,38 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
         ← All labs
       </Link>
 
-      {/* header clamped so the title/summary don't sprawl across the wide shell */}
-      <div className="mt-4 max-w-3xl">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`rounded-md px-2 py-0.5 text-xs font-bold badge-${lab.level.toLowerCase()}`}>{lab.level}</span>
-          {lab.free && <span className="rounded-md bg-brand/10 px-2 py-0.5 text-xs font-bold text-brand">FREE</span>}
-          <span className="text-sm text-muted">~{lab.estimatedActiveMinutes} min</span>
+      {/* header: title/summary on the left + a compact "how it's graded" card filling
+          the wide shell's right side (the auto-grader is our #1 differentiator).
+          Stacks under the title on mobile. */}
+      <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="max-w-3xl">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-md px-2 py-0.5 text-xs font-bold badge-${lab.level.toLowerCase()}`}>{lab.level}</span>
+            {lab.free && <span className="rounded-md bg-brand/10 px-2 py-0.5 text-xs font-bold text-brand">FREE</span>}
+            <span className="text-sm text-muted">~{lab.estimatedActiveMinutes} min</span>
+          </div>
+          <h1 className="mt-3 text-3xl font-extrabold text-ink">{lab.title}</h1>
+          <p className="mt-2 text-lg text-ink-soft">{lab.summary}</p>
         </div>
-        <h1 className="mt-3 text-3xl font-extrabold text-ink">{lab.title}</h1>
-        <p className="mt-2 text-lg text-ink-soft">{lab.summary}</p>
+        {lab.ready && (
+          <aside className="rounded-2xl border border-line bg-canvas p-4 lg:w-[21rem] lg:flex-none">
+            <p className="text-xs font-bold uppercase tracking-wider text-brand">Real · graded · disposable</p>
+            <ul className="mt-2.5 space-y-2.5 text-sm text-ink-soft">
+              <li className="flex gap-2">
+                <span aria-hidden>✓</span>
+                <span><strong className="text-ink">Auto-graded, not a checklist.</strong> Hit <strong>Check my work</strong> and we inspect your <em>live</em> AWS account against each objective.</span>
+              </li>
+              <li className="flex gap-2">
+                <span aria-hidden>🛡️</span>
+                <span><strong className="text-ink">Your own isolated AWS account</strong> — the real console, nothing shared, nothing you can break for real.</span>
+              </li>
+              <li className="flex gap-2">
+                <span aria-hidden>🧹</span>
+                <span><strong className="text-ink">Wiped automatically</strong> when you finish. No setup, no cleanup, no bill.</span>
+              </li>
+            </ul>
+          </aside>
+        )}
       </div>
 
       {lab.ready && <LabIntro />}
