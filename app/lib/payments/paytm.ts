@@ -169,7 +169,7 @@ export async function initiateTransaction(args: {
   }
 }
 
-export type StatusResult = { ok: boolean; status?: string; amountMinor?: number; currency?: string; paymentId?: string; raw?: unknown };
+export type StatusResult = { ok: boolean; status?: string; amountMinor?: number; currency?: string; paymentId?: string; error?: string; raw?: unknown };
 
 /** Order Status: the authoritative server-to-server confirmation of a payment. */
 export async function transactionStatus(orderId: string): Promise<StatusResult> {
@@ -183,8 +183,18 @@ export async function transactionStatus(orderId: string): Promise<StatusResult> 
       body: JSON.stringify({ body, head: { signature } }),
     });
     const data = (await r.json()) as {
+      head?: { signature?: string };
       body?: { resultInfo?: { resultStatus?: string }; txnAmount?: string; currency?: string; txnId?: string };
     };
+    // SECURITY: this is the AUTHORITATIVE grant gate — verify Paytm signed the
+    // response (head.signature over the body) with OUR key before trusting any
+    // TXN_SUCCESS. Without this, a tampered/misrouted response could forge a grant.
+    // (Paytm's documented verification re-serialises the parsed body via JSON.)
+    const sig = data?.head?.signature;
+    const verified = sig ? await verifySignature(JSON.stringify(data.body ?? {}), cfg.key, sig) : false;
+    if (!verified) {
+      return { ok: false, error: "response checksum verification failed", raw: data };
+    }
     const b = data?.body;
     const amt = b?.txnAmount ? Math.round(parseFloat(b.txnAmount) * 100) : undefined;
     return {

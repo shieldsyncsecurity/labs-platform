@@ -10,6 +10,13 @@ const isDev = process.env.NODE_ENV !== "production";
  *   https://<your-domain>.auth.<region>.amazoncognito.com  https://cognito-idp.<region>.amazonaws.com
  * and `form-action` with the Hosted UI domain if you use the redirect flow.
  */
+// Paytm Checkout needs to load its CheckoutJS script, render the payment iframe,
+// and make its own XHR — without these the live checkout silently fails the moment
+// PAYMENTS_LIVE is on. Harmless when payments are off (nothing loads from them).
+const PAYTM = "https://securestage.paytmpayments.com https://secure.paytmpayments.com https://*.paytmpayments.com";
+// Cognito (sign-in is server-side redirects, but allow its XHR/endpoints defensively).
+const COGNITO = "https://cognito-idp.us-east-1.amazonaws.com https://*.auth.us-east-1.amazoncognito.com";
+
 const csp = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -19,8 +26,9 @@ const csp = [
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-  `connect-src 'self'${isDev ? " ws:" : ""}`,
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} ${PAYTM}`,
+  `connect-src 'self' ${PAYTM} ${COGNITO}${isDev ? " ws:" : ""}`,
+  `frame-src 'self' ${PAYTM}`,
   "upgrade-insecure-requests",
 ].join("; ");
 
