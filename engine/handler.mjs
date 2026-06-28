@@ -14,6 +14,7 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { createWriteStream } from "node:fs";
 import { chmod } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
+import { createHmac } from "node:crypto";
 
 const DEPLOY_BUCKET = "shieldsync-engine-deploy-750294427884";
 const NUKE_TMP      = "/tmp/aws-nuke";
@@ -33,6 +34,58 @@ function timingSafeEqual(a, b) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+// ── Signed engine identity (audit #2) ────────────────────────────────────────
+// The app sends X-Engine-Auth = b64url(JSON{u,p,exp}) + "." + b64url(HMAC). We
+// recompute the HMAC with ENGINE_SHARED_SECRET, check expiry + that the signed
+// path matches THIS request, then DERIVE the caller from the token — instead of
+// trusting a verbatim X-User-Id header. Binds identity to path + a 2-min window.
+const ENGINE_AUTH_PROD = Boolean(ENGINE_SHARED_SECRET); // strict mode == a secret is configured (matches the rest of the handler)
+const ENGINE_AUTH_SKEW_SECONDS = 120; // tolerate engine clock up to 2 min ahead of the app
+const ENGINE_AUTH_TTL_SECONDS = 120;  // must match the app; used to reject absurd-future exp
+
+// Boot-assert (audit #2): a real Lambda deploy must NOT run with engine auth
+// silently disabled. Local dev (no AWS_LAMBDA_FUNCTION_NAME) may run without it.
+if (process.env.AWS_LAMBDA_FUNCTION_NAME && !ENGINE_SHARED_SECRET) {
+  throw new Error("ENGINE_SHARED_SECRET is not configured — refusing to start with engine auth disabled");
+}
+
+function b64urlToString(s) {
+  try { return Buffer.from(s, "base64url").toString("utf8"); } catch { return ""; }
+}
+
+/**
+ * Verify the app-signed identity token. Returns the caller's userId on success,
+ * or null on any failure. HMAC is checked BEFORE the JSON is parsed.
+ */
+function verifyEngineAuth(event) {
+  if (!ENGINE_SHARED_SECRET) return null; // no secret -> this path isn't trusted
+  const h = event.headers ?? {};
+  const token = h["x-engine-auth"] ?? h["X-Engine-Auth"] ?? "";
+  if (!token || typeof token !== "string") return null;
+
+  const dot = token.indexOf(".");
+  if (dot <= 0) return null;
+  const head = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+
+  const expected = createHmac("sha256", ENGINE_SHARED_SECRET).update(head).digest("base64url");
+  if (!timingSafeEqual(expected, sig)) return null; // verify BEFORE parse
+
+  let claims;
+  try { claims = JSON.parse(b64urlToString(head)); } catch { return null; }
+  if (!claims || typeof claims !== "object") return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  if (typeof claims.exp !== "number") return null;
+  if (claims.exp + ENGINE_AUTH_SKEW_SECONDS < now) return null;                          // expired
+  if (claims.exp > now + ENGINE_AUTH_TTL_SECONDS + ENGINE_AUTH_SKEW_SECONDS) return null; // reject absurd-future exp
+
+  const reqPath = event.rawPath ?? event.path ?? "/";
+  if (claims.p !== reqPath) return null; // path binding
+
+  return (typeof claims.u === "string" && claims.u) ? claims.u : null;
 }
 
 // Download the binary once per Lambda container (module-level, runs at cold start).
@@ -238,10 +291,23 @@ export async function handler(event) {
     }
   }
 
-  // Trusted caller identity from the app. The app puts this in X-User-Id from
-  // its Cognito session; the engine uses it for ownership checks below.
-  const callerUserId =
-    event.headers?.["x-user-id"] ?? event.headers?.["X-User-Id"] ?? null;
+  // Caller identity. Prefer the app-signed, path-bound token (audit #2): it proves
+  // the app asserted THIS user for THIS path within ~2 min. When present and valid
+  // we DERIVE the caller from it and IGNORE the raw (spoofable) X-User-Id header.
+  const signedUserId = verifyEngineAuth(event);
+  let callerUserId;
+  if (signedUserId) {
+    callerUserId = signedUserId;
+  } else if (ENGINE_AUTH_PROD) {
+    // Prod with no valid signed token: do NOT fall back to X-User-Id. Treat as
+    // unidentified — every ownership/identity site below fails closed on a null
+    // caller, so impersonation via a forged/absent token is closed.
+    callerUserId = null;
+  } else {
+    // Local dev (no secret): keep the legacy plaintext-header path so the local
+    // engine + smoke flows work without signing.
+    callerUserId = event.headers?.["x-user-id"] ?? event.headers?.["X-User-Id"] ?? null;
+  }
 
   let parsed = {};
   try {
@@ -267,10 +333,11 @@ export async function handler(event) {
       if (typeof labSlug !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(labSlug)) {
         return resp(400, { error: "invalid lab slug" });
       }
-      // Trust the header (set by the app from the verified Cognito session) over
-      // the body when both are present; falls back to body for local-dev callers
-      // without auth, and finally to "anon" so the smoke /health flow still works.
-      const uid = callerUserId || userId || "anon";
+      // Caller identity for the launch. In PROD use ONLY the signed caller — never a
+      // body-supplied userId (audit#2 FLAW B: a leaked secret could otherwise launch
+      // AS another user). Local dev keeps the body fallback for unauthenticated smoke
+      // flows; "anon" is the final fallback so /health-style smoke still works.
+      const uid = ENGINE_AUTH_PROD ? (callerUserId || "anon") : (callerUserId || userId || "anon");
 
       // Abuse guard: per-network rate cap (Cloudflare client IP, hashed). Bounds
       // burst farming from one IP across labs/accounts before we do any real work.
@@ -446,7 +513,7 @@ export async function handler(event) {
       // for longer labs the learner re-mints via "Copy URL for incognito".
       const remainingMs = s.expiresAt ? new Date(s.expiresAt).getTime() - Date.now() : 0;
       const durationSeconds = Math.max(900, Math.min(3600, Math.floor(remainingMs / 1000)));
-      const url = await mintConsoleUrl({ accountId: s.accountId, durationSeconds });
+      const url = await mintConsoleUrl({ accountId: s.accountId, labSlug: s.labSlug, durationSeconds });
       return resp(200, { consoleUrl: url.consoleUrl, expiresInSeconds: url.expiresInSeconds });
     }
 
@@ -502,11 +569,13 @@ export async function handler(event) {
       const { orderId, paymentId, amountMinor, currency } = parsed;
       const order = await getOrder(orderId);
       if (!order) return resp(404, { error: "order not found" });
-      // #8: re-validate the payment against the PERSISTED order at the engine's own
-      // trust boundary — don't take the caller's word on the amount. (The app webhook
-      // already verified the provider signature; this is defense in depth.)
-      if (amountMinor != null && (Number(amountMinor) !== order.amountMinor || (currency && currency !== order.currency))) {
-        console.warn(`[orders/paid] amount/currency mismatch on ${orderId}`);
+      // #8 + audit#2 FLAW A: re-validate the payment against the PERSISTED order at
+      // the engine's own trust boundary. amount + currency are REQUIRED and must
+      // match — omitting amountMinor must NOT skip validation (that was a self-grant
+      // path for a leaked-secret holder). markOrderPaid (app/lib/server/orders.ts)
+      // always sends both from the verified webhook, so this rejects no real caller.
+      if (Number(amountMinor) !== order.amountMinor || currency !== order.currency) {
+        console.warn(`[orders/paid] amount/currency mismatch or missing on ${orderId}`);
         return resp(400, { error: "amount mismatch" });
       }
       // #7: GRANT first (idempotent upsert), THEN record paid. A grant failure leaves
@@ -545,6 +614,13 @@ export async function handler(event) {
     if (method === "POST" && path === "/entitlements") {
       const { userId, labSlug, kind, accessUntil } = parsed;
       if (!userId || !labSlug) return resp(400, { error: "userId and labSlug required" });
+      // audit#2 FLAW B: a signed caller may only grant to ITSELF, so a leaked secret
+      // can't POST an entitlement for an arbitrary userId. The post-payment grant
+      // path is the engine's own /orders/paid (derives the grant from the stored
+      // order); this route is only a same-user fallback.
+      if (ENGINE_AUTH_PROD && callerUserId && callerUserId !== userId) {
+        return resp(403, { error: "forbidden" });
+      }
       await grantEntitlement(userId, { labSlug, kind, accessUntil });
       return resp(200, { ok: true });
     }

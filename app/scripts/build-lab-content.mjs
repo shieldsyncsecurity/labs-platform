@@ -80,3 +80,34 @@ export const labCatalog: Lab[] = ${JSON.stringify(catalog, null, 2)};
 `;
 writeFileSync(CATALOG_OUT, catalogOut);
 console.log(`Wrote ${CATALOG_OUT} (${catalog.length} labs)`);
+
+// ── Least-privilege gate ────────────────────────────────────────────────────
+// Every READY lab (has a CloudFormation template) MUST declare a `learnerPolicy`
+// in its ENGINE-side lab.json (labs/<slug>/lab.json — the copy the engine bundles
+// and reads at console-mint to fence the learner's session to exactly what the lab
+// needs). A ready lab WITHOUT one would mint an UNSCOPED admin console, so fail the
+// build — this is the scalable guardrail as the catalog grows to 100 labs.
+// 2048 is the STS inline session-policy hard limit; the engine merges a ~300-char
+// control-plane guardrail-deny, so budget the lab part under ~1700.
+const SESSION_POLICY_LIMIT = 2048;
+const GUARDRAIL_BUDGET = 350;
+for (const slug of slugs) {
+  if (!existsSync(join(LABS_ROOT, slug, "template.yaml"))) continue; // not ready → exempt
+  const engineLabJson = join(LABS_ROOT, slug, "lab.json");
+  if (!existsSync(engineLabJson)) {
+    throw new Error(`[least-priv] READY lab "${slug}" has no engine lab.json at ${engineLabJson}`);
+  }
+  const lp = JSON.parse(readFileSync(engineLabJson, "utf8")).learnerPolicy;
+  const statements = Array.isArray(lp) ? lp : Array.isArray(lp?.Statement) ? lp.Statement : null;
+  if (!statements || !statements.length) {
+    throw new Error(
+      `[least-priv] READY lab "${slug}" is missing a non-empty learnerPolicy in ${engineLabJson} — it would mint an UNSCOPED admin console. Add a least-privilege Statement[] (copy the shape from another lab).`
+    );
+  }
+  const size = JSON.stringify({ Version: "2012-10-17", Statement: statements }).length;
+  const budget = SESSION_POLICY_LIMIT - GUARDRAIL_BUDGET;
+  if (size > budget) {
+    throw new Error(`[least-priv] "${slug}" learnerPolicy is ${size} chars; must stay under ${budget} (STS session-policy limit ${SESSION_POLICY_LIMIT} minus guardrail). Tighten it.`);
+  }
+  console.log(`  [least-priv] ${slug}: learnerPolicy OK (${size} chars + guardrail < ${SESSION_POLICY_LIMIT})`);
+}

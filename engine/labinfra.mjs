@@ -87,6 +87,56 @@ export function rulesFor(labSlug) {
   return { ...(free ? FREE_RULE : LEVEL_RULES[level] ?? LEVEL_RULES.Beginner), free };
 }
 
+// ── Per-lab LEAST-PRIVILEGE learner session policy ───────────────────────────
+// lab.json may declare `learnerPolicy`: a policy document {Version,Statement:[…]}
+// OR a bare Statement array describing EXACTLY what the learner needs for that lab.
+// It's passed as an STS *session policy* when minting the console (mintConsoleUrl),
+// so the learner's federated console session = ShieldSyncLabUser(admin) ∩ this
+// policy ∩ SCP — i.e. nothing beyond the lab. A fixed GUARDRAIL_DENY is always
+// merged in so a lab can never (even by an authoring slip) let the learner tamper
+// with the control-plane roles or org/account governance. Returns a minified JSON
+// string, or null when the lab declares no policy (caller then mints UNSCOPED
+// admin-within-SCP and logs — the build step fails a READY lab missing this).
+
+// Always-deny statements appended to every learner session policy. Defence in depth
+// over the SCPs: the learner can never touch the engine/control roles even if a lab's
+// learnerPolicy were authored too broadly. Lab IAM work targets user/lab/* + policy/*,
+// which these denies deliberately do NOT cover.
+function guardrailDeny(accountId) {
+  return [
+    {
+      Sid: "ssGuardrailProtectControlPlane",
+      Effect: "Deny",
+      Action: ["iam:*", "sts:AssumeRole"],
+      Resource: [
+        `arn:aws:iam::${accountId}:role/ShieldSyncLab*`,
+        `arn:aws:iam::${accountId}:role/OrganizationAccountAccessRole`,
+      ],
+    },
+    {
+      Sid: "ssGuardrailDenyGovernance",
+      Effect: "Deny",
+      Action: ["organizations:*", "account:*"],
+      Resource: "*",
+    },
+  ];
+}
+
+export function labLearnerPolicy(labSlug, accountId) {
+  if (!isSafeSlug(labSlug)) return null;
+  let raw;
+  try {
+    const j = JSON.parse(readFileSync(join(__dirname, "labs", labSlug, "lab.json"), "utf8"));
+    raw = j.learnerPolicy;
+  } catch {
+    return null;
+  }
+  const statements = Array.isArray(raw) ? raw : Array.isArray(raw?.Statement) ? raw.Statement : null;
+  if (!statements || !statements.length) return null;
+  const doc = { Version: "2012-10-17", Statement: [...statements, ...guardrailDeny(accountId)] };
+  return JSON.stringify(doc);
+}
+
 // Free labs may occupy at most this SHARE of the whole account pool at once, so a
 // rush of free users can never starve paying customers. Scales as the pool grows
 // (e.g. 20 accounts → 6 free slots, 14 always reserved for paid). Min 1 so the
@@ -206,16 +256,21 @@ async function platformCreds() {
   return _pc.creds;
 }
 
-export async function assumeInSandbox(roleArn, sessionName, durationSeconds) {
+export async function assumeInSandbox(roleArn, sessionName, durationSeconds, opts = {}) {
   // Lambda runs in the platform account — use execution role directly.
   // Local dev assumes into the platform account first via platformCreds().
   const stsCfg = { region: REGION, maxAttempts: 5, retryMode: "adaptive" }; // ride out AssumeRole throttling under burst
   const sts = process.env.AWS_LAMBDA_FUNCTION_NAME
     ? new STSClient(stsCfg)
     : new STSClient({ ...stsCfg, credentials: await platformCreds() });
-  const r = await sts.send(
-    new AssumeRoleCommand({ RoleArn: roleArn, RoleSessionName: sessionName, DurationSeconds: durationSeconds })
-  );
+  const input = { RoleArn: roleArn, RoleSessionName: sessionName, DurationSeconds: durationSeconds };
+  // Optional STS SESSION POLICY: fences the assumed session to a SUBSET of the
+  // role's permissions (effective = role policies ∩ session policy ∩ SCPs). Used to
+  // mint a LEAST-PRIVILEGE learner console — the role stays admin, the session is
+  // scoped to exactly what the lab needs. NOT passed for deploy/nuke (need full admin).
+  if (opts.policy) input.Policy = opts.policy;
+  if (opts.policyArns?.length) input.PolicyArns = opts.policyArns.map((arn) => ({ arn }));
+  const r = await sts.send(new AssumeRoleCommand(input));
   return r.Credentials;
 }
 
@@ -610,11 +665,13 @@ export async function dequeueWaiter(userId) {
 // an idempotent created->paid transition. status is forced server-side.
 
 /** createOrder(): persist a checkout order as "created". Won't overwrite a PAID
- *  order (so a paid order can never be reset to re-grant). 90-day TTL. */
+ *  order (so a paid order can never be reset to re-grant). #18: UNPAID orders get a
+ *  SHORT TTL (48h) so abandoned/spam checkouts self-purge instead of accruing;
+ *  markOrderPaid bumps a real payment to long (90d) retention for the audit trail. */
 export async function createOrder(order) {
   if (!order?.id || !order?.userId) throw new Error("order id + userId required");
   const db = await ddb();
-  const ttl = Math.floor(Date.now() / 1000) + 90 * 24 * 3600;
+  const ttl = Math.floor(Date.now() / 1000) + 48 * 3600; // 48h for an unpaid 'created' order
   try {
     await db.send(
       new PutItemCommand({
@@ -672,14 +729,16 @@ export async function markOrderPaid(orderId, paymentId) {
       new UpdateItemCommand({
         TableName: ORDERS_TABLE,
         Key: { orderId: { S: String(orderId) } },
-        UpdateExpression: "SET #s = :paid, paymentId = :pid, paidAt = :now",
+        // #18: also bump the row to long (90d) retention now that it's a real payment.
+        UpdateExpression: "SET #s = :paid, paymentId = :pid, paidAt = :now, #ttl = :ttl",
         ConditionExpression: "#s = :created", // only the created->paid transition wins
-        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeNames: { "#s": "status", "#ttl": "ttl" },
         ExpressionAttributeValues: {
           ":paid": { S: "paid" },
           ":created": { S: "created" },
           ":pid": { S: String(paymentId ?? "") },
           ":now": { S: new Date().toISOString() },
+          ":ttl": { N: String(Math.floor(Date.now() / 1000) + 90 * 24 * 3600) },
         },
       })
     );
@@ -863,10 +922,18 @@ export async function ensureWarm(labSlug) {
   return warmed;
 }
 
-/** mintConsoleUrl(): scoped learner role -> AWS federation -> console sign-in URL. */
-export async function mintConsoleUrl({ accountId, destination, durationSeconds = 1800 }) {
+/** mintConsoleUrl(): scoped learner role -> AWS federation -> console sign-in URL.
+ *  The session is fenced to the lab's least-privilege learnerPolicy (if declared). */
+export async function mintConsoleUrl({ accountId, labSlug, destination, durationSeconds = 1800 }) {
   const learnerRoleArn = `arn:aws:iam::${accountId}:role/ShieldSyncLabUser`;
-  const c = await assumeInSandbox(learnerRoleArn, "lab-learner", durationSeconds);
+  // LEAST PRIVILEGE: scope the federated console session to exactly what THIS lab
+  // needs (effective perms = LabUser(admin) ∩ policy ∩ SCP). No declared policy →
+  // mint UNSCOPED (admin∩SCP) + warn; build-lab-content fails a READY lab missing one.
+  const policy = labLearnerPolicy(labSlug, accountId);
+  if (!policy) {
+    console.warn(`[mintConsoleUrl] ${labSlug || "(no slug)"}: no learnerPolicy — minting UNSCOPED admin console (still SCP-fenced). Add learnerPolicy to lab.json.`);
+  }
+  const c = await assumeInSandbox(learnerRoleArn, "lab-learner", durationSeconds, policy ? { policy } : {});
   const session = JSON.stringify({
     sessionId: c.AccessKeyId,
     sessionKey: c.SecretAccessKey,

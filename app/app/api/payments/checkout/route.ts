@@ -37,13 +37,15 @@ export async function POST(req: Request) {
   if (!ALLOWED_CCY.has(currency)) {
     return NextResponse.json({ error: "invalid currency" }, { status: 400 });
   }
+  let canonicalSlug: string | null = null;
   if (body.plan === "per-lab") {
     const l = body.labSlug ? getLab(body.labSlug) : undefined;
     if (!l || l.free || !l.ready) {
       return NextResponse.json({ error: "invalid lab" }, { status: 400 });
     }
+    canonicalSlug = l.slug; // #17: pin to the validated lab object, never the raw client string
   }
-  const amountMinor = priceFor(body.labSlug ?? null, body.plan, currency);
+  const amountMinor = priceFor(canonicalSlug, body.plan, currency);
 
   // Persist the order (status forced "created" engine-side). This record — not any
   // client value — is what the grant is validated + derived from.
@@ -51,7 +53,7 @@ export async function POST(req: Request) {
   const order: Order = {
     id: orderId,
     userId,
-    labSlug: body.labSlug ?? null,
+    labSlug: canonicalSlug,
     plan: body.plan,
     amountMinor,
     currency,
@@ -80,6 +82,7 @@ export async function POST(req: Request) {
   // MID + host are public (used in the checkout JS URL); the merchant key is NOT returned.
   return NextResponse.json({
     orderId,
+    labSlug: canonicalSlug, // #17: echo the canonical, server-chosen slug so the client confirms the target
     txnToken: init.txnToken,
     mid: cfg.mid,
     host: cfg.baseUrl,
