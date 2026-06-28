@@ -817,7 +817,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
               {grading ? "Checking your live account…" : grade ? "Re-check my work" : "Check my work"}
             </button>
             <p className="mt-2 text-center text-xs text-muted">
-              Grades your <strong>live</strong> AWS account against the {objectives.length} objectives above.
+              We look inside your <strong>live</strong> AWS account and score each objective above — real feedback, not a checkbox you tick yourself.
             </p>
             {grade && (grade.gradable ? (
               <div className="mt-3 border-t border-line pt-3">
