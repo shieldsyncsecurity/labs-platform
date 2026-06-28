@@ -1,5 +1,6 @@
 import { LABS } from "@/lib/labs";
 import { LabCard } from "@/components/lab-card";
+import { LabRequest } from "@/components/lab-request";
 
 export default function CatalogPage() {
   const live = LABS.filter((l) => l.ready).length;
@@ -24,6 +25,8 @@ export default function CatalogPage() {
           <LabCard key={lab.slug} lab={lab} />
         ))}
       </section>
+
+      <LabRequest />
     </div>
   );
 }
