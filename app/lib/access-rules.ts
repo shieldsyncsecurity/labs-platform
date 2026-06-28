@@ -14,10 +14,10 @@ export const ACCESS_RULES: Record<LabLevel, AccessRule> = {
   Advanced: { sessionMinutes: 120, maxLaunches: 2, windowHours: 48 },
 };
 
-// The FREE lab is a lead magnet: ONE run per user every 24h. Pre-launch we favour a
-// great first try (a 30-min beginner lab is easy to run out of); tighten later via
-// FREE_POOL_PCT once paid is live. KEEP IN SYNC with engine FREE_RULE + marketing FREE_LAUNCH_RULE.
-export const FREE_RULE: AccessRule = { sessionMinutes: 30, maxLaunches: 1, windowHours: 24 };
+// The FREE lab is a lead magnet: TWO runs per user every 24h (temporarily bumped from 1).
+// Pre-launch we favour a great first try (a 30-min beginner lab is easy to run out of);
+// tighten later via FREE_POOL_PCT once paid is live. KEEP IN SYNC with engine FREE_RULE + marketing FREE_LAUNCH_RULE.
+export const FREE_RULE: AccessRule = { sessionMinutes: 30, maxLaunches: 2, windowHours: 24 };
 
 // Monthly subscription = all-access for this many days.
 export const MONTHLY_ACCESS_DAYS = 30;
