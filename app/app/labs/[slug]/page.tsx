@@ -88,8 +88,8 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
       </div>
       {lab.ready && (
         <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="flex items-start gap-2.5 rounded-xl border border-brand/30 bg-brand/5 px-4 py-3">
-            <span aria-hidden className="text-lg leading-none text-brand">✓</span>
+          <div className="flex items-start gap-2.5 rounded-xl border border-line bg-canvas px-4 py-3">
+            <span aria-hidden className="text-lg leading-none">✓</span>
             <p className="text-sm text-ink-soft"><strong className="text-ink">We check your real work — not a checkbox.</strong> Other labs make you tick "done" yourself. Hit <strong>Check my work</strong> and we look inside your <em>live</em> AWS account and show exactly what you fixed and what&apos;s still open.</p>
           </div>
           <div className="flex items-start gap-2.5 rounded-xl border border-line bg-canvas px-4 py-3">
