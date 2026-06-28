@@ -20,7 +20,7 @@ The Session Engine gives you the leaked keys:
 
 ## Your mission
 
-**Prove** the escalation by capturing the admin-only flag, then **close it**: detach the admin you attached, strip the dangerous IAM-write permission from the policy, and keep the user's legitimate reads working. **Check my work** verifies each fix against your *live* account — a real grader, not a static checklist (your progress shows in the panel on the right).
+**Prove** the escalation by capturing the admin-only flag, then **close it**: detach the admin you attached, strip the dangerous IAM-write permission from the policy, and keep the user's legitimate reads working. Verify each fix with **Check my work** (panel on the right).
 
 <!-- ss:walkthrough -->
 
