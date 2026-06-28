@@ -13,10 +13,8 @@ import {
   ListAttachedUserPoliciesCommand,
   ListUserPoliciesCommand,
   GetUserPolicyCommand,
-  GetUserCommand,
   GetPolicyCommand,
   GetPolicyVersionCommand,
-  SimulatePrincipalPolicyCommand,
 } from "@aws-sdk/client-iam";
 import { assumeInSandbox } from "./labinfra.mjs";
 
@@ -145,14 +143,33 @@ async function gradeIam(creds) {
     } catch (e) { if (!isAbsenceError(e)) escErr = e; }
   }
 
-  // Legitimate function preserved: s3:GetObject still allowed for the user.
+  // Legitimate function preserved: the user can still read S3 (s3:GetObject granted
+  // somewhere in its policies). Inspect the policy DOCUMENTS directly rather than
+  // SimulatePrincipalPolicy — the simulator is subject to eventual consistency on a
+  // freshly-attached policy, which made a fresh deployer read as "broken" (a false
+  // negative → fresh baseline 1/3 instead of the intended 2/3). Accepts both the
+  // original Resource:"*" read and a remediated scoped read.
   let stillWorks = false, simErr = null;
   try {
-    const gu = await iam.send(new GetUserCommand({ UserName: user }));
-    if (gu?.User?.Arn) {
-      const sim = await iam.send(new SimulatePrincipalPolicyCommand({ PolicySourceArn: gu.User.Arn, ActionNames: ["s3:GetObject"] }));
-      stillWorks = sim?.EvaluationResults?.[0]?.EvalDecision === "allowed";
+    const docs = [];
+    for (const p of attached.AttachedPolicies ?? []) {
+      const gp = await iam.send(new GetPolicyCommand({ PolicyArn: p.PolicyArn }));
+      const ver = gp?.Policy?.DefaultVersionId;
+      if (ver) {
+        const pv = await iam.send(new GetPolicyVersionCommand({ PolicyArn: p.PolicyArn, VersionId: ver }));
+        docs.push(parsePolicy(pv.PolicyVersion?.Document));
+      }
     }
+    const inlineRead = await iam.send(new ListUserPoliciesCommand({ UserName: user }));
+    for (const pn of inlineRead.PolicyNames ?? []) {
+      const up = await iam.send(new GetUserPolicyCommand({ UserName: user, PolicyName: pn }));
+      docs.push(parsePolicy(up.PolicyDocument));
+    }
+    const grantsRead = (pol) =>
+      !!pol && asArray(pol.Statement).some((st) =>
+        st.Effect === "Allow" &&
+        asArray(st.Action).some((a) => a === "s3:GetObject" || a === "s3:*" || a === "*"));
+    stillWorks = docs.some(grantsRead);
   } catch (e) { if (!isAbsenceError(e)) simErr = e; }
 
   return [
