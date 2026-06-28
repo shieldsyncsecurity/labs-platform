@@ -48,3 +48,35 @@ ${entries(objectives)}
 
 writeFileSync(OUT, out);
 console.log(`Wrote ${OUT} from ${slugs.length} lab(s): ${slugs.join(", ")}`);
+
+// ── Catalog metadata (lightweight — NO instructions) ────────────────────────
+// Generated from each lab.json so lib/labs.ts is a single source DERIVED from
+// lab.json, not a hand-kept duplicate that drifts. `ready` = a CloudFormation
+// template exists at labs-platform/labs/<slug>/template.yaml. Kept in a separate
+// file from lab-content.ts so importing the catalog doesn't pull in the heavy
+// instructions strings.
+const LABS_ROOT = join(__dirname, "..", "..", "labs");
+const catalog = slugs.map((slug) => {
+  const lab = JSON.parse(readFileSync(join(CONTENT, slug, "lab.json"), "utf8"));
+  return {
+    slug: lab.slug,
+    title: lab.title,
+    level: lab.level,
+    free: !!lab.free,
+    ready: existsSync(join(LABS_ROOT, slug, "template.yaml")),
+    summary: lab.summary,
+    tags: lab.tags ?? [],
+    estimatedActiveMinutes: lab.estimatedActiveMinutes,
+  };
+});
+
+const CATALOG_OUT = join(__dirname, "..", "lib", "lab-catalog.ts");
+const catalogOut = `// AUTO-GENERATED — do not edit by hand.
+// Source: app/content/labs/<slug>/lab.json (+ labs/<slug>/template.yaml for \`ready\`)
+// Regenerate: node scripts/build-lab-content.mjs  (from app/)
+import type { Lab } from "./labs";
+
+export const labCatalog: Lab[] = ${JSON.stringify(catalog, null, 2)};
+`;
+writeFileSync(CATALOG_OUT, catalogOut);
+console.log(`Wrote ${CATALOG_OUT} (${catalog.length} labs)`);
