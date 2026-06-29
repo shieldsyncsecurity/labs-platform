@@ -23,8 +23,8 @@ export type PaytmConfig = {
 export function paytmConfig(): PaytmConfig {
   const env = (process.env.PAYTM_ENV ?? "staging").trim().toLowerCase();
   return {
-    mid: process.env.PAYTM_MID ?? "",
-    key: process.env.PAYTM_MERCHANT_KEY ?? "",
+    mid: (process.env.PAYTM_MID ?? "").trim(),
+    key: (process.env.PAYTM_MERCHANT_KEY ?? "").trim(),
     website: process.env.PAYTM_WEBSITE ?? "WEBSTAGING",
     industryType: process.env.PAYTM_INDUSTRY_TYPE ?? "Retail",
     channelId: process.env.PAYTM_CHANNEL_ID ?? "WEB",

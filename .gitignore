@@ -16,6 +16,10 @@ app/.env.local
 *.key
 *.log
 
+# Internal-only docs (security audit findings, business strategy) — keep local
+AUDIT_*.md
+MONETIZATION_ROADMAP.md
+
 # Build artifacts
 engine/deploy/engine.zip
 engine/bin/aws-nuke-linux

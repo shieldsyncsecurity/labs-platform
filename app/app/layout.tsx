@@ -18,16 +18,80 @@ const jetbrains = JetBrains_Mono({
   display: "swap",
 });
 
+const APP_URL = "https://labs.shieldsyncsecurity.com";
+const MARKETING_URL = "https://shieldsyncsecurity.com";
+
 export const metadata: Metadata = {
-  title: { default: "ShieldSync Labs", template: "%s · ShieldSync Labs" },
-  description: "Hands-on AWS cloud-security labs in real, isolated AWS accounts.",
-  // The authenticated platform app is not for search indexing.
-  robots: { index: false, follow: false },
+  metadataBase: new URL(APP_URL),
+  title: {
+    default: "AWS Security Labs — ShieldSync Labs",
+    template: "%s · ShieldSync Labs",
+  },
+  description:
+    "Hands-on AWS security labs in real, isolated AWS accounts. Practice IAM, S3, encryption, GuardDuty, VPC and detection with auto-wipe when you're done. First lab free.",
+  keywords: [
+    "AWS security labs",
+    "AWS cloud security",
+    "hands-on AWS labs",
+    "AWS IAM lab",
+    "AWS S3 security lab",
+    "cyber range",
+  ],
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    siteName: "ShieldSync Labs",
+    title: "AWS Security Labs — ShieldSync Labs",
+    description:
+      "Real, isolated AWS accounts in your browser. Practice IAM, S3, encryption, GuardDuty, VPC. First lab free.",
+    url: APP_URL,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "AWS Security Labs — ShieldSync Labs",
+    description: "Real, isolated AWS accounts in your browser. First lab free.",
+  },
+  // Public catalog + lab detail pages are indexable. Authenticated pages
+  // (dashboard, account, admin, sign-in) override this in their own page.tsx.
+  robots: {
+    index: true,
+    follow: true,
+    "max-image-preview": "large",
+    "max-snippet": -1,
+    googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 },
+  },
+};
+
+const ORG_SCHEMA = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "@id": `${MARKETING_URL}/#organization`,
+  name: "ShieldSync Security Private Limited",
+  url: MARKETING_URL,
+  logo: `${MARKETING_URL}/logo.svg`,
+  sameAs: [APP_URL],
+};
+
+const WEBSITE_SCHEMA = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "@id": `${APP_URL}/#website`,
+  name: "ShieldSync Labs",
+  url: APP_URL,
+  description: "Hands-on AWS security labs in real, isolated AWS accounts.",
+  publisher: { "@id": `${MARKETING_URL}/#organization` },
+  inLanguage: "en",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${jetbrains.variable} h-full antialiased`}>
+      <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify([ORG_SCHEMA, WEBSITE_SCHEMA]) }}
+        />
+      </head>
       <body className="flex min-h-full flex-col">
         <AuthProvider>
           <SiteHeader />

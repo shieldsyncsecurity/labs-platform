@@ -41,6 +41,8 @@ export function generateStaticParams() {
 // themselves stay immutably cached.
 export const revalidate = 300;
 
+const APP_URL = "https://labs.shieldsyncsecurity.com";
+
 export async function generateMetadata({
   params,
 }: {
@@ -48,7 +50,18 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const lab = getLab(slug);
-  return { title: lab ? lab.title : "Lab" };
+  if (!lab) return { title: "Lab" };
+  const title = `${lab.title} — AWS Security Lab`;
+  const description = `${lab.summary} A hands-on AWS security lab that runs in a real, isolated AWS account in your browser — ${lab.level.toLowerCase()} level, about ${lab.estimatedActiveMinutes} minutes.`;
+  const url = `${APP_URL}/labs/${slug}`;
+  return {
+    title,
+    description,
+    keywords: ["AWS security lab", `${lab.title} AWS`, "hands-on AWS", "cloud security lab", ...lab.tags.map((t) => `AWS ${t}`)],
+    alternates: { canonical: `/labs/${slug}` },
+    openGraph: { title, description, url, type: "article" },
+    twitter: { card: "summary_large_image", title, description },
+  };
 }
 
 export default async function LabPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -71,35 +84,63 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
     // wide screen has no dead side gutters — surplus width flows to the guide, not to
     // empty margins. pb-24 leaves room for the mobile sticky action bar.
     <div className="mx-auto max-w-[1536px] px-4 py-8 pb-24 sm:px-6 lg:px-10 lg:pb-8">
-      <Link href="/" className="text-sm font-semibold text-muted hover:text-ink">
-        ← All labs
-      </Link>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "Course",
+            "@id": `${APP_URL}/labs/${lab.slug}#course`,
+            name: `${lab.title} — AWS Security Lab`,
+            description: lab.summary,
+            url: `${APP_URL}/labs/${lab.slug}`,
+            provider: { "@type": "Organization", name: "ShieldSync Security", url: "https://shieldsyncsecurity.com" },
+            educationalLevel: lab.level,
+            inLanguage: "en",
+            keywords: lab.tags.join(", "),
+            hasCourseInstance: {
+              "@type": "CourseInstance",
+              courseMode: "online",
+              courseWorkload: `PT${lab.estimatedActiveMinutes}M`,
+            },
+            offers: {
+              "@type": "Offer",
+              price: lab.free ? "0" : "99",
+              priceCurrency: "INR",
+              availability: "https://schema.org/InStock",
+              category: lab.free ? "Free" : "Paid",
+            },
+          }),
+        }}
+      />
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+        <a href="https://shieldsyncsecurity.com/labs-wizard" className="font-semibold text-muted hover:text-ink">
+          ← Back to plans
+        </a>
+        <span aria-hidden className="text-muted/40">·</span>
+        <Link href="/" className="font-semibold text-muted hover:text-ink">
+          All labs
+        </Link>
+      </div>
 
-      {/* header: title/summary, then a FULL-WIDTH 3-up "why this is real" strip — a
-          right-column card left the left side empty, so this spans the whole width. */}
       <div className="mt-4 max-w-3xl">
         <div className="flex flex-wrap items-center gap-2">
           <span className={`rounded-md px-2 py-0.5 text-xs font-bold badge-${lab.level.toLowerCase()}`}>{lab.level}</span>
           {lab.free && <span className="rounded-md bg-brand/10 px-2 py-0.5 text-xs font-bold text-brand">FREE</span>}
           <span className="text-sm text-muted">~{lab.estimatedActiveMinutes} min</span>
         </div>
-        <h1 className="mt-3 text-3xl font-extrabold text-ink">{lab.title}</h1>
-        <p className="mt-2 text-lg text-ink-soft">{lab.summary}</p>
+        <h1 className="mt-3 text-3xl font-extrabold text-ink">
+          {lab.title} <span className="text-muted font-semibold">— AWS Security Lab</span>
+        </h1>
+        <p className="mt-2 text-base text-ink-soft">{lab.summary}</p>
       </div>
       {lab.ready && (
-        <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="flex items-start gap-2.5 rounded-xl border border-line bg-canvas px-4 py-3">
-            <span aria-hidden className="text-lg leading-none">✓</span>
-            <p className="text-sm text-ink-soft"><strong className="text-ink">We check your real work — not a checkbox.</strong> Other labs make you tick "done" yourself. Hit <strong>Check my work</strong> and we look inside your <em>live</em> AWS account and show exactly what you fixed and what&apos;s still open.</p>
-          </div>
-          <div className="flex items-start gap-2.5 rounded-xl border border-line bg-canvas px-4 py-3">
-            <span aria-hidden className="text-lg leading-none">🛡️</span>
-            <p className="text-sm text-ink-soft"><strong className="text-ink">Your own isolated AWS account.</strong> The real console — nothing shared, nothing you can break for real.</p>
-          </div>
-          <div className="flex items-start gap-2.5 rounded-xl border border-line bg-canvas px-4 py-3">
-            <span aria-hidden className="text-lg leading-none">🧹</span>
-            <p className="text-sm text-ink-soft"><strong className="text-ink">Wiped automatically</strong> when you finish. No setup, no cleanup, no bill.</p>
-          </div>
+        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-line bg-canvas px-4 py-2.5 text-sm text-ink-soft">
+          <span className="inline-flex items-center gap-1.5"><span aria-hidden>✓</span><strong className="text-ink">Real work checked</strong></span>
+          <span aria-hidden className="text-muted/40">·</span>
+          <span className="inline-flex items-center gap-1.5"><span aria-hidden>🛡️</span><strong className="text-ink">Your own isolated AWS account</strong></span>
+          <span aria-hidden className="text-muted/40">·</span>
+          <span className="inline-flex items-center gap-1.5"><span aria-hidden>🧹</span><strong className="text-ink">Auto-wiped — no bill</strong></span>
         </div>
       )}
 

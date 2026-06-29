@@ -9,7 +9,7 @@ import type { Plan, Currency } from "@/lib/payments/types";
 
 type CheckoutInit = { orderId: string; txnToken: string; mid: string; host: string; amountMinor: number; currency: Currency };
 
-type PaytmCheckoutJS = { init: (config: unknown) => Promise<void>; invoke: () => void; close?: () => void };
+type PaytmCheckoutJS = { onLoad: (cb: () => void) => void; init: (config: unknown) => Promise<void>; invoke: () => void; close?: () => void };
 declare global {
   interface Window {
     Paytm?: { CheckoutJS?: PaytmCheckoutJS };
@@ -120,6 +120,7 @@ export function CheckoutSheet({
       await loadPaytmScript(info.host, info.mid);
       const cjs = window.Paytm?.CheckoutJS;
       if (!cjs) throw new Error("Paytm checkout unavailable");
+
       const config = {
         root: "",
         flow: "DEFAULT",
@@ -140,8 +141,18 @@ export function CheckoutSheet({
           },
         },
       };
-      await cjs.init(config);
-      cjs.invoke();
+
+      // Paytm's documented pattern: wait for onLoad before calling init.
+      // Calling init immediately after the script's onload fires can fail
+      // because CheckoutJS hasn't finished its own internal setup yet.
+      await new Promise<void>((resolve, reject) => {
+        cjs.onLoad(function() {
+          cjs.init(config).then(function() {
+            cjs.invoke();
+            resolve();
+          }).catch(reject);
+        });
+      });
     } catch (e) {
       invoked.current = false;
       setErr(e instanceof Error ? e.message : "Couldn't open Paytm checkout");
@@ -152,7 +163,7 @@ export function CheckoutSheet({
   const price = info ? formatMoney(info.amountMinor, info.currency) : "…";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" onClick={onClose}>
       <div
         ref={dialogRef}
         tabIndex={-1}
