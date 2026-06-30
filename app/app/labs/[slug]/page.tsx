@@ -138,7 +138,7 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
 
       <EntitlementStatus entitlement={entitlement} />
 
-      <div className="mt-4 max-w-3xl">
+      <div className="mt-4">
         <div className="flex flex-wrap items-center gap-2">
           <span className={`rounded-md px-2 py-0.5 text-xs font-bold badge-${lab.level.toLowerCase()}`}>{lab.level}</span>
           {lab.free && <span className="rounded-md bg-brand/10 px-2 py-0.5 text-xs font-bold text-brand">FREE</span>}
@@ -147,7 +147,7 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
         <h1 className="mt-3 text-3xl font-extrabold text-ink">
           {lab.title} <span className="text-muted font-semibold">— AWS Security Lab</span>
         </h1>
-        <p className="mt-2 text-base text-ink-soft">{lab.summary}</p>
+        <p className="mt-2 max-w-5xl text-base text-ink-soft">{lab.summary}</p>
       </div>
       {lab.ready && (
         <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-line bg-canvas px-4 py-2.5 text-sm text-ink-soft">
