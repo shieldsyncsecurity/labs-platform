@@ -1238,21 +1238,61 @@ export async function healPool() {
  * grantEntitlement(): idempotently write an entitlement row.
  * labSlug "*" means all-access (monthly plan).
  */
-export async function grantEntitlement(userId, { labSlug, kind, accessUntil }) {
+// ── Pay-per-lab v2 budget (entitlement-governed launches) ────────────────────
+// A one-time per-lab purchase grants PAYPERLAB_MAX_LAUNCHES launches within a
+// PAYPERLAB_WINDOW_DAYS window that STARTS ON FIRST LAUNCH (stamped lazily by
+// reserveLaunch). accessUntil is just a generous backstop so an UNUSED purchase
+// doesn't live forever — the real cap is maxLaunches + the on-first-launch window.
+export const PAYPERLAB_MAX_LAUNCHES = 30;
+export const PAYPERLAB_WINDOW_DAYS = 7;
+export const PAYPERLAB_BACKSTOP_DAYS = 90;
+
+/**
+ * grantEntitlement(): upsert an entitlement row. Backward-compatible —
+ * legacy callers pass {labSlug, kind, accessUntil}. v2 callers also pass
+ * {type, maxLaunches, orderId} for PAY_PER_LAB.
+ *
+ * ⚠️ Idempotency: the v2 budget descriptors + counters (type, maxLaunches,
+ * launchCount, version) are written with if_not_exists so a webhook RETRY for
+ * the SAME purchase can NOT reset a user's already-consumed launches (would be a
+ * free-budget-refill exploit). A genuine re-purchase that should refill the
+ * budget is a separate concern — see RE-PURCHASE note in the runbook. The grant
+ * is exactly-once per entitlement row.
+ */
+export async function grantEntitlement(userId, e = {}) {
+  const { labSlug, kind, accessUntil, type, maxLaunches, orderId } = e;
   const db = await ddb();
   const now = new Date().toISOString();
-  const expr = ["SET grantedAt = if_not_exists(grantedAt, :t)", "kind = :k"];
-  const vals = { ":t": { S: now }, ":k": { S: String(kind ?? "per-lab") } };
+  const sets = ["grantedAt = if_not_exists(grantedAt, :t)", "kind = :k", "updatedAt = :now"];
+  const vals = { ":t": { S: now }, ":k": { S: String(kind ?? "per-lab") }, ":now": { S: now } };
   const names = {};
   if (accessUntil) {
-    expr.push("accessUntil = :au");
+    sets.push("accessUntil = :au");
     vals[":au"] = { S: String(accessUntil) };
+  }
+  if (type) {
+    // `type` + `version` are DynamoDB reserved words → alias them.
+    names["#ty"] = "type";
+    names["#ver"] = "version";
+    sets.push("#ty = if_not_exists(#ty, :ty)");
+    sets.push("launchCount = if_not_exists(launchCount, :z)");
+    sets.push("#ver = if_not_exists(#ver, :z)");
+    vals[":ty"] = { S: String(type) };
+    vals[":z"] = { N: "0" };
+    if (maxLaunches != null) {
+      sets.push("maxLaunches = if_not_exists(maxLaunches, :ml)");
+      vals[":ml"] = { N: String(maxLaunches) };
+    }
+    if (orderId) {
+      sets.push("orderId = if_not_exists(orderId, :oid)");
+      vals[":oid"] = { S: String(orderId) };
+    }
   }
   await db.send(
     new UpdateItemCommand({
       TableName: ENTITLEMENTS_TABLE,
       Key: { userId: { S: String(userId) }, labSlug: { S: String(labSlug) } },
-      UpdateExpression: expr.join(", "),
+      UpdateExpression: "SET " + sets.join(", "),
       ExpressionAttributeNames: Object.keys(names).length ? names : undefined,
       ExpressionAttributeValues: vals,
     })
@@ -1260,7 +1300,109 @@ export async function grantEntitlement(userId, { labSlug, kind, accessUntil }) {
 }
 
 /**
- * listEntitlements(): return all entitlement rows for a user.
+ * reserveLaunch(): atomic CAS that reserves ONE launch against a PAY_PER_LAB
+ * entitlement. On the FIRST launch it lazily stamps the window (now → now+7d).
+ *
+ *   SET launchCount = if_not_exists(launchCount,0) + 1,
+ *       windowStartedAt = if_not_exists(windowStartedAt, now),
+ *       windowExpiresAt = if_not_exists(windowExpiresAt, now+7d),
+ *       version = if_not_exists(version,0) + 1, updatedAt = now
+ *   COND: row exists AND version = expectedVersion
+ *         AND if_not_exists(launchCount,0) < maxLaunches
+ *         AND (attribute_not_exists(windowExpiresAt) OR now < windowExpiresAt)
+ *
+ * Returns { ok:true, launchesRemaining, windowExpiresAt } or
+ * { ok:false, code:"CONCURRENT_LAUNCH_OR_LIMIT" } on ConditionalCheckFailed —
+ * which covers a lost optimistic-concurrency race, the cap being hit, OR the
+ * window having expired. All three are correct reasons to refuse the launch.
+ */
+export async function reserveLaunch(userId, labSlug, expectedVersion) {
+  const db = await ddb();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const winExpIso = new Date(now.getTime() + PAYPERLAB_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: ENTITLEMENTS_TABLE,
+        Key: { userId: { S: String(userId) }, labSlug: { S: String(labSlug) } },
+        UpdateExpression:
+          "SET launchCount = if_not_exists(launchCount, :z) + :one, " +
+          "windowStartedAt = if_not_exists(windowStartedAt, :now), " +
+          "windowExpiresAt = if_not_exists(windowExpiresAt, :winexp), " +
+          "#ver = if_not_exists(#ver, :z) + :one, updatedAt = :now",
+        // NOTE: if_not_exists() is NOT allowed in a ConditionExpression (only in
+        // UpdateExpression). grantEntitlement always initialises launchCount=0 for
+        // PAY_PER_LAB rows, so it's safe to compare it directly; if it were somehow
+        // absent the comparison evaluates false → ConditionalCheckFailed → 409
+        // (fails closed, which is the correct refusal).
+        ConditionExpression:
+          "attribute_exists(userId) AND #ver = :expected " +
+          "AND launchCount < maxLaunches " +
+          "AND (attribute_not_exists(windowExpiresAt) OR :now < windowExpiresAt)",
+        ExpressionAttributeNames: { "#ver": "version" },
+        ExpressionAttributeValues: {
+          ":z": { N: "0" },
+          ":one": { N: "1" },
+          ":now": { S: nowIso },
+          ":winexp": { S: winExpIso },
+          ":expected": { N: String(Number(expectedVersion) || 0) },
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    const a = r.Attributes ?? {};
+    const used = Number(a.launchCount?.N ?? "0");
+    const cap = Number(a.maxLaunches?.N ?? "0");
+    return { ok: true, launchesRemaining: Math.max(0, cap - used), windowExpiresAt: a.windowExpiresAt?.S ?? null };
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return { ok: false, code: "CONCURRENT_LAUNCH_OR_LIMIT" };
+    throw e;
+  }
+}
+
+/**
+ * rollbackLaunch(): compensating decrement after a reserve when the downstream
+ * provision fails — so a 503/engine error doesn't burn a paid launch the user
+ * never got. Decrements launchCount (never below 0); leaves the monotonic
+ * version as-is (the reserve's bump stands; the app re-reads version before its
+ * next reserve). No-op if launchCount is already 0.
+ */
+export async function rollbackLaunch(userId, labSlug) {
+  const db = await ddb();
+  try {
+    await db.send(
+      new UpdateItemCommand({
+        TableName: ENTITLEMENTS_TABLE,
+        Key: { userId: { S: String(userId) }, labSlug: { S: String(labSlug) } },
+        UpdateExpression: "SET launchCount = launchCount - :one, updatedAt = :now",
+        ConditionExpression: "launchCount > :z",
+        ExpressionAttributeValues: { ":one": { N: "1" }, ":z": { N: "0" }, ":now": { S: new Date().toISOString() } },
+      })
+    );
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return; // nothing to roll back
+    throw e;
+  }
+}
+
+/** deleteEntitlement(): remove one entitlement row. Admin/cleanup utility
+ *  (not on the request path) — e.g. revoking a grant or clearing test data. */
+export async function deleteEntitlement(userId, labSlug) {
+  const db = await ddb();
+  await db.send(
+    new DeleteItemCommand({
+      TableName: ENTITLEMENTS_TABLE,
+      Key: { userId: { S: String(userId) }, labSlug: { S: String(labSlug) } },
+    })
+  );
+}
+
+/**
+ * listEntitlements(): return all entitlement rows for a user, including the v2
+ * pay-per-lab budget fields (undefined when absent — the app treats a missing
+ * `type` as LIFETIME, so legacy rows keep their old unlimited-within-accessUntil
+ * behaviour with no migration required).
  */
 export async function listEntitlements(userId) {
   if (!userId) return [];
@@ -1277,6 +1419,17 @@ export async function listEntitlements(userId) {
     kind: it.kind?.S,
     accessUntil: it.accessUntil?.S ?? null,
     grantedAt: it.grantedAt?.S,
+    // v2 fields (optional; absent on legacy rows)
+    type: it.type?.S ?? undefined,
+    launchCount: it.launchCount?.N != null ? Number(it.launchCount.N) : undefined,
+    maxLaunches: it.maxLaunches?.N != null ? Number(it.maxLaunches.N) : undefined,
+    version: it.version?.N != null ? Number(it.version.N) : undefined,
+    windowStartedAt: it.windowStartedAt?.S ?? null,
+    windowExpiresAt: it.windowExpiresAt?.S ?? null,
+    subscriptionId: it.subscriptionId?.S ?? undefined,
+    subscriptionStatus: it.subscriptionStatus?.S ?? undefined,
+    subscriptionExpiresAt: it.subscriptionExpiresAt?.S ?? null,
+    orderId: it.orderId?.S ?? undefined,
   }));
 }
 

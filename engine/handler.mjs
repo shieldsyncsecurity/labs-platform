@@ -112,6 +112,10 @@ import {
   upsertUser,
   grantEntitlement,
   listEntitlements,
+  reserveLaunch,
+  rollbackLaunch,
+  PAYPERLAB_MAX_LAUNCHES,
+  PAYPERLAB_BACKSTOP_DAYS,
   findExpiredSessions,
   rulesFor,
   launchCount,
@@ -375,23 +379,32 @@ export async function handler(event) {
         return resp(409, { error: "ALREADY_ACTIVE", labSlug: lock.labSlug });
       }
 
-      // Per-level launch limit (e.g. Beginner = 3 runs / 72h). Reconnects don't
-      // count — only genuinely new runs do. Session length is also per-level.
-      const used = await launchCount(uid, labSlug, rules.windowHours);
-      if (used >= rules.maxLaunches) {
-        await releaseUserLock(uid);
-        console.log(`[launch] LIMIT_REACHED ${uid} ${labSlug}: ${used}/${rules.maxLaunches} in ${rules.windowHours}h`);
-        metric({ Launch: 1 }, { Outcome: "limit" });
-        // Exact time the next run frees up (oldest in-window launch + window) so the
-        // UI can show "unlocks at 3:45 PM" instead of a vague "about 24h".
-        const retryAt = await nextLaunchAt(uid, labSlug, rules.windowHours, rules.maxLaunches).catch(() => null);
-        return resp(429, {
-          error: "LIMIT_REACHED",
-          maxLaunches: rules.maxLaunches,
-          windowHours: rules.windowHours,
-          used,
-          retryAt,
-        });
+      // Per-level launch limit — FREE labs only. The free lab is a lead magnet
+      // (FREE_RULE = 2 runs / 24h) and needs a rolling abuse cap. PAID labs are no
+      // longer capped here: their launch budget lives on the entitlement row and
+      // is enforced by the app (it calls reserveLaunch — an atomic CAS on the
+      // ShieldSyncLabEntitlements row — BEFORE this /launch). Applying the old
+      // 2/48h level cap to paid labs would silently override the pay-per-lab
+      // budget (30 launches / 7-day window). Session length still comes from the
+      // per-level rule regardless; the one-live-session lock + per-IP rate cap
+      // remain the engine-side backstops for paid launches.
+      if (rules.free) {
+        const used = await launchCount(uid, labSlug, rules.windowHours);
+        if (used >= rules.maxLaunches) {
+          await releaseUserLock(uid);
+          console.log(`[launch] LIMIT_REACHED ${uid} ${labSlug}: ${used}/${rules.maxLaunches} in ${rules.windowHours}h`);
+          metric({ Launch: 1 }, { Outcome: "limit" });
+          // Exact time the next run frees up (oldest in-window launch + window) so the
+          // UI can show "unlocks at 3:45 PM" instead of a vague "about 24h".
+          const retryAt = await nextLaunchAt(uid, labSlug, rules.windowHours, rules.maxLaunches).catch(() => null);
+          return resp(429, {
+            error: "LIMIT_REACHED",
+            maxLaunches: rules.maxLaunches,
+            windowHours: rules.windowHours,
+            used,
+            retryAt,
+          });
+        }
       }
 
       // Free labs are capped to a share of the pool (FREE_POOL_PCT) so a free rush
@@ -580,13 +593,30 @@ export async function handler(event) {
       }
       // #7: GRANT first (idempotent upsert), THEN record paid. A grant failure leaves
       // the order unpaid so the provider retries (no "charged, no access"). The grant is
-      // derived from the STORED order — never a client-supplied userId/labSlug/window —
-      // and the access window is computed HERE from the engine's own rules (authoritative).
-      const labSlug = order.plan === "monthly" ? "*" : (order.labSlug ?? "");
-      const kind = order.plan === "monthly" ? "monthly" : "per-lab";
-      const windowH = order.plan === "monthly" ? 30 * 24 : rulesFor(order.labSlug || "").windowHours;
-      const accessUntil = new Date(Date.now() + windowH * 3600 * 1000).toISOString();
-      await grantEntitlement(order.userId, { labSlug, kind, accessUntil });
+      // derived from the STORED order — never a client-supplied userId/labSlug/window.
+      const isMonthly = order.plan === "monthly";
+      if (isMonthly) {
+        // Monthly = unlimited launches for 30 days (one-time pass; a real recurring
+        // subscription is a later, separate model). LIFETIME-shaped: no launch budget,
+        // gated only by accessUntil.
+        const accessUntil = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+        await grantEntitlement(order.userId, { labSlug: "*", kind: "monthly", accessUntil });
+      } else {
+        // Pay-per-lab v2: a launch budget (PAYPERLAB_MAX_LAUNCHES) within a 7-day
+        // window that starts on FIRST launch (reserveLaunch stamps it). accessUntil
+        // is a generous backstop so an UNUSED purchase doesn't live forever; the real
+        // cap is maxLaunches + the on-first-launch window. Budget fields are written
+        // idempotently (if_not_exists) so a webhook retry can't refill a used budget.
+        const accessUntil = new Date(Date.now() + PAYPERLAB_BACKSTOP_DAYS * 24 * 3600 * 1000).toISOString();
+        await grantEntitlement(order.userId, {
+          labSlug: order.labSlug ?? "",
+          kind: "per-lab",
+          accessUntil,
+          type: "PAY_PER_LAB",
+          maxLaunches: PAYPERLAB_MAX_LAUNCHES,
+          orderId,
+        });
+      }
       const transitioned = await markOrderPaid(orderId, paymentId);
       return resp(200, { transitioned, granted: true });
     }
@@ -612,7 +642,7 @@ export async function handler(event) {
 
     // ── Entitlements (persistent, DynamoDB-backed) ───────────────────────────
     if (method === "POST" && path === "/entitlements") {
-      const { userId, labSlug, kind, accessUntil } = parsed;
+      const { userId, labSlug, kind, accessUntil, type, maxLaunches, orderId } = parsed;
       if (!userId || !labSlug) return resp(400, { error: "userId and labSlug required" });
       // audit#2 FLAW B: a signed caller may only grant to ITSELF, so a leaked secret
       // can't POST an entitlement for an arbitrary userId. The post-payment grant
@@ -621,7 +651,33 @@ export async function handler(event) {
       if (ENGINE_AUTH_PROD && callerUserId && callerUserId !== userId) {
         return resp(403, { error: "forbidden" });
       }
-      await grantEntitlement(userId, { labSlug, kind, accessUntil });
+      await grantEntitlement(userId, { labSlug, kind, accessUntil, type, maxLaunches, orderId });
+      return resp(200, { ok: true });
+    }
+
+    // Pay-per-lab v2: atomically reserve one launch against the caller's own
+    // entitlement (CAS on version + launch budget + 7-day window). The app calls
+    // this BEFORE /launch for PAY_PER_LAB labs; 409 = lost race / cap / expired.
+    if (method === "POST" && path === "/entitlements/reserve-launch") {
+      const { userId, labSlug, expectedVersion } = parsed;
+      const uid = ENGINE_AUTH_PROD ? callerUserId : (callerUserId || userId);
+      if (!uid) return resp(401, { error: "unauthorized" });
+      if (ENGINE_AUTH_PROD && userId && userId !== uid) return resp(403, { error: "forbidden" });
+      if (typeof labSlug !== "string" || !labSlug) return resp(400, { error: "labSlug required" });
+      const r = await reserveLaunch(uid, labSlug, expectedVersion);
+      if (!r.ok) return resp(409, { error: r.code });
+      return resp(200, { launchesRemaining: r.launchesRemaining, windowExpiresAt: r.windowExpiresAt });
+    }
+
+    // Pay-per-lab v2: compensating decrement when a reserved launch's provision
+    // fails downstream — so a 503/engine error doesn't burn a paid launch.
+    if (method === "POST" && path === "/entitlements/rollback-launch") {
+      const { userId, labSlug } = parsed;
+      const uid = ENGINE_AUTH_PROD ? callerUserId : (callerUserId || userId);
+      if (!uid) return resp(401, { error: "unauthorized" });
+      if (ENGINE_AUTH_PROD && userId && userId !== uid) return resp(403, { error: "forbidden" });
+      if (typeof labSlug !== "string" || !labSlug) return resp(400, { error: "labSlug required" });
+      await rollbackLaunch(uid, labSlug);
       return resp(200, { ok: true });
     }
 
