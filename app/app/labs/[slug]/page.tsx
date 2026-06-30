@@ -7,6 +7,9 @@ import { LabPanel } from "@/components/lab-panel";
 import { LabGuide } from "@/components/lab-guide";
 import { LabIntro } from "@/components/lab-intro";
 import { LabWorkspaceProvider } from "@/components/lab-workspace";
+import { EntitlementStatus } from "@/components/entitlement-status";
+import { getServerUser } from "@/lib/auth/session";
+import { listEntitlements } from "@/lib/server/store";
 
 type Objective = { id: string; description: string };
 
@@ -69,6 +72,16 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
   const lab = getLab(slug);
   if (!lab) notFound();
 
+  // Fetch the signed-in user's entitlement for THIS lab (or the monthly all-access
+  // "*" row) so we can render launch-cap / window state above the title. Best-effort:
+  // any failure (no session, engine unreachable) returns null and the page renders
+  // as it does for an anonymous visitor.
+  const user = await getServerUser().catch(() => null);
+  const entitlement = user
+    ? (await listEntitlements(user.id).catch(() => []))
+        .find((e) => e.labSlug === slug || e.labSlug === "*") ?? null
+    : null;
+
   const full = lab.ready ? (labInstructions[slug] ?? null) : null;
   const [overview, walkthrough] = full ? splitSentinel(full) : [null, ""];
   const objectives: Objective[] = lab.ready ? (labObjectives[slug] ?? []) : [];
@@ -122,6 +135,8 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
           All labs
         </Link>
       </div>
+
+      <EntitlementStatus entitlement={entitlement} />
 
       <div className="mt-4 max-w-3xl">
         <div className="flex flex-wrap items-center gap-2">

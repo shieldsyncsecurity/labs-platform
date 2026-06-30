@@ -46,12 +46,17 @@ export async function markOrderPaid(
   orderId: string,
   paymentId: string,
   amountMinor?: number,
-  currency?: string
+  currency?: string,
+  // v2: hint the engine that this is a pay-per-lab grant with a launch cap. The
+  // engine remains authoritative — it can ignore these if its own rules disagree
+  // (e.g. monthly plan) — but for per-lab orders it should write the v2 shape.
+  entitlementType?: "PAY_PER_LAB" | "SUBSCRIPTION" | "LIFETIME",
+  maxLaunches?: number
 ): Promise<{ transitioned: boolean; granted: boolean }> {
   try {
     const r = await engineFetch("/orders/paid", {
       method: "POST",
-      body: { orderId, paymentId, amountMinor, currency },
+      body: { orderId, paymentId, amountMinor, currency, entitlementType, maxLaunches },
     });
     if (!r.ok) return { transitioned: false, granted: false };
     const data = (await r.json()) as { transitioned?: boolean; granted?: boolean };

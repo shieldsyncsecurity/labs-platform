@@ -50,7 +50,18 @@ export async function POST(req: Request) {
   //    order, grants the entitlement (idempotent, derived from the stored order, window
   //    computed engine-side), then records created->paid. We return ok ONLY if it
   //    granted; otherwise 5xx so the provider redelivers (no "charged, no access").
-  const { granted } = await markOrderPaid(order.id, evt.paymentId, evt.amountMinor, evt.currency);
+  // v2: hint the engine to write the PAY_PER_LAB shape (type + maxLaunches=30)
+  // for per-lab orders. Monthly stays a subscription-style grant — let the engine
+  // pick its own type for that plan; we only assert the per-lab case here.
+  const isPerLab = order.plan === "per-lab";
+  const { granted } = await markOrderPaid(
+    order.id,
+    evt.paymentId,
+    evt.amountMinor,
+    evt.currency,
+    isPerLab ? "PAY_PER_LAB" : undefined,
+    isPerLab ? 30 : undefined
+  );
   if (!granted) {
     return NextResponse.json({ ok: false, reason: "grant failed, retry" }, { status: 503 });
   }
