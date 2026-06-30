@@ -109,7 +109,13 @@ function fmtRetry(iso: string | null): { exact: string; rel: string } | null {
     `about ${Math.round(mins / 60 / 24)} day${Math.round(mins / 60 / 24) === 1 ? "" : "s"}`;
   return { exact, rel };
 }
-const card = "rounded-2xl border border-line bg-surface p-5";
+const card = "rounded-2xl border border-line bg-surface p-5 shadow-sm";
+// Shared button styles — a branded gradient primary (premium feel, matches the
+// marketing site) + a quiet secondary. Presentational only.
+const btnPrimary =
+  "w-full rounded-xl bg-gradient-to-r from-brand to-cyan px-5 py-3 text-center text-base font-semibold text-white shadow-sm shadow-brand/20 transition hover:brightness-110 disabled:opacity-60";
+const btnSecondary =
+  "w-full rounded-xl border border-line-strong px-5 py-2.5 text-base font-semibold text-ink transition hover:bg-canvas";
 
 function LeasingCard({ onCancel }: { onCancel?: () => void }) {
   const shown = useStaggeredLog(BUILD_LOG);
@@ -662,7 +668,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       <div className={card}>
         <p className="text-base font-extrabold text-ink">Start this lab</p>
         <p className="mt-1 text-base text-ink-soft">Sign in to spin up your own isolated AWS lab.</p>
-        <Link href={`/sign-in?returnTo=${encodeURIComponent(`/labs/${slug}`)}`} className="mt-4 block rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong">Sign in to start</Link>
+        <Link href={`/sign-in?returnTo=${encodeURIComponent(`/labs/${slug}`)}`} className={`mt-4 block ${btnPrimary}`}>Sign in to start</Link>
       </div>
     );
   }
@@ -672,7 +678,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
       <div className={card}>
         <p className="text-base font-extrabold text-ink">Get this lab</p>
         <p className="mt-1 text-base text-ink-soft">One-time purchase — simulated checkout, 24h access.</p>
-        <button onClick={() => setShowCheckout(true)} className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-semibold text-white hover:bg-brand-strong">Get this lab</button>
+        <button onClick={() => setShowCheckout(true)} className={`mt-4 ${btnPrimary}`}>Get this lab</button>
         {showCheckout && (
           <CheckoutSheet labSlug={slug} labTitle={lab?.title ?? "Lab"} plan="per-lab" onClose={() => setShowCheckout(false)} onPaid={async () => { await refreshEntitlements(); setShowCheckout(false); }} />
         )}
@@ -713,7 +719,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         <div className="mt-3 rounded-lg border border-[#fde68a] bg-[#fffbeb] p-2.5 text-xs text-[#92400e]">
           🪟 <strong>Close any AWS console tabs you opened</strong> — their session was revoked, but the tab may look unchanged until you click. (The incognito copy-URL flow doesn’t auto-close.)
         </div>
-        <button onClick={() => { clearSession(); void launch(); }} className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-semibold text-white hover:bg-brand-strong">Start a new lab</button>
+        <button onClick={() => { clearSession(); void launch(); }} className={`mt-4 ${btnPrimary}`}>Start a new lab</button>
         <div className="mt-5 border-t border-line pt-4">
           <p className="text-xs font-bold uppercase tracking-wider text-muted">Did this lab help?</p>
           {rated ? (
@@ -735,17 +741,28 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     const doneCount = graded ? grade!.criteria.filter((c) => c.passed && !c.unknown).length : 0;
     const totalCount = graded ? grade!.criteria.filter((c) => !c.unknown).length : 0;
     return (
-      <div className={card} role="status" aria-live="polite">
-        <div className="flex items-center justify-between">
-          <span className="text-base font-extrabold text-ink">🟢 Lab is live</span>
-          <span className={`font-mono text-sm font-bold ${low ? "text-[#b91c1c]" : "text-brand"}`}>⏱ {fmt(remaining)}</span>
+      <div className="overflow-hidden rounded-2xl border border-emerald-300/70 bg-surface shadow-sm ring-1 ring-emerald-500/10" role="status" aria-live="polite">
+        {/* Live status bar — reads as "active" vs the gray idle card */}
+        <div className="flex items-center justify-between gap-2 border-b border-emerald-200/60 bg-emerald-50/70 px-5 py-2.5">
+          <span className="inline-flex items-center gap-2 text-sm font-bold text-emerald-800">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+            </span>
+            Lab is live
+          </span>
+          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-sm font-bold tabular-nums ${low ? "bg-[#fee2e2] text-[#b91c1c]" : "bg-white text-emerald-700"}`}>
+            <span aria-hidden>⏱</span> {fmt(remaining)}
+          </span>
         </div>
+
+        <div className="p-5">
         {low && (
-          <div role="alert" className="mt-3 rounded-lg border border-[#fecaca] bg-[#fef2f2] p-2.5 text-sm font-semibold text-[#b91c1c]">
+          <div role="alert" className="rounded-lg border border-[#fecaca] bg-[#fef2f2] p-2.5 text-sm font-semibold text-[#b91c1c]">
             ⚠ Under 5 minutes left — wrap up and click <strong>End &amp; wipe lab</strong>. When the timer hits 0 the account is auto-wiped and your work is cleared.
           </div>
         )}
-        <button onClick={openConsole} disabled={consoleOpening} className="mt-4 block w-full rounded-xl bg-brand px-5 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong disabled:opacity-70">
+        <button onClick={openConsole} disabled={consoleOpening} className={`${low ? "mt-3" : ""} block ${btnPrimary}`}>
           {consoleOpening ? "Opening console…" : "Open AWS console ↗"}
         </button>
         {consoleError && (
@@ -812,7 +829,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
             <button
               onClick={checkWork}
               disabled={grading}
-              className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-bold text-white hover:bg-brand-strong disabled:opacity-60"
+              className={`mt-4 ${btnPrimary}`}
             >
               {grading ? "Checking your live account…" : grade ? "Re-check my work" : "Check my work"}
             </button>
@@ -841,15 +858,16 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
           </div>
         )}
 
-        <button onClick={endLab} className="mt-3 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">End &amp; wipe lab</button>
+        <button onClick={endLab} className={`mt-3 ${btnSecondary}`}>End &amp; wipe lab</button>
+        </div>
 
         {/* Mobile-only sticky action bar: on phones the rail sits below the whole guide,
             so mirror the two primary actions at the bottom of the viewport. */}
         <div className="fixed inset-x-0 bottom-0 z-30 flex gap-2 border-t border-line bg-surface/95 p-3 shadow-[0_-2px_10px_rgba(0,0,0,0.06)] backdrop-blur lg:hidden">
-          <button onClick={openConsole} disabled={consoleOpening} className="flex-1 rounded-xl border border-line px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-70">
+          <button onClick={openConsole} disabled={consoleOpening} className="flex-1 rounded-xl border border-line-strong px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-70">
             {consoleOpening ? "Opening…" : "Open console ↗"}
           </button>
-          <button onClick={checkWork} disabled={grading} className="flex-1 rounded-xl bg-brand px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+          <button onClick={checkWork} disabled={grading} className="flex-1 rounded-xl bg-gradient-to-r from-brand to-cyan px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
             {grading ? "Checking…" : grade ? "Re-check" : "Check my work"}
           </button>
         </div>
@@ -857,19 +875,49 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     );
   }
 
-  // no session — idle
+  // no session — idle (the conversion moment: make it inviting)
   return (
-    <div className={card}>
-      <p className="text-base font-extrabold text-ink">Start this lab</p>
-      <p className="mt-1 text-base text-ink-soft">Your own isolated AWS account (~30 min), the scenario pre-deployed, auto-wiped when you finish.</p>
-      {rule && (
-        <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-line bg-canvas px-2.5 py-1 text-sm text-ink-soft">
-          <span aria-hidden>↻</span>
-          {lab?.free ? "Free lab" : lab?.level} · {launchPolicy}
+    <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+      {/* Accent header strip */}
+      <div className="bg-gradient-to-r from-brand/[0.08] to-cyan/[0.04] px-5 pb-3 pt-4">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-brand to-cyan text-white">
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+          </span>
+          <p className="text-base font-extrabold text-ink">Start this lab</p>
+        </div>
+        <p className="mt-1.5 text-sm leading-6 text-ink-soft">
+          Your own isolated AWS account, the scenario pre-deployed, auto-wiped when you finish.
         </p>
-      )}
-      <button onClick={launch} className="mt-4 w-full rounded-xl bg-brand px-5 py-3 text-base font-semibold text-white hover:bg-brand-strong">Launch lab</button>
-      <p className="mt-2 text-xs text-muted">Opens the AWS console in a new tab; this guide stays here.</p>
+      </div>
+
+      <div className="p-5 pt-4">
+        {/* Quick reassurance chips */}
+        <ul className="grid gap-2">
+          {[
+            { i: "🔐", t: "Real, isolated AWS console — nothing shared" },
+            { i: "🧹", t: "Auto-wiped when you're done — no setup, no bill" },
+            { i: "✓", t: "Graded against your live account, not a checkbox" },
+          ].map((c) => (
+            <li key={c.t} className="flex items-start gap-2 text-sm text-ink-soft">
+              <span aria-hidden className="mt-0.5 flex-none">{c.i}</span>
+              {c.t}
+            </li>
+          ))}
+        </ul>
+
+        {rule && (
+          <p className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-line bg-canvas px-2.5 py-1 text-xs font-semibold text-ink-soft">
+            <span aria-hidden>↻</span>
+            {lab?.free ? "Free lab" : lab?.level} · {launchPolicy} · ~{lab?.estimatedActiveMinutes ?? 30} min
+          </p>
+        )}
+
+        <button onClick={launch} className={`mt-4 ${btnPrimary}`}>Launch lab →</button>
+        <p className="mt-2 text-center text-xs text-muted">Opens the AWS console in a new tab; this guide stays here.</p>
+      </div>
     </div>
   );
 }
