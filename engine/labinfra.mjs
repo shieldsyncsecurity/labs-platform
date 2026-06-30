@@ -20,6 +20,7 @@ import {
   CloudFormationClient,
   CreateStackCommand,
   DescribeStacksCommand,
+  DescribeStackResourcesCommand,
   waitUntilStackCreateComplete,
 } from "@aws-sdk/client-cloudformation";
 import { IAMClient, PutRolePolicyCommand, DeleteRolePolicyCommand } from "@aws-sdk/client-iam";
@@ -509,6 +510,15 @@ export async function getSession(sessionId) {
     // Owner of this session — used by the engine's HTTP layer for ownership
     // checks on /teardown, /console, /grade, GET /session/<id>.
     userId: it.userId?.S,
+    // Live cold-build progress (real CloudFormation resource counts), written by
+    // the deploy worker while leasing. Absent on warm/instant leases and once active.
+    progress: it.progress?.M
+      ? {
+          done: Number(it.progress.M.done?.N ?? 0),
+          total: Number(it.progress.M.total?.N ?? 0),
+          current: it.progress.M.current?.S ?? null,
+        }
+      : undefined,
   };
 }
 
@@ -771,8 +781,83 @@ export async function markSession(sessionId, status, error) {
   );
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * markSessionProgress(): record live cold-build progress on a session so the
+ * learner's build bar reflects the REAL CloudFormation stack (resources done /
+ * total) instead of a timer. Guarded to only write while the session is still
+ * "leasing" — a torn-down session must never get progress written back onto it.
+ * Best-effort: a lost progress write must never fail a deploy, so callers swallow.
+ */
+export async function markSessionProgress(sessionId, p) {
+  const db = await ddb();
+  const m = {
+    done: { N: String(Math.max(0, p.done | 0)) },
+    total: { N: String(Math.max(0, p.total | 0)) },
+  };
+  if (p.current) m.current = { S: String(p.current).slice(0, 60) };
+  try {
+    await db.send(
+      new UpdateItemCommand({
+        TableName: SESSIONS_TABLE,
+        Key: { sessionId: { S: sessionId } },
+        UpdateExpression: "SET progress = :p",
+        ConditionExpression: "#s = :leasing",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":p": { M: m }, ":leasing": { S: "leasing" } },
+      })
+    );
+  } catch (e) {
+    if (e.name !== "ConditionalCheckFailedException") throw e; // no longer leasing → drop
+  }
+}
+
+// Count the top-level resources declared in a CloudFormation YAML template. Our
+// templates are authored consistently (resource keys at exactly 2-space indent),
+// so a line scan gives a STABLE denominator — without it, DescribeStackResources
+// reveals resources lazily and the bar would yo-yo (1/1 → 1/3 → 2/6 …).
+function countTemplateResources(templateBody) {
+  try {
+    const lines = String(templateBody).split(/\r?\n/);
+    let inRes = false;
+    let n = 0;
+    for (const line of lines) {
+      if (!inRes) {
+        if (/^Resources:\s*(#.*)?$/.test(line)) inRes = true;
+        continue;
+      }
+      if (/^\S/.test(line)) break; // dedent to another top-level section → done
+      if (/^ {2}[A-Za-z0-9]+:\s*(#.*)?$/.test(line)) n++; // a resource key
+    }
+    return n;
+  } catch {
+    return 0;
+  }
+}
+
+// Turn a CloudFormation resource type into a learner-friendly noun for the
+// "now creating …" line under the bar.
+function friendlyResource(type, logicalId) {
+  if (!type) return null;
+  const map = {
+    "AWS::S3::Bucket": "S3 bucket",
+    "AWS::S3::BucketPolicy": "bucket access policy",
+    "AWS::IAM::Role": "IAM role",
+    "AWS::IAM::User": "IAM user",
+    "AWS::IAM::Policy": "IAM policy",
+    "AWS::IAM::ManagedPolicy": "IAM policy",
+    "AWS::IAM::AccessKey": "access key",
+    "AWS::Lambda::Function": "Lambda function",
+  };
+  if (map[type]) return map[type];
+  if (type.startsWith("Custom::") || type === "AWS::CloudFormation::CustomResource") return "seed data";
+  const seg = type.split("::").pop();
+  return seg ? seg.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase() : logicalId ?? null;
+}
+
 /** deployStack(): assume ShieldSyncLabExec and create a lab's CloudFormation. */
-async function deployStack(execRoleArn, labSlug, stackName, tags = []) {
+async function deployStack(execRoleArn, labSlug, stackName, tags = [], onProgress = null) {
   // Hard sanity check: labSlug controls a filesystem path, so it must match the
   // whitelist. Any caller that already validated (labMeta/rulesFor) is fine; this
   // is the last-line defence against path traversal making it into a deploy.
@@ -801,12 +886,55 @@ async function deployStack(execRoleArn, labSlug, stackName, tags = []) {
       Tags: tags,
     })
   );
+
+  // ── Live progress (cold-lease only) ────────────────────────────────────────
+  // While the SDK waiter blocks on the terminal state, poll the REAL stack
+  // resource states and report done/total so the learner's build bar reflects the
+  // actual CloudFormation, not a fixed timer. The waiter remains the single source
+  // of truth for success/failure; this poller is best-effort and never throws into
+  // the deploy. Skipped entirely for warm pre-deploys (no onProgress sink).
+  const total = onProgress ? countTemplateResources(templateBody) : 0;
+  let polling = !!onProgress;
+  const poller =
+    onProgress &&
+    (async () => {
+      // seed the bar immediately with the known denominator (before any resource
+      // is describable) so the user never stares at an empty/0-of-0 bar
+      try {
+        await onProgress({ done: 0, total, current: null });
+      } catch {}
+      while (polling) {
+        await sleep(4500);
+        if (!polling) break;
+        try {
+          const rs = await cfn.send(new DescribeStackResourcesCommand({ StackName: stackName }));
+          const resources = (rs.StackResources ?? []).filter(
+            (r) => r.ResourceType !== "AWS::CloudFormation::Stack"
+          );
+          const done = resources.filter((r) => r.ResourceStatus === "CREATE_COMPLETE").length;
+          const inProg = resources.find((r) => r.ResourceStatus === "CREATE_IN_PROGRESS");
+          await onProgress({
+            done,
+            total: Math.max(total, resources.length),
+            current: friendlyResource(inProg?.ResourceType, inProg?.LogicalResourceId),
+          });
+        } catch {
+          /* throttle / not-yet-visible / transient — keep polling */
+        }
+      }
+    })();
+
   // 540s (cold deploys finish in ~80–110s; OnFailure=DELETE auto-cleans real
   // failures). The old 280s could time out while the stack was STILL creating →
   // it would later reach CREATE_COMPLETE on an account already re-pooled →
   // account-named-bucket collision → CREATE_FAILED for the next customer. The
   // wide margin (well under the 900s Lambda budget) makes that race vanishingly rare.
-  await waitUntilStackCreateComplete({ client: cfn, maxWaitTime: 540 }, { StackName: stackName });
+  try {
+    await waitUntilStackCreateComplete({ client: cfn, maxWaitTime: 540 }, { StackName: stackName });
+  } finally {
+    polling = false;
+    if (poller) await poller.catch(() => {});
+  }
   const desc = await cfn.send(new DescribeStacksCommand({ StackName: stackName }));
   const outputs = {};
   for (const o of desc.Stacks?.[0]?.Outputs ?? []) outputs[o.OutputKey] = o.OutputValue;
@@ -817,7 +945,16 @@ async function deployStack(execRoleArn, labSlug, stackName, tags = []) {
 export async function deployLab({ sessionId, accountId, labSlug, execRoleArn }) {
   const stackName = ("sslab-" + labSlug + "-" + sessionId.replace("sess_", "")).slice(0, 120);
   console.log(`  deploying stack ${stackName} into account ${accountId} ...`);
-  const { outputs } = await deployStack(execRoleArn, labSlug, stackName, [{ Key: "ShieldSyncSession", Value: sessionId }]);
+  // Stream real CloudFormation progress onto the session (best-effort; never fails
+  // the deploy) so the learner's build bar tracks the actual stack.
+  const onProgress = (p) => markSessionProgress(sessionId, p).catch(() => {});
+  const { outputs } = await deployStack(
+    execRoleArn,
+    labSlug,
+    stackName,
+    [{ Key: "ShieldSyncSession", Value: sessionId }],
+    onProgress
+  );
   const db = await ddb();
   try {
     await db.send(
@@ -829,7 +966,7 @@ export async function deployLab({ sessionId, accountId, labSlug, execRoleArn }) 
         // resurrect it — otherwise a teardown-during-deploy race leaves a zombie
         // "active" session on an account teardown is already wiping. teardown +
         // the reaper reclaim the account; the lock TTL clears the user lock.
-        UpdateExpression: "SET #s = :active, stackName = :sn",
+        UpdateExpression: "SET #s = :active, stackName = :sn REMOVE progress",
         ConditionExpression: "#s = :leasing",
         ExpressionAttributeNames: { "#s": "status" },
         ExpressionAttributeValues: { ":active": { S: "active" }, ":sn": { S: stackName }, ":leasing": { S: "leasing" } },

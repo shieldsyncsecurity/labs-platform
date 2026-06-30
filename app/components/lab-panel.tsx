@@ -13,17 +13,6 @@ const SUPPORT_URL = "https://shieldsyncsecurity.com/contact";
 
 // ── animated terminal log lines ──────────────────────────────────────────────
 
-const BUILD_LOG: { ms: number; text: string }[] = [
-  { ms: 0,     text: "locating available sandbox account…" },
-  { ms: 1300,  text: "account acquired · us-east-1" },
-  { ms: 2500,  text: "guardrails verified  region-lock ✓  cost-cap ✓" },
-  { ms: 3700,  text: "deploying lab scenario (CloudFormation)…" },
-  { ms: 5400,  text: "stack → CREATE_IN_PROGRESS" },
-  { ms: 11500, text: "resources creating  S3 · IAM · Lambda…" },
-  { ms: 17500, text: "stack → CREATE_COMPLETE ✓" },
-  { ms: 19000, text: "minting time-boxed console access…" },
-];
-
 const WIPE_LOG: { ms: number; text: string }[] = [
   { ms: 0,    text: "revoking learner console session…" },
   { ms: 1300, text: "running full account wipe (aws-nuke)…" },
@@ -35,7 +24,7 @@ function TerminalLog({
   shown,
   color,
 }: {
-  lines: typeof BUILD_LOG;
+  lines: typeof WIPE_LOG;
   shown: number;
   color: "green" | "orange";
 }) {
@@ -60,7 +49,7 @@ function TerminalLog({
   );
 }
 
-function useStaggeredLog(log: typeof BUILD_LOG) {
+function useStaggeredLog(log: typeof WIPE_LOG) {
   const [shown, setShown] = useState(1);
   useEffect(() => {
     const timers = log.slice(1).map((line, i) =>
@@ -84,7 +73,8 @@ function useElapsed() {
 }
 
 type Objective = { id: string; description: string };
-type Session = { status: string; expiresAt?: string | null; accountId?: string; error?: string };
+type BuildProgress = { done: number; total: number; current: string | null };
+type Session = { status: string; expiresAt?: string | null; accountId?: string; error?: string; progress?: BuildProgress };
 
 function fmt(total: number) {
   const m = Math.floor(total / 60);
@@ -117,17 +107,48 @@ const btnPrimary =
 const btnSecondary =
   "w-full rounded-xl border border-line-strong px-5 py-2.5 text-base font-semibold text-ink transition hover:bg-canvas";
 
-function LeasingCard({ onCancel }: { onCancel?: () => void }) {
-  const shown = useStaggeredLog(BUILD_LOG);
+function LeasingCard({ progress, onCancel }: { progress?: BuildProgress; onCancel?: () => void }) {
   const elapsed = useElapsed();
+  const total = progress?.total ?? 0;
+  const determinate = total > 0;
+  const done = determinate ? Math.min(progress?.done ?? 0, total) : 0;
+  // Real fraction, floored so the bar never reads empty and capped < 100 until the
+  // session actually flips to "active" — so we never show a premature "done" that
+  // then sits waiting on the final custom-resource (data seeding).
+  const pct = determinate ? Math.min(97, Math.max(6, Math.round((done / total) * 90) + 6)) : 0;
+
+  // One honest status line under the bar, driven by the REAL stack state.
+  const phase = !determinate
+    ? "Acquiring your isolated AWS account…"
+    : done >= total
+    ? "Finalizing — minting secure console access…"
+    : progress?.current
+    ? `Provisioning resources — now creating your ${progress.current}`
+    : "Provisioning lab resources…";
+
+  // Console feed — real CloudFormation milestones (not a timer).
+  const lines: string[] = [
+    "sandbox account acquired · us-east-1",
+    "deploying lab scenario (CloudFormation)",
+    ...(determinate
+      ? done >= total
+        ? [`${total} of ${total} resources ready ✓`, "minting time-boxed console access…"]
+        : [
+            ...(progress?.current ? [`creating ${progress.current}…`] : []),
+            `${done} of ${total} resources ready`,
+          ]
+      : ["stack → CREATE_IN_PROGRESS"]),
+  ];
+
   // Reassurance escalates with elapsed time so a slow cold build (a fresh AWS
   // account + CloudFormation can take 1–2 min) never looks frozen.
   const reassure =
-    elapsed < 20
-      ? "us-east-1 · isolated AWS account · you can leave this tab — it'll be ready when you're back."
-      : elapsed < 70
-      ? "We're spinning up a brand-new, isolated AWS account just for you — a cold build usually takes 1–2 minutes. This is normal, hang tight."
-      : "Still working — some builds take a little longer than others. We haven't lost you; feel free to leave this tab and come back.";
+    elapsed < 25
+      ? "Spinning up a brand-new, isolated AWS account just for you — you can leave this tab; it'll be ready when you're back."
+      : elapsed < 75
+      ? "A cold build usually takes 1–2 minutes. This is normal — hang tight."
+      : "Still working — some builds run a little longer. We haven't lost you; feel free to come back to this tab.";
+
   return (
     <div className={card} role="status" aria-live="polite">
       <div className="flex items-center justify-between gap-2">
@@ -135,16 +156,43 @@ function LeasingCard({ onCancel }: { onCancel?: () => void }) {
           <span className="h-2 w-2 flex-none rounded-full bg-brand animate-pulse" />
           <span className="text-sm font-bold text-ink">Building your lab</span>
         </div>
-        {/* Live elapsed counter — visible proof it's progressing, not hung. */}
+        {/* Real count when we have it, else the elapsed clock — both prove it's live. */}
         <span className="font-mono text-xs font-semibold tabular-nums text-muted" aria-hidden>
-          {fmt(elapsed)}
+          {determinate ? `${done}/${total}` : fmt(elapsed)}
         </span>
       </div>
-      <TerminalLog lines={BUILD_LOG} shown={shown} color="green" />
-      <div className="ss-bar-track mt-3">
-        <div className="ss-bar-fill ss-bar-brand" />
+
+      {/* dark console — REAL milestone lines */}
+      <div className="mt-3 min-h-[72px] rounded-xl bg-[#0f172a] px-4 py-3 font-mono text-xs">
+        {lines.map((t, i) => (
+          <div
+            key={i}
+            className="leading-6 text-emerald-400"
+            style={{ opacity: i < lines.length - 1 ? 0.55 : 1 }}
+          >
+            <span className="mr-2 text-slate-600">$</span>
+            {t}
+          </div>
+        ))}
+        <span className="inline-block h-3.5 w-1.5 align-middle animate-pulse bg-emerald-400" />
       </div>
-      <p className="mt-2.5 text-xs text-muted">{reassure}</p>
+
+      {/* progress bar — determinate from real resource counts, else indeterminate */}
+      {determinate ? (
+        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-line">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-brand to-cyan transition-[width] duration-700 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      ) : (
+        <div className="ss-bar-track mt-3">
+          <div className="ss-bar-fill ss-bar-brand" />
+        </div>
+      )}
+
+      <p className="mt-2 text-xs font-medium text-ink-soft">{phase}</p>
+      <p className="mt-1 text-xs text-muted">{reassure}</p>
       {onCancel && (
         <button onClick={onCancel} className="mt-3 text-sm font-semibold text-muted hover:text-ink">
           Cancel
@@ -689,7 +737,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const status = session?.status;
 
   if (status === "leasing") {
-    return <LeasingCard onCancel={endLab} />;
+    return <LeasingCard progress={session?.progress} onCancel={endLab} />;
   }
 
   if (status === "ending") {
