@@ -234,7 +234,10 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [rated, setRated] = useState<"up" | "down" | null>(null);
   const [busy, setBusy] = useState(false);
   const [grade, setGrade] = useState<{ gradable: boolean; passed: boolean; criteria: { id: string; description: string; passed: boolean; unknown?: boolean }[] } | null>(null);
-  const [grading, setGrading] = useState(false);
+  const [grading, setGrading] = useState(false); // manual "Check my work" in flight
+  const [autoGrading, setAutoGrading] = useState(false); // silent auto re-grade in flight
+  const gradeInFlight = useRef(false); // one grade at a time (manual OR auto)
+  const lastGradedAtRef = useRef(0); // debounce the on-return opportunistic re-grade
   const [copyStatus, setCopyStatus] = useState<"idle" | "loading" | "copied" | "error">("idle");
   const [consoleOpening, setConsoleOpening] = useState(false); // "Open AWS console" in flight
   const [consoleError, setConsoleError] = useState(false); // console mint failed (don't fail silently)
@@ -343,6 +346,43 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     const s = session?.status;
     setLaunched(s === "leasing" || s === "active" || s === "ending");
   }, [session?.status, setLaunched]);
+
+  // ── Real-time auto-grading ─────────────────────────────────────────────────
+  // While the lab is live, quietly re-score the account every ~25s so the
+  // objectives tick green AS the learner fixes things — no need to hit "Check my
+  // work". Pauses while the tab is hidden (saves cross-account calls), re-checks
+  // opportunistically the moment they switch back (they likely just fixed
+  // something in the console tab), and stops once everything passes. The manual
+  // button stays an instant override. A grade is read-only (~10 AWS calls) and
+  // the pool caps concurrent labs at 3, so this is negligible load.
+  useEffect(() => {
+    if (session?.status !== "active" || grade?.passed) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      timer = setTimeout(loop, 25000);
+    };
+    async function loop() {
+      if (!alive) return;
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        await runGrade({ silent: true });
+      }
+      if (alive) schedule();
+    }
+    const onVisible = () => {
+      if (!alive || document.visibilityState !== "visible") return;
+      // debounce: don't re-grade if we just did (avoids a flurry on tab-flipping)
+      if (Date.now() - lastGradedAtRef.current > 8000) void runGrade({ silent: true });
+    };
+    schedule(); // first auto-grade ~25s in — gives them time to start working
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.status, grade?.passed, sessionId]);
 
   async function launch() {
     setFlash(null);
@@ -483,21 +523,37 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     }).catch(() => {});
   }
 
-  async function checkWork() {
-    if (!sessionId) return;
-    setGrading(true);
+  // Single grade path shared by the manual button and the live auto-grader.
+  // `silent` = the background poll: it shows a subtle spinner (not the big button
+  // label) and, crucially, NEVER clears an existing grade on a transient error —
+  // a momentary AWS blip must not wipe the objectives the learner already ticked.
+  async function runGrade({ silent }: { silent: boolean }) {
+    if (!sessionId || gradeInFlight.current) return;
+    gradeInFlight.current = true;
+    if (silent) setAutoGrading(true);
+    else setGrading(true);
     try {
       const r = await fetch("/api/grade", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ sessionId }),
       });
-      setGrade(r.ok ? await r.json() : null);
+      if (r.ok) {
+        setGrade(await r.json());
+        lastGradedAtRef.current = Date.now();
+      } else if (!silent) {
+        setGrade(null); // manual check surfaces failure; auto keeps the prior grade
+      }
     } catch {
-      setGrade(null);
+      if (!silent) setGrade(null);
+    } finally {
+      gradeInFlight.current = false;
+      if (silent) setAutoGrading(false);
+      else setGrading(false);
     }
-    setGrading(false);
   }
+
+  const checkWork = () => runGrade({ silent: false });
 
   // Read the wizard's ?intent=launch handoff once (client-only → no hydration mismatch).
   useEffect(() => {
@@ -848,18 +904,35 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
             it's obvious what the button does. (objective.id === grade criterion.id) */}
         {objectives.length > 0 && (
           <div className="mt-5 rounded-xl border border-line bg-canvas p-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-bold uppercase tracking-wider text-muted">What you’re fixing</p>
-              {graded && (
-                <span className="font-mono text-xs font-bold text-brand">{doneCount}/{totalCount} done</span>
-              )}
+              <div className="flex items-center gap-2">
+                {!grade?.passed && (
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                    title="We re-check your live AWS account automatically as you work"
+                  >
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className={`absolute inline-flex h-full w-full rounded-full bg-emerald-500 ${autoGrading ? "animate-ping opacity-75" : "opacity-0"}`} />
+                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    </span>
+                    {autoGrading ? "checking…" : "live"}
+                  </span>
+                )}
+                {graded && (
+                  <span className="font-mono text-xs font-bold text-brand">{doneCount}/{totalCount} done</span>
+                )}
+              </div>
             </div>
             <ul className="mt-3 space-y-2">
               {objectives.map((o) => {
                 const c = graded ? grade!.criteria.find((x) => x.id === o.id) : undefined;
                 const state = !c ? "idle" : c.unknown ? "unknown" : c.passed ? "pass" : "todo";
                 return (
-                  <li key={o.id} className="flex gap-2 text-sm">
+                  <li
+                    key={o.id}
+                    className={`flex gap-2 rounded-md px-1.5 py-1 text-sm transition-colors duration-500 ${state === "pass" ? "bg-emerald-50/70" : ""}`}
+                  >
                     <span
                       className="mt-0.5 flex-none"
                       role="img"
@@ -869,20 +942,20 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
                         <span className="inline-block h-3 w-3 rounded-full border-2 border-muted align-middle" />
                       )}
                     </span>
-                    <span className={`text-ink-soft ${state === "pass" ? "line-through opacity-70" : ""}`}>{o.description}</span>
+                    <span className={`text-ink-soft transition-all duration-500 ${state === "pass" ? "line-through opacity-70" : ""}`}>{o.description}</span>
                   </li>
                 );
               })}
             </ul>
             <button
               onClick={checkWork}
-              disabled={grading}
+              disabled={grading || autoGrading}
               className={`mt-4 ${btnPrimary}`}
             >
-              {grading ? "Checking your live account…" : grade ? "Re-check my work" : "Check my work"}
+              {grading ? "Checking your live account…" : autoGrading ? "Auto-checking…" : grade ? "Re-check now" : "Check my work"}
             </button>
             <p className="mt-2 text-center text-xs text-muted">
-              We look inside your <strong>live</strong> AWS account and score each objective above — real feedback, not a checkbox you tick yourself.
+              The ticks update <strong>automatically</strong> as you work — we re-check your <strong>live</strong> AWS account every few seconds. Hit the button any time to check instantly.
             </p>
             {grade && (grade.gradable ? (
               <div className="mt-3 border-t border-line pt-3">
@@ -915,8 +988,8 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
           <button onClick={openConsole} disabled={consoleOpening} className="flex-1 rounded-xl border border-line-strong px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-70">
             {consoleOpening ? "Opening…" : "Open console ↗"}
           </button>
-          <button onClick={checkWork} disabled={grading} className="flex-1 rounded-xl bg-gradient-to-r from-brand to-cyan px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
-            {grading ? "Checking…" : grade ? "Re-check" : "Check my work"}
+          <button onClick={checkWork} disabled={grading || autoGrading} className="flex-1 rounded-xl bg-gradient-to-r from-brand to-cyan px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+            {grading || autoGrading ? "Checking…" : grade ? "Re-check" : "Check my work"}
           </button>
         </div>
       </div>
