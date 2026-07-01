@@ -10,6 +10,12 @@ const FREE_SLUG = "s3-misconfiguration-audit";
 const MARKETING_WIZARD = "https://shieldsyncsecurity.com/labs-wizard";
 const APP_URL = "https://labs.shieldsyncsecurity.com";
 
+// This static catalog page otherwise defaults to `Cache-Control: s-maxage=31536000`
+// (ONE YEAR) — the same stale-HTML-pointing-at-dead-chunks trap that bit /labs/[slug].
+// A 5-min revalidate emits `s-maxage=300` instead, so if the page ever does get
+// edge-cached (a Cache Rule, an upgrade) a deploy reaches users in ~5 min, not a year.
+export const revalidate = 300;
+
 export const metadata: Metadata = {
   title: "AWS Security Labs — Hands-on Cloud Security in Real AWS",
   description:

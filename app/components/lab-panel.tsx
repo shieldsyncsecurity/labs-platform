@@ -314,7 +314,10 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
           if (s.status === "done" || s.status === "error") return; // terminal — stop polling
         }
       } catch { /* transient — keep polling */ }
-      if (alive) timer = setTimeout(tick, 3000);
+      // 5s (was 3s): matches the engine's ~4.5s CFN-progress write cadence, so a
+      // faster poll gains nothing but ~40% more requests. Cuts Worker request
+      // volume (the Free-plan 100k/day ceiling) with no UX cost.
+      if (alive) timer = setTimeout(tick, 5000);
     };
     tick();
     return () => { alive = false; clearTimeout(timer); };
