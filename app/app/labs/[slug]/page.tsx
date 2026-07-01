@@ -45,6 +45,11 @@ export function generateStaticParams() {
 export const revalidate = 300;
 
 const APP_URL = "https://labs.shieldsyncsecurity.com";
+// The same lab also has a (faster, static, higher-authority) landing page on the
+// marketing site. Canonicalise there so Google consolidates ranking signal on ONE
+// page and indexes the fast Amplify version instead of this Cloudflare one — the
+// app here stays the funnel target (search → marketing landing → sign in → app).
+const MARKETING_URL = "https://shieldsyncsecurity.com";
 
 export async function generateMetadata({
   params,
@@ -61,7 +66,7 @@ export async function generateMetadata({
     title,
     description,
     keywords: ["AWS security lab", `${lab.title} AWS`, "hands-on AWS", "cloud security lab", ...lab.tags.map((t) => `AWS ${t}`)],
-    alternates: { canonical: `/labs/${slug}` },
+    alternates: { canonical: `${MARKETING_URL}/labs/${slug}` },
     openGraph: { title, description, url, type: "article" },
     twitter: { card: "summary_large_image", title, description },
   };
