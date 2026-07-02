@@ -131,38 +131,32 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
           }),
         }}
       />
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-        <a href="https://shieldsyncsecurity.com/labs-wizard" className="font-semibold text-muted hover:text-ink">
-          ← Back to plans
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-sm">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Link href="/" className="font-semibold text-muted hover:text-ink">
+            Labs
+          </Link>
+          <span aria-hidden className="text-muted/40">›</span>
+          <span className="font-semibold text-ink-soft">{lab.title}</span>
+        </div>
+        <a href="https://shieldsyncsecurity.com/labs-wizard" className="text-xs font-medium text-muted hover:text-ink">
+          Back to plans
         </a>
-        <span aria-hidden className="text-muted/40">·</span>
-        <Link href="/" className="font-semibold text-muted hover:text-ink">
-          All labs
-        </Link>
       </div>
 
       <EntitlementStatus entitlement={entitlement} />
 
       <div className="mt-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`rounded-md px-2 py-0.5 text-xs font-bold badge-${lab.level.toLowerCase()}`}>{lab.level}</span>
-          {lab.free && <span className="rounded-md bg-brand/10 px-2 py-0.5 text-xs font-bold text-brand">FREE</span>}
-          <span className="text-sm text-muted">~{lab.estimatedActiveMinutes} min</span>
-        </div>
-        <h1 className="mt-3 text-3xl font-extrabold text-ink">
+        <h1 className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-3xl font-extrabold text-ink">
           {lab.title} <span className="text-muted font-semibold">— AWS Security Lab</span>
+          <span className="inline-flex items-center gap-2 align-middle">
+            <span className={`rounded-md px-2 py-0.5 text-xs font-bold badge-${lab.level.toLowerCase()}`}>{lab.level}</span>
+            {lab.free && <span className="rounded-md bg-brand/10 px-2 py-0.5 text-xs font-bold text-brand">FREE</span>}
+            <span className="text-sm font-semibold text-muted">~{lab.estimatedActiveMinutes} min</span>
+          </span>
         </h1>
         <p className="mt-2 max-w-5xl text-base text-ink-soft">{lab.summary}</p>
       </div>
-      {lab.ready && (
-        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-line bg-canvas px-4 py-2.5 text-sm text-ink-soft">
-          <span className="inline-flex items-center gap-1.5"><span aria-hidden>✓</span><strong className="text-ink">Real work checked</strong></span>
-          <span aria-hidden className="text-muted/40">·</span>
-          <span className="inline-flex items-center gap-1.5"><span aria-hidden>🛡️</span><strong className="text-ink">Your own isolated AWS account</strong></span>
-          <span aria-hidden className="text-muted/40">·</span>
-          <span className="inline-flex items-center gap-1.5"><span aria-hidden>🧹</span><strong className="text-ink">Auto-wiped — no bill</strong></span>
-        </div>
-      )}
 
       {lab.ready && <LabIntro />}
 

@@ -906,7 +906,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         {/* The objectives ARE the scorecard: Check my work fills this very list in, so
             it's obvious what the button does. (objective.id === grade criterion.id) */}
         {objectives.length > 0 && (
-          <div className="mt-5 rounded-xl border border-line bg-canvas p-4">
+          <div id="ss-check-work" tabIndex={-1} className="mt-5 rounded-xl border border-line bg-canvas p-4 outline-none">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-bold uppercase tracking-wider text-muted">What you’re fixing</p>
               <div className="flex items-center gap-2">
@@ -958,7 +958,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
               {grading ? "Checking your live account…" : autoGrading ? "Auto-checking…" : grade ? "Re-check now" : "Check my work"}
             </button>
             <p className="mt-2 text-center text-xs text-muted">
-              The ticks update <strong>automatically</strong> as you work — we re-check your <strong>live</strong> AWS account every few seconds. Hit the button any time to check instantly.
+              The ticks update <strong>automatically</strong> as you work — hit the button any time to check instantly.
             </p>
             {grade && (grade.gradable ? (
               <div className="mt-3 border-t border-line pt-3">
@@ -991,7 +991,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
           <button onClick={openConsole} disabled={consoleOpening} className="flex-1 rounded-xl border border-line-strong px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-70">
             {consoleOpening ? "Opening…" : "Open console ↗"}
           </button>
-          <button onClick={checkWork} disabled={grading || autoGrading} className="flex-1 rounded-xl bg-gradient-to-r from-brand to-cyan px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+          <button id="ss-check-work-mobile" onClick={checkWork} disabled={grading || autoGrading} className="flex-1 rounded-xl bg-gradient-to-r from-brand to-cyan px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
             {grading || autoGrading ? "Checking…" : grade ? "Re-check" : "Check my work"}
           </button>
         </div>

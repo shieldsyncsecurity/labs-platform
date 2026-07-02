@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth/context";
 import { useLabWorkspace } from "@/components/lab-workspace";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -132,6 +132,43 @@ function splitGuide(md: string): { overview: string; walkthrough: string } {
   return { overview: md, walkthrough: "" };
 }
 
+// The exact step-heading pattern used everywhere (app/labs/[slug]/page.tsx's
+// extractStepTitles uses the same shape) — keep in sync.
+const STEP_HEADING_RE = /^##\s+Step\s+\d+\s*[—–-]\s*(.+?)\s*$/gm;
+
+/**
+ * Break the raw walkthrough markdown into per-step chunks, one per "## Step N —
+ * Title" heading (heading line included, so downstream rendering — refcards, track
+ * blocks — still sees it). Any content BEFORE the first heading is NOT included
+ * here; the caller (LabGuide) surfaces it separately via `leadInOf` and folds it
+ * into the Overview segment. If there are no step headings at all, the whole
+ * markdown is returned as a single untitled chunk (defensive fallback).
+ */
+function splitWalkthroughIntoSteps(md: string): { title: string; body: string }[] {
+  const re = /^##\s+Step\s+\d+\s*[—–-]\s*(.+?)\s*$/gm;
+  const matches: { index: number; title: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(md)) !== null) matches.push({ index: m.index, title: m[1].trim() });
+
+  if (matches.length === 0) {
+    return md.trim() ? [{ title: "", body: md }] : [];
+  }
+
+  const out: { title: string; body: string }[] = [];
+  for (let i = 0; i < matches.length; i++) {
+    const start = matches[i].index;
+    const end = i + 1 < matches.length ? matches[i + 1].index : md.length;
+    out.push({ title: matches[i].title, body: md.slice(start, end) });
+  }
+  return out;
+}
+
+function leadInOf(md: string): string {
+  const idx = md.search(STEP_HEADING_RE);
+  STEP_HEADING_RE.lastIndex = 0;
+  return idx >= 0 ? md.slice(0, idx) : md;
+}
+
 // Sticky so it's always reachable while scrolling the steps. The caption swaps with
 // the track, so flipping it is visibly confirmed even before you look at the steps.
 function TrackToggle({ track, onPick }: { track: Track; onPick: (t: Track) => void }) {
@@ -140,11 +177,7 @@ function TrackToggle({ track, onPick }: { track: Track; onPick: (t: Track) => vo
       active ? "bg-brand text-white shadow-sm" : "text-ink-soft hover:bg-surface"
     }`;
   return (
-    <div
-      className="ss-toggle sticky top-2 z-20 mb-5 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-canvas p-1.5 shadow-sm"
-      role="tablist"
-      aria-label="Instruction style"
-    >
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-canvas p-1.5" role="tablist" aria-label="Instruction style">
       <button role="tab" aria-selected={track === "console"} onClick={() => onPick("console")} className={seg(track === "console")}>
         🖱️ Console
       </button>
@@ -156,6 +189,36 @@ function TrackToggle({ track, onPick }: { track: Track; onPick: (t: Track) => vo
       </span>
     </div>
   );
+}
+
+// Renders one segment list (refcards + common/track prose) the same way the guide
+// always has — reused per-step now instead of once for the whole walkthrough.
+function renderSegments(md: string): { refcardNodes: ReactNode[]; bodyNodes: ReactNode[]; hasTracks: boolean } {
+  const segs = splitTracks(md);
+  const refcardNodes: ReactNode[] = [];
+  const bodyNodes: ReactNode[] = [];
+  segs.forEach((s, i) => {
+    if (s.kind === "refcard") {
+      refcardNodes.push(
+        <aside key={`rc-${i}`} className="ss-refcard">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{s.text}</ReactMarkdown>
+        </aside>
+      );
+      return;
+    }
+    // chipify runs on common + console; NOT cli (bash legitimately uses ">>").
+    const src = s.kind === "cli" ? s.text : chipify(s.text);
+    bodyNodes.push(
+      s.kind === "common" ? (
+        <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} components={mdComponents}>{src}</ReactMarkdown>
+      ) : (
+        <div key={i} className={`ss-track ss-track-${s.kind}`}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{src}</ReactMarkdown>
+        </div>
+      )
+    );
+  });
+  return { refcardNodes, bodyNodes, hasTracks: segs.some((s) => s.kind === "console" || s.kind === "cli") };
 }
 
 // Shown in place of the walkthrough until the learner launches the lab. Left-aligned
@@ -194,6 +257,89 @@ function LaunchGate({ steps }: { steps: string[] }) {
   );
 }
 
+// Scrolls to (and focuses, if focusable) the "Check my work" area once launched: the
+// right-rail objectives card on desktop, or the sticky mobile action bar on phones.
+// Both ids are rendered by LabPanel; falls back to a no-op if neither is present yet
+// (e.g. auto-grading hasn't produced objectives for this lab).
+function goToCheckWork() {
+  if (typeof document === "undefined") return;
+  const isMobile = window.matchMedia && window.matchMedia("(max-width: 1023px)").matches;
+  const el = isMobile
+    ? document.getElementById("ss-check-work-mobile")
+    : document.getElementById("ss-check-work") ?? document.getElementById("ss-check-work-mobile");
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (typeof (el as HTMLElement).focus === "function") {
+    try {
+      (el as HTMLElement).focus({ preventScroll: true });
+    } catch {}
+  }
+}
+
+const btnNext =
+  "inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-brand to-cyan px-5 py-2.5 text-sm font-bold text-white shadow-sm shadow-brand/20 transition hover:brightness-110 disabled:opacity-50";
+const btnBack =
+  "inline-flex items-center justify-center gap-1.5 rounded-xl border border-line-strong px-5 py-2.5 text-sm font-semibold text-ink transition hover:bg-canvas disabled:opacity-50";
+
+/**
+ * Sticky player header: step dropdown (jump to any step, shows done/current state),
+ * the Console/CLI toggle, and "Step N of M". Sits above a thin progress bar.
+ */
+function GuideHeader({
+  step,
+  total,
+  titles,
+  onJump,
+  hasTracks,
+  track,
+  onPickTrack,
+}: {
+  step: number; // 0 = Overview
+  total: number; // total steps, NOT counting Overview
+  titles: string[];
+  onJump: (i: number) => void;
+  hasTracks: boolean;
+  track: Track;
+  onPickTrack: (t: Track) => void;
+}) {
+  const pct = total > 0 ? Math.round((step / total) * 100) : 0;
+  return (
+    <div className="ss-guide-header sticky top-2 z-20 -mx-6 -mt-6 mb-6 rounded-t-2xl border-b border-line bg-surface/95 px-6 pt-5 pb-3 backdrop-blur sm:-mx-7 sm:-mt-7 sm:px-7">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="sr-only">Jump to step</span>
+          <select
+            value={step}
+            onChange={(e) => onJump(Number(e.target.value))}
+            className="w-full min-w-0 rounded-lg border border-line bg-canvas px-3 py-1.5 text-sm font-semibold text-ink outline-none focus:border-brand sm:w-auto"
+          >
+            <option value={0}>{step === 0 ? "▸ " : ""}Overview</option>
+            {titles.map((t, i) => (
+              <option key={i} value={i + 1}>
+                {i + 1 < step ? "✓ " : i + 1 === step ? "▸ " : ""}Step {i + 1} — {t}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {hasTracks && step > 0 && (
+          <div className="order-3 w-full sm:order-none sm:w-auto">
+            <TrackToggle track={track} onPick={onPickTrack} />
+          </div>
+        )}
+
+        <span className="flex-none font-mono text-xs font-bold text-muted">
+          {step === 0 ? `Overview` : `Step ${step} of ${total}`}
+        </span>
+      </div>
+
+      <div className="ss-bar-track mt-3" aria-hidden>
+        <div className="h-full rounded-full bg-brand transition-all duration-300" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
 export function LabGuide({
   slug,
   instructions,
@@ -211,6 +357,9 @@ export function LabGuide({
   const { launched } = useLabWorkspace();
   const [track, setTrack] = useState<Track>("console"); // default to point-and-click (beginner-friendly)
   const [remoteWt, setRemoteWt] = useState<string | null>(null); // gated walkthrough, once fetched
+  const [stepIndex, setStepIndex] = useState(0); // 0 = Overview, 1..M = steps
+  const articleRef = useRef<HTMLElement | null>(null);
+  const restoredRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -243,53 +392,41 @@ export function LabGuide({
 
   // Overview is always local (parsed once). The walkthrough is local for free labs,
   // fetched for paid. `wtSource === null` means "gated, not fetched yet".
-  const { overviewNodes, localWalkthrough } = useMemo(() => {
+  const { overviewMd, localWalkthrough } = useMemo(() => {
     const { overview, walkthrough } = splitGuide(instructions);
-    return {
-      overviewNodes: (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{overview}</ReactMarkdown>
-      ),
-      localWalkthrough: walkthrough,
-    };
+    return { overviewMd: overview, localWalkthrough: walkthrough };
   }, [instructions]);
 
   const wtSource = gatedSlug ? remoteWt : localWalkthrough;
   const hasWalkthrough = gatedSlug ? true : localWalkthrough.trim().length > 0;
 
-  // Split the rendered walkthrough into the leading reference card(s) and the step
-  // body so we can sit the sticky toggle BETWEEN them — refcard scrolls away, then
-  // Step 1 sits directly under the pinned toggle (so flipping it is visible at once).
-  const { refcardNodes, stepNodes, hasTracks } = useMemo(() => {
-    const segs = splitTracks(wtSource ?? "");
-    const refcardNodes: ReactNode[] = [];
-    const stepNodes: ReactNode[] = [];
-    segs.forEach((s, i) => {
-      if (s.kind === "refcard") {
-        refcardNodes.push(
-          <aside key={`rc-${i}`} className="ss-refcard">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{s.text}</ReactMarkdown>
-          </aside>
-        );
-        return;
-      }
-      // chipify runs on common + console; NOT cli (bash legitimately uses ">>").
-      const src = s.kind === "cli" ? s.text : chipify(s.text);
-      stepNodes.push(
-        s.kind === "common" ? (
-          <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} components={mdComponents}>{src}</ReactMarkdown>
-        ) : (
-          <div key={i} className={`ss-track ss-track-${s.kind}`}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{src}</ReactMarkdown>
-          </div>
-        )
-      );
-    });
-    return {
-      refcardNodes,
-      stepNodes,
-      hasTracks: segs.some((s) => s.kind === "console" || s.kind === "cli"),
-    };
+  // Break whatever walkthrough markdown we currently have into per-step chunks.
+  // Any content before "## Step 1" (refcards, orientation prose) is folded into the
+  // Overview segment so nothing from the source is lost.
+  const { stepChunks, walkthroughLeadIn } = useMemo(() => {
+    const src = wtSource ?? "";
+    return { stepChunks: splitWalkthroughIntoSteps(src), walkthroughLeadIn: leadInOf(src) };
   }, [wtSource]);
+
+  // Overview segment = the always-visible overview markdown + any walkthrough lead-in
+  // (refcards etc. that appear before Step 1).
+  const overviewRendered = useMemo(() => {
+    const overviewNodes = <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{overviewMd}</ReactMarkdown>;
+    const leadIn = walkthroughLeadIn.trim() ? renderSegments(walkthroughLeadIn) : null;
+    return { overviewNodes, leadIn };
+  }, [overviewMd, walkthroughLeadIn]);
+
+  const currentStepRendered = useMemo(() => {
+    if (stepIndex === 0) return null;
+    const chunk = stepChunks[stepIndex - 1];
+    if (!chunk) return null;
+    return renderSegments(chunk.body);
+  }, [stepChunks, stepIndex]);
+
+  const hasTracksAnywhere = useMemo(
+    () => stepChunks.some((c) => splitTracks(c.body).some((s) => s.kind === "console" || s.kind === "cli")),
+    [stepChunks]
+  );
 
   // Launch-gate step preview: prefer server-provided titles (so the preview works even
   // when the walkthrough body is gated), else derive from a local walkthrough.
@@ -302,26 +439,126 @@ export function LabGuide({
     return out;
   }, [stepTitlesProp, localWalkthrough]);
 
+  // Titles for the header dropdown: prefer whatever we actually parsed from the
+  // fetched/local walkthrough (accurate once loaded); fall back to the server-provided
+  // preview titles while the gated walkthrough hasn't arrived yet, so the dropdown
+  // isn't empty during the loading flash.
+  const headerTitles = stepChunks.length > 0 ? stepChunks.map((c) => c.title) : stepTitles;
+  const totalSteps = headerTitles.length;
+
+  // Persist current step per lab; restore on mount and clamp to range whenever the
+  // available step count changes (e.g. once the gated walkthrough finishes loading).
+  const storageKey = `ss-guide-step:${slug}`;
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const n = raw != null ? parseInt(raw, 10) : 0;
+      if (Number.isFinite(n) && n > 0) setStepIndex(n);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (totalSteps > 0 && stepIndex > totalSteps) setStepIndex(totalSteps);
+  }, [totalSteps, stepIndex]);
+
+  const goToStep = (i: number) => {
+    const clamped = Math.max(0, Math.min(totalSteps, i));
+    setStepIndex(clamped);
+    try { localStorage.setItem(storageKey, String(clamped)); } catch {}
+    // Scroll the guide card into view on step change.
+    articleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const isLastStep = totalSteps > 0 && stepIndex === totalSteps;
+
+  const onNext = () => {
+    if (isLastStep) {
+      goToCheckWork();
+      return;
+    }
+    goToStep(stepIndex + 1);
+  };
+  const onBack = () => goToStep(stepIndex - 1);
+
+  // Optional nice-to-have: ArrowLeft/ArrowRight navigate steps when focus isn't in a
+  // text input/select (so typing in a form field is never hijacked).
+  useEffect(() => {
+    if (totalSteps === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "ArrowRight") onNext();
+      else if (e.key === "ArrowLeft" && stepIndex > 0) onBack();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepIndex, totalSteps, isLastStep]);
+
   // Free labs and already-paid users get immediate access.
   // hasAccess() returns true for free labs without needing entitlements.
   if (hasAccess(slug)) {
     return (
-      <article className="lab-md ss-guide rounded-2xl border border-line bg-surface p-6 sm:p-7" data-track={track}>
-        {overviewNodes}
-        {!hasWalkthrough ? null : launched ? (
-          <div className="ss-walkthrough mt-6">
-            {wtSource === null ? (
-              <p className="text-sm text-muted">Loading the walkthrough&hellip;</p>
-            ) : (
-              <>
-                {refcardNodes}
-                {hasTracks && <TrackToggle track={track} onPick={pick} />}
-                {stepNodes}
-              </>
-            )}
-          </div>
+      <article ref={articleRef} className="lab-md ss-guide relative rounded-2xl border border-line bg-surface p-6 sm:p-7" data-track={track}>
+        {!hasWalkthrough || !launched ? (
+          <>
+            {overviewRendered.overviewNodes}
+            {!hasWalkthrough ? null : <LaunchGate steps={stepTitles} />}
+          </>
+        ) : wtSource === null ? (
+          <>
+            {overviewRendered.overviewNodes}
+            <p className="mt-6 text-sm text-muted">Loading the walkthrough&hellip;</p>
+          </>
         ) : (
-          <LaunchGate steps={stepTitles} />
+          <>
+            <GuideHeader
+              step={stepIndex}
+              total={totalSteps}
+              titles={headerTitles}
+              onJump={goToStep}
+              hasTracks={hasTracksAnywhere}
+              track={track}
+              onPickTrack={pick}
+            />
+            <div className="ss-walkthrough">
+              {stepIndex === 0 ? (
+                <>
+                  {overviewRendered.overviewNodes}
+                  {overviewRendered.leadIn && (
+                    <>
+                      {overviewRendered.leadIn.refcardNodes}
+                      {overviewRendered.leadIn.bodyNodes}
+                    </>
+                  )}
+                </>
+              ) : (
+                currentStepRendered && (
+                  <>
+                    {currentStepRendered.refcardNodes}
+                    {currentStepRendered.bodyNodes}
+                  </>
+                )
+              )}
+            </div>
+
+            {totalSteps > 0 && (
+              <div className="mt-8 flex items-center justify-between gap-3 border-t border-line pt-5">
+                <button type="button" onClick={onBack} disabled={stepIndex === 0} className={btnBack}>
+                  ← Back
+                </button>
+                <span className="font-mono text-xs font-semibold text-muted">
+                  {stepIndex === 0 ? "Overview" : `Step ${stepIndex} of ${totalSteps}`}
+                </span>
+                <button type="button" onClick={onNext} className={btnNext}>
+                  {isLastStep ? "Finish — check your work" : "Next →"}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </article>
     );
