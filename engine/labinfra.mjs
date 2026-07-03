@@ -43,6 +43,7 @@ const RATINGS_TABLE = "ShieldSyncLabRatings";
 const USER_LOCKS_TABLE = "ShieldSyncLabUserLocks"; // H3: one-live-session-per-user guard (TTL on `ttl`)
 const QUEUE_TABLE = "ShieldSyncLabQueue"; // wait-room "place in line" (informational; TTL on `ttl`)
 const ORDERS_TABLE = "ShieldSyncLabOrders"; // payment orders — webhook validates payment vs this (TTL on `ttl`)
+const COMPLETIONS_TABLE = "ShieldSyncLabCompletions"; // F2: server-side lab completion tracking (no TTL — permanent)
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
 
@@ -1567,6 +1568,62 @@ export async function listEntitlements(userId) {
     subscriptionStatus: it.subscriptionStatus?.S ?? undefined,
     subscriptionExpiresAt: it.subscriptionExpiresAt?.S ?? null,
     orderId: it.orderId?.S ?? undefined,
+  }));
+}
+
+/**
+ * recordCompletion(): F2 — idempotent upsert marking a lab as completed by a
+ * user. Called fire-and-forget from the /grade handler once a run passes.
+ * Row is keyed {userId, labSlug} (composite) — same shape entitlements uses —
+ * so a later certificate feature (credentialId/HMAC) can layer on without a
+ * migration. firstCompletedAt is stamped once; lastCompletedAt and the
+ * completions counter update every pass. No condition — always upserts.
+ */
+export async function recordCompletion(userId, labSlug) {
+  if (!userId || !labSlug) return;
+  try {
+    const db = await ddb();
+    const now = new Date().toISOString();
+    await db.send(
+      new UpdateItemCommand({
+        TableName: COMPLETIONS_TABLE,
+        Key: { userId: { S: String(userId) }, labSlug: { S: String(labSlug) } },
+        UpdateExpression:
+          "SET firstCompletedAt = if_not_exists(firstCompletedAt, :now), " +
+          "lastCompletedAt = :now, " +
+          "completions = if_not_exists(completions, :zero) + :one, " +
+          "updatedAt = :now",
+        ExpressionAttributeValues: {
+          ":now": { S: now },
+          ":zero": { N: "0" },
+          ":one": { N: "1" },
+        },
+      })
+    );
+  } catch (e) {
+    console.error("recordCompletion failed:", e.message);
+  }
+}
+
+/**
+ * listCompletions(): return all completion rows for a user — F2 dashboard
+ * "X of Y complete" + per-card badge. Mirrors listEntitlements' Query shape.
+ */
+export async function listCompletions(userId) {
+  if (!userId) return [];
+  const db = await ddb();
+  const { Items } = await db.send(
+    new QueryCommand({
+      TableName: COMPLETIONS_TABLE,
+      KeyConditionExpression: "userId = :u",
+      ExpressionAttributeValues: { ":u": { S: String(userId) } },
+    })
+  );
+  return (Items ?? []).map((it) => ({
+    labSlug: it.labSlug?.S,
+    firstCompletedAt: it.firstCompletedAt?.S,
+    lastCompletedAt: it.lastCompletedAt?.S,
+    completions: it.completions?.N != null ? Number(it.completions.N) : 0,
   }));
 }
 

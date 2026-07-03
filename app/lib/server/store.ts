@@ -155,3 +155,27 @@ export async function listEntitlements(userId: string): Promise<Entitlement[]> {
     return [];
   }
 }
+
+// F2: server-side lab completion tracking. Row shape mirrors entitlements'
+// composite key ({userId, labSlug}) — see engine/labinfra.mjs recordCompletion.
+export type Completion = {
+  labSlug: string;
+  firstCompletedAt: string;
+  lastCompletedAt: string;
+  completions: number;
+};
+
+export async function listCompletions(userId: string): Promise<Completion[]> {
+  if (!userId) return [];
+  try {
+    const r = await engineFetch(`/completions?userId=${encodeURIComponent(userId)}`, {
+      method: "GET",
+      userId,
+    });
+    if (!r.ok) return [];
+    const data = (await r.json()) as { completions?: Completion[] };
+    return data.completions ?? [];
+  } catch {
+    return [];
+  }
+}

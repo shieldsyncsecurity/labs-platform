@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth/context";
 import { LABS, type Lab } from "@/lib/labs";
+import type { Completion } from "@/lib/server/store";
 
 // Compact card — level + free/locked + ~min on one row, 2-line-clamped summary,
 // one CTA. Denser than the old card so more fit per viewport without scrolling.
-function LabCard({ lab, owned }: { lab: Lab; owned: boolean }) {
+function LabCard({ lab, owned, completed }: { lab: Lab; owned: boolean; completed: boolean }) {
   return (
     <div className="flex flex-col rounded-xl border border-line bg-surface p-4 transition hover:border-line-strong hover:shadow-sm">
       <div className="flex items-center gap-1.5">
@@ -19,6 +20,11 @@ function LabCard({ lab, owned }: { lab: Lab; owned: boolean }) {
         ) : !owned ? (
           <span className="rounded-md border border-line px-1.5 py-0.5 text-[11px] font-bold text-muted">🔒 Locked</span>
         ) : null}
+        {completed && (
+          <span className="rounded-md bg-green-600/10 px-1.5 py-0.5 text-[11px] font-bold text-green-700">
+            ✓ Completed
+          </span>
+        )}
         <span className="ml-auto text-[11px] text-muted">~{lab.estimatedActiveMinutes} min</span>
       </div>
       <h3 className="mt-1.5 text-base font-extrabold text-ink">{lab.title}</h3>
@@ -145,6 +151,32 @@ function SignedInDashboard({
   const yours = useMemo(() => ready.filter((l) => hasAccess(l.slug)), [ready, hasAccess]);
   const launchableCount = yours.length;
 
+  // F2: server-side completion tracking — fetched client-side so the rest of the
+  // page (which reads from local LABS + entitlements) doesn't wait on it. Don't
+  // fake a count before this resolves; the stat strip below only adds the
+  // "X complete" segment once `completedSlugs` is non-null.
+  const [completedSlugs, setCompletedSlugs] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/completions");
+        if (!r.ok) return;
+        const data = (await r.json()) as { completions?: Completion[] };
+        if (!cancelled) setCompletedSlugs(new Set((data.completions ?? []).map((c) => c.labSlug)));
+      } catch {
+        /* offline / not ready — leave as null, stat strip omits the count */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const completedCount = useMemo(
+    () => (completedSlugs ? ready.filter((l) => completedSlugs.has(l.slug)).length : 0),
+    [ready, completedSlugs]
+  );
+
   // Deterministic hero pick: the free lab if the learner doesn't already have a
   // paid one, else the first lab they have access to, else the first ready lab.
   const heroLab = useMemo(() => {
@@ -175,7 +207,8 @@ function SignedInDashboard({
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h1 className="text-2xl font-extrabold text-ink">Welcome back, {firstName}</h1>
         <p className="text-sm text-ink-soft">
-          {ready.length} lab{ready.length === 1 ? "" : "s"} · {launchableCount} you can launch now · first lab free
+          {ready.length} lab{ready.length === 1 ? "" : "s"} · {launchableCount} you can launch now
+          {completedSlugs && <> · {completedCount} of {ready.length} complete</>} · first lab free
         </p>
       </div>
 
@@ -201,7 +234,12 @@ function SignedInDashboard({
           ) : (
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map((lab) => (
-                <LabCard key={lab.slug} lab={lab} owned={hasAccess(lab.slug)} />
+                <LabCard
+                  key={lab.slug}
+                  lab={lab}
+                  owned={hasAccess(lab.slug)}
+                  completed={completedSlugs?.has(lab.slug) ?? false}
+                />
               ))}
             </div>
           )}

@@ -114,6 +114,8 @@ import {
   listEntitlements,
   reserveLaunch,
   rollbackLaunch,
+  recordCompletion,
+  listCompletions,
   PAYPERLAB_MAX_LAUNCHES,
   PAYPERLAB_BACKSTOP_DAYS,
   findExpiredSessions,
@@ -633,6 +635,10 @@ export async function handler(event) {
         const execRoleArn = `arn:aws:iam::${s.accountId}:role/ShieldSyncLabExec`;
         const result = await gradeLab(s.labSlug, execRoleArn, s.accountId);
         console.log(`[grade] ${sessionId} ${s.labSlug}: ${result.criteria.filter((c) => c.passed).length}/${result.criteria.length}`);
+        // F2: fire-and-forget completion record — never blocks/breaks the grade response.
+        if (result.passed) {
+          try { await recordCompletion(callerUserId, s.labSlug); } catch (e) { console.error("recordCompletion failed", e); }
+        }
         return resp(200, result);
       } catch (e) {
         console.error(`[grade] ${sessionId} failed: ${e.message}`);
@@ -688,6 +694,14 @@ export async function handler(event) {
       if (!userId) return resp(ENGINE_SHARED_SECRET ? 401 : 400, { error: ENGINE_SHARED_SECRET ? "unauthorized" : "userId required" });
       const items = await listEntitlements(userId);
       return resp(200, { entitlements: items });
+    }
+
+    // F2: server-side lab completion tracking — mirrors GET /entitlements' auth shape.
+    if (method === "GET" && path === "/completions") {
+      const userId = ENGINE_SHARED_SECRET ? callerUserId : (callerUserId || event.queryStringParameters?.userId || null);
+      if (!userId) return resp(ENGINE_SHARED_SECRET ? 401 : 400, { error: ENGINE_SHARED_SECRET ? "unauthorized" : "userId required" });
+      const completions = await listCompletions(userId);
+      return resp(200, { completions });
     }
 
     return resp(404, { error: "not found" });
