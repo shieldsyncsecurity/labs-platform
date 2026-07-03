@@ -62,7 +62,7 @@ function certSvgInner(data: CertificateData, markHref: string): string {
 
   return `
   <defs>
-    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#06b6d4"/></linearGradient>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#2563eb"/></linearGradient>
   </defs>
   <rect x="0" y="0" width="${CERT_W}" height="${CERT_H}" fill="#ffffff"/>
   <g opacity="0.05"><path transform="translate(441,232) scale(7)" d="M17 2 L32 8 L32 22 C32 33 25 39 17 42 C9 39 2 33 2 22 L2 8 Z" fill="#4f46e5"/></g>
@@ -70,14 +70,14 @@ function certSvgInner(data: CertificateData, markHref: string): string {
   <rect x="34" y="34" width="1052" height="724" rx="4" fill="none" stroke="#4f46e5" stroke-opacity="0.22" stroke-width="1"/>
   <g fill="none" stroke="#4f46e5" stroke-opacity="0.5" stroke-width="2"><path d="M58 80 L58 62 L76 62"/><path d="M1062 80 L1062 62 L1044 62"/><path d="M58 712 L58 730 L76 730"/><path d="M1062 712 L1062 730 L1044 730"/></g>
   <image href="${markHref}" x="527" y="48" width="66" height="66"/>
-  <text x="560" y="140" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#1e293b">Shield<tspan fill="#0891b2">Sync</tspan></text>
+  <text x="560" y="140" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#1e293b">Shield<tspan fill="#4f46e5">Sync</tspan></text>
   <text x="560" y="161" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="600" letter-spacing="4.5" fill="#64748b">SECURITY LABS</text>
   <text x="560" y="214" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="16" font-weight="700" letter-spacing="6.5" fill="#4338ca">CERTIFICATE OF COMPLETION</text>
   <rect x="512" y="228" width="96" height="3" rx="1.5" fill="url(#acc)"/>
   <text x="560" y="278" text-anchor="middle" font-family="Georgia,'Times New Roman',serif" font-size="16" font-style="italic" fill="#64748b">This is to certify that</text>
   <text x="560" y="334" text-anchor="middle" font-family="Georgia,'Times New Roman',serif" font-size="44" font-weight="700" fill="#0f172a">${name}</text>
   <line x1="400" y1="354" x2="720" y2="354" stroke="#cbd5e1" stroke-width="1.25"/>
-  <rect x="524" y="352.5" width="72" height="3" rx="1.5" fill="#06b6d4"/>
+  <rect x="524" y="352.5" width="72" height="3" rx="1.5" fill="#2563eb"/>
   <text x="560" y="398" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="16" fill="#64748b">has successfully completed the hands-on security lab</text>
   <text x="560" y="452" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="32" font-weight="800" fill="#312e81">${labTitle}</text>
   <text x="560" y="479" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" font-weight="600" letter-spacing="3.5" fill="#64748b">AWS SECURITY LAB</text>
@@ -85,7 +85,7 @@ function certSvgInner(data: CertificateData, markHref: string): string {
   <text x="560" y="547" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" fill="#475569">every fix against real, running AWS resources — not a checkbox quiz.</text>
   <g transform="translate(560,656)">
     <path d="M-16 6 L-28 52 L-12 42 L-4 52 Z" fill="#4338ca"/>
-    <path d="M16 6 L28 52 L12 42 L4 52 Z" fill="#06b6d4"/>
+    <path d="M16 6 L28 52 L12 42 L4 52 Z" fill="#2563eb"/>
     <circle r="44" fill="#ffffff" stroke="url(#acc)" stroke-width="2.5"/>
     <circle r="36" fill="none" stroke="#4f46e5" stroke-opacity="0.22" stroke-width="1"/>
     <image href="${markHref}" x="-27" y="-27" width="54" height="54"/>
@@ -118,7 +118,7 @@ function fullCertSvgString(data: CertificateData, markHref: string): string {
 // second same-origin fetch mid-canvas-draw (some browsers choke on <image
 // href> pointing at a relative path inside a Blob-URL SVG).
 async function markAsDataUri(): Promise<string> {
-  const r = await fetch("/logo/shieldsync-mark-light.svg");
+  const r = await fetch("/logo/shieldsync-mark-indigo.svg");
   const svgText = await r.text();
   const b64 = btoa(unescape(encodeURIComponent(svgText)));
   return `data:image/svg+xml;base64,${b64}`;
@@ -167,7 +167,7 @@ export function Certificate({ data, onClose }: { data: CertificateData; onClose?
   // real, same-origin /logo/... href instead of a data URI — cheaper on
   // screen since the browser already has it cached from the header/favicon).
   const previewInnerHtml = useMemo(
-    () => certSvgInner(data, "/logo/shieldsync-mark-light.svg"),
+    () => certSvgInner(data, "/logo/shieldsync-mark-indigo.svg"),
     [data]
   );
 
