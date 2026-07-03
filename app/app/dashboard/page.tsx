@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth/context";
 import { LABS, type Lab } from "@/lib/labs";
 import type { Completion } from "@/lib/server/store";
+import { CertificateButton } from "@/components/certificate-button";
 
 // Compact card — level + free/locked + ~min on one row, 2-line-clamped summary,
 // one CTA. Denser than the old card so more fit per viewport without scrolling.
@@ -29,16 +30,28 @@ function LabCard({ lab, owned, completed }: { lab: Lab; owned: boolean; complete
       </div>
       <h3 className="mt-1.5 text-base font-extrabold text-ink">{lab.title}</h3>
       <p className="mt-1 line-clamp-2 flex-1 text-sm text-ink-soft">{lab.summary}</p>
-      <Link
-        href={`/labs/${lab.slug}`}
-        className={
-          owned
-            ? "mt-3 inline-block rounded-lg bg-brand px-3.5 py-1.5 text-sm font-semibold text-white hover:bg-brand-strong"
-            : "mt-3 inline-block rounded-lg border border-line px-3.5 py-1.5 text-sm font-semibold text-ink hover:bg-canvas"
-        }
-      >
-        {owned ? "Open lab →" : "Get access →"}
-      </Link>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Link
+          href={`/labs/${lab.slug}`}
+          className={
+            owned
+              ? "inline-block rounded-lg bg-brand px-3.5 py-1.5 text-sm font-semibold text-white hover:bg-brand-strong"
+              : "inline-block rounded-lg border border-line px-3.5 py-1.5 text-sm font-semibold text-ink hover:bg-canvas"
+          }
+        >
+          {owned ? "Open lab →" : "Get access →"}
+        </Link>
+        {/* Durable re-download: works even after the lab account is wiped —
+            the certificate is derived from the permanent completion row, not
+            the (torn-down) lab session. */}
+        {completed && (
+          <CertificateButton
+            labSlug={lab.slug}
+            label="Certificate 🎓"
+            className="inline-block rounded-lg border border-line px-3.5 py-1.5 text-sm font-semibold text-ink hover:bg-canvas"
+          />
+        )}
+      </div>
     </div>
   );
 }

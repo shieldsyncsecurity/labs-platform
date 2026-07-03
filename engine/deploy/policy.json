@@ -27,7 +27,8 @@
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabUserLocks",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabQueue",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabOrders",
-        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabCompletions"
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabCompletions",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabCompletions/index/*"
       ]
     },
     {

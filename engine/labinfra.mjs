@@ -24,7 +24,7 @@ import {
   waitUntilStackCreateComplete,
 } from "@aws-sdk/client-cloudformation";
 import { IAMClient, PutRolePolicyCommand, DeleteRolePolicyCommand } from "@aws-sdk/client-iam";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1571,19 +1571,96 @@ export async function listEntitlements(userId) {
   }));
 }
 
+// ── Verifiable completion certificate (F3) ──────────────────────────────────
+// credentialId = "SS-<LABCODE>-<6hex>", deterministic per (userId, labSlug,
+// calendar day) via HMAC-SHA256 — so re-downloading the certificate the same
+// day (or re-grading a pass) always yields the SAME id, but the id itself
+// reveals nothing about the user (it's not derivable without the secret).
+//
+// Secret: process.env.CREDENTIAL_HMAC_SECRET, set as a Lambda env var on the
+// engine (operator sets this — NOT done by this change). Falls back to a
+// fixed local-dev string ONLY when unset, exactly like hashIp()'s ENGINE_
+// SHARED_SECRET fallback — this fallback MUST NOT be relied on in prod. A real
+// deploy without CREDENTIAL_HMAC_SECRET set would mint forgeable/guessable
+// credential ids, so set it before any certificate is actually issued.
+const CREDENTIAL_HMAC_SECRET = process.env.CREDENTIAL_HMAC_SECRET || "shieldsync-dev-credential-secret";
+
+// labSlug -> short LABCODE for the credential id. Derived deterministically so
+// a new lab never needs a manual mapping: take the first letters of the
+// hyphen-separated words, uppercased, capped at 4 chars (so ids stay short and
+// readable) — e.g. "s3-misconfiguration-audit" -> "SMA", "iam-privilege-
+// escalation" -> "IPE". Falls back to the first 3 chars of the slug if that
+// somehow yields nothing (empty slug can't reach here in practice).
+function labCode(labSlug) {
+  const parts = String(labSlug || "")
+    .split("-")
+    .filter(Boolean);
+  const code = parts
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 4);
+  return code || String(labSlug || "lab").slice(0, 3).toUpperCase();
+}
+
+function yyyymmdd(d = new Date()) {
+  return d.toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+/**
+ * credentialId(): deterministic "SS-<LABCODE>-<6hex>" for (userId, labSlug,
+ * dateYYYYMMDD). 6hex = first 6 hex chars of HMAC_SHA256(secret,
+ * "userId:labSlug:dateYYYYMMDD"). Same inputs always produce the same id, so
+ * a re-issued certificate for the same user+lab+day is stable; a different
+ * day produces a different id (matching the "issued on" date the cert shows).
+ */
+export function credentialId(userId, labSlug, dateYYYYMMDD = yyyymmdd()) {
+  const mac = createHmac("sha256", CREDENTIAL_HMAC_SECRET)
+    .update(`${userId}:${labSlug}:${dateYYYYMMDD}`)
+    .digest("hex")
+    .slice(0, 6);
+  return `SS-${labCode(labSlug)}-${mac}`;
+}
+
+/**
+ * getUserName(): the learner's display name from ShieldSyncLabUsers (stamped
+ * by upsertUser on every sign-in from the verified Cognito session — never
+ * client-supplied at read time). Returns "" if the user row/name is missing
+ * (e.g. a completion recorded before the user ever hit /user) rather than
+ * throwing — a missing name must not break grading.
+ */
+async function getUserName(userId) {
+  if (!userId) return "";
+  try {
+    const db = await ddb();
+    const r = await db.send(new GetItemCommand({ TableName: USERS_TABLE, Key: { userId: { S: String(userId) } } }));
+    return r.Item?.name?.S ?? "";
+  } catch (e) {
+    console.error("getUserName failed:", e.message);
+    return "";
+  }
+}
+
 /**
  * recordCompletion(): F2 — idempotent upsert marking a lab as completed by a
  * user. Called fire-and-forget from the /grade handler once a run passes.
- * Row is keyed {userId, labSlug} (composite) — same shape entitlements uses —
- * so a later certificate feature (credentialId/HMAC) can layer on without a
- * migration. firstCompletedAt is stamped once; lastCompletedAt and the
- * completions counter update every pass. No condition — always upserts.
+ * Row is keyed {userId, labSlug} (composite) — same shape entitlements uses.
+ * firstCompletedAt is stamped once; lastCompletedAt and the completions
+ * counter update every pass. No condition — always upserts.
+ *
+ * F3: also stamps `credentialId` (computed for TODAY, first-write-wins via
+ * if_not_exists — so a learner who completes near midnight keeps the SAME
+ * credential id on subsequent same-session re-grades) and the learner's
+ * `name`, looked up server-side from ShieldSyncLabUsers (never client-
+ * supplied) so the certificate can't be spoofed with an arbitrary name.
  */
 export async function recordCompletion(userId, labSlug) {
   if (!userId || !labSlug) return;
   try {
     const db = await ddb();
     const now = new Date().toISOString();
+    const credId = credentialId(userId, labSlug);
+    const name = await getUserName(userId);
     await db.send(
       new UpdateItemCommand({
         TableName: COMPLETIONS_TABLE,
@@ -1592,11 +1669,16 @@ export async function recordCompletion(userId, labSlug) {
           "SET firstCompletedAt = if_not_exists(firstCompletedAt, :now), " +
           "lastCompletedAt = :now, " +
           "completions = if_not_exists(completions, :zero) + :one, " +
+          "credentialId = if_not_exists(credentialId, :cid), " +
+          "#n = :n, " +
           "updatedAt = :now",
+        ExpressionAttributeNames: { "#n": "name" },
         ExpressionAttributeValues: {
           ":now": { S: now },
           ":zero": { N: "0" },
           ":one": { N: "1" },
+          ":cid": { S: credId },
+          ":n": { S: name || "" },
         },
       })
     );
@@ -1624,7 +1706,44 @@ export async function listCompletions(userId) {
     firstCompletedAt: it.firstCompletedAt?.S,
     lastCompletedAt: it.lastCompletedAt?.S,
     completions: it.completions?.N != null ? Number(it.completions.N) : 0,
+    credentialId: it.credentialId?.S ?? undefined,
   }));
+}
+
+/**
+ * getCompletionByCredential(): F3 — resolve a public credential id (from the
+ * /verify/<id> page or a LinkedIn share) back to the completion it belongs
+ * to. Queries the `credentialId-index` GSI (HASH=credentialId) on
+ * COMPLETIONS_TABLE — created by the operator via create-completions-gsi.mjs
+ * (NOT run by this change). Returns null if the GSI doesn't exist yet
+ * (ResourceNotFoundException / ValidationException) or the id isn't found —
+ * either way the verify page just shows "not found", never a 500.
+ */
+export async function getCompletionByCredential(credId) {
+  if (!credId) return null;
+  const db = await ddb();
+  try {
+    const { Items } = await db.send(
+      new QueryCommand({
+        TableName: COMPLETIONS_TABLE,
+        IndexName: "credentialId-index",
+        KeyConditionExpression: "credentialId = :c",
+        ExpressionAttributeValues: { ":c": { S: String(credId) } },
+        Limit: 1,
+      })
+    );
+    const it = Items?.[0];
+    if (!it) return null;
+    return {
+      credentialId: it.credentialId?.S,
+      name: it.name?.S ?? "",
+      labSlug: it.labSlug?.S,
+      firstCompletedAt: it.firstCompletedAt?.S,
+    };
+  } catch (e) {
+    console.error("getCompletionByCredential failed:", e.message);
+    return null;
+  }
 }
 
 /**

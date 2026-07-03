@@ -7,6 +7,7 @@ import { getLab, nextLab } from "@/lib/labs";
 import { rulesForLab } from "@/lib/access-rules";
 import { CheckoutSheet } from "@/components/checkout-sheet";
 import { useLabWorkspace, type ObjectiveStatus } from "@/components/lab-workspace";
+import { CertificateButton } from "@/components/certificate-button";
 
 // Where "contact support" links go (the marketing contact page — WhatsApp + form).
 const SUPPORT_URL = "https://shieldsyncsecurity.com/contact";
@@ -1044,6 +1045,12 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
                 )}
                 {grade.criteria.some((c) => c.unknown) && (
                   <p className="mt-1 text-xs text-[#92400e]">⚠ Some checks couldn&apos;t run (a temporary AWS hiccup) — click “Re-check my work”.</p>
+                )}
+                {grade.passed && (
+                  <CertificateButton
+                    labSlug={slug}
+                    className="mt-3 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand to-cyan px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand/20 transition hover:brightness-110 disabled:opacity-60"
+                  />
                 )}
               </div>
             ) : (

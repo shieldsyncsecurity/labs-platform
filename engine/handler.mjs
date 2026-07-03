@@ -116,6 +116,7 @@ import {
   rollbackLaunch,
   recordCompletion,
   listCompletions,
+  getCompletionByCredential,
   PAYPERLAB_MAX_LAUNCHES,
   PAYPERLAB_BACKSTOP_DAYS,
   findExpiredSessions,
@@ -702,6 +703,22 @@ export async function handler(event) {
       if (!userId) return resp(ENGINE_SHARED_SECRET ? 401 : 400, { error: ENGINE_SHARED_SECRET ? "unauthorized" : "userId required" });
       const completions = await listCompletions(userId);
       return resp(200, { completions });
+    }
+
+    // F3: public credential verification — the /verify/<id> page resolves an id
+    // to {name, labSlug, firstCompletedAt} here, via the app's server (never
+    // called directly from the browser). Token-guarded like every other engine
+    // route (X-Engine-Token), but intentionally NOT identity-scoped — anyone
+    // holding a credential id (it's meant to be shared, e.g. on LinkedIn) can
+    // verify it; the id itself is an unguessable HMAC, not a secret to protect.
+    if (method === "GET" && path === "/completions/by-credential") {
+      const id = event.queryStringParameters?.id;
+      if (typeof id !== "string" || !/^SS-[A-Z0-9]{1,10}-[0-9a-f]{6}$/.test(id)) {
+        return resp(400, { error: "invalid credential id" });
+      }
+      const credential = await getCompletionByCredential(id);
+      if (!credential) return resp(404, { error: "not found" });
+      return resp(200, { credential });
     }
 
     return resp(404, { error: "not found" });

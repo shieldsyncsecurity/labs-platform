@@ -158,11 +158,15 @@ export async function listEntitlements(userId: string): Promise<Entitlement[]> {
 
 // F2: server-side lab completion tracking. Row shape mirrors entitlements'
 // composite key ({userId, labSlug}) — see engine/labinfra.mjs recordCompletion.
+// F3: `credentialId` is present once the learner has passed at least once
+// (stamped by recordCompletion the first time a /grade call passes) — absent
+// on rows written before the certificate feature shipped.
 export type Completion = {
   labSlug: string;
   firstCompletedAt: string;
   lastCompletedAt: string;
   completions: number;
+  credentialId?: string;
 };
 
 export async function listCompletions(userId: string): Promise<Completion[]> {
@@ -177,5 +181,32 @@ export async function listCompletions(userId: string): Promise<Completion[]> {
     return data.completions ?? [];
   } catch {
     return [];
+  }
+}
+
+// F3: public credential lookup for the /verify/[id] page. No userId is sent —
+// this is a public, unauthenticated fact ("does this credential exist and
+// what does it say"), so engineFetch is called WITHOUT withUser/userId. The
+// engine still requires the shared secret (x-engine-token), which engineFetch
+// always attaches when configured.
+export type Credential = {
+  credentialId: string;
+  name: string;
+  labSlug: string;
+  firstCompletedAt: string;
+};
+
+export async function getCredential(id: string): Promise<Credential | null> {
+  if (!id) return null;
+  try {
+    const r = await engineFetch(`/completions/by-credential?id=${encodeURIComponent(id)}`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!r.ok) return null;
+    const data = (await r.json()) as { credential?: Credential };
+    return data.credential ?? null;
+  } catch {
+    return null;
   }
 }
