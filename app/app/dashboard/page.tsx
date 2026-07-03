@@ -1,31 +1,34 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth/context";
 import { LABS, type Lab } from "@/lib/labs";
 
+// Compact card — level + free/locked + ~min on one row, 2-line-clamped summary,
+// one CTA. Denser than the old card so more fit per viewport without scrolling.
 function LabCard({ lab, owned }: { lab: Lab; owned: boolean }) {
   return (
-    <div className="flex flex-col rounded-2xl border border-line bg-surface p-5 transition hover:border-line-strong hover:shadow-sm">
-      <div className="mb-2 flex items-center gap-2">
-        <span className={`rounded-md px-2 py-0.5 text-xs font-bold badge-${lab.level.toLowerCase()}`}>
+    <div className="flex flex-col rounded-xl border border-line bg-surface p-4 transition hover:border-line-strong hover:shadow-sm">
+      <div className="flex items-center gap-1.5">
+        <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-bold badge-${lab.level.toLowerCase()}`}>
           {lab.level}
         </span>
         {lab.free ? (
-          <span className="rounded-md bg-brand/10 px-2 py-0.5 text-xs font-bold text-brand">FREE</span>
+          <span className="rounded-md bg-brand/10 px-1.5 py-0.5 text-[11px] font-bold text-brand">FREE</span>
         ) : !owned ? (
-          <span className="rounded-md border border-line px-2 py-0.5 text-xs font-bold text-muted">🔒 Locked</span>
+          <span className="rounded-md border border-line px-1.5 py-0.5 text-[11px] font-bold text-muted">🔒 Locked</span>
         ) : null}
-        <span className="ml-auto text-xs text-muted">~{lab.estimatedActiveMinutes} min</span>
+        <span className="ml-auto text-[11px] text-muted">~{lab.estimatedActiveMinutes} min</span>
       </div>
-      <h3 className="text-lg font-extrabold text-ink">{lab.title}</h3>
-      <p className="mt-1 flex-1 text-sm text-ink-soft">{lab.summary}</p>
+      <h3 className="mt-1.5 text-base font-extrabold text-ink">{lab.title}</h3>
+      <p className="mt-1 line-clamp-2 flex-1 text-sm text-ink-soft">{lab.summary}</p>
       <Link
         href={`/labs/${lab.slug}`}
         className={
           owned
-            ? "mt-4 inline-block rounded-lg bg-brand px-4 py-2 text-[15px] font-semibold text-white hover:bg-brand-strong"
-            : "mt-4 inline-block rounded-lg border border-line px-4 py-2 text-[15px] font-semibold text-ink hover:bg-canvas"
+            ? "mt-3 inline-block rounded-lg bg-brand px-3.5 py-1.5 text-sm font-semibold text-white hover:bg-brand-strong"
+            : "mt-3 inline-block rounded-lg border border-line px-3.5 py-1.5 text-sm font-semibold text-ink hover:bg-canvas"
         }
       >
         {owned ? "Open lab →" : "Get access →"}
@@ -34,8 +37,79 @@ function LabCard({ lab, owned }: { lab: Lab; owned: boolean }) {
   );
 }
 
+// The single actionable "what do I do next?" card. Deterministic pick: the free
+// lab if the learner hasn't got a paid one yet, else the first lab they have
+// access to. Labeled "Recommended" — we have no in-progress/completion state to
+// justify "Continue".
+function HeroLab({ lab }: { lab: Lab }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+      <div className="h-[3px] w-full bg-gradient-to-r from-brand to-cyan" aria-hidden />
+      <div className="bg-gradient-to-r from-brand/[0.08] to-cyan/[0.04] p-5 sm:p-6">
+        <p className="text-xs font-bold uppercase tracking-wider text-brand">Recommended</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className={`rounded-md px-2 py-0.5 text-xs font-bold badge-${lab.level.toLowerCase()}`}>
+            {lab.level}
+          </span>
+          {lab.free && (
+            <span className="rounded-md bg-brand/10 px-2 py-0.5 text-xs font-bold text-brand">FREE</span>
+          )}
+          <span className="text-xs text-muted">~{lab.estimatedActiveMinutes} min</span>
+        </div>
+        <h2 className="mt-2 text-xl font-extrabold text-ink sm:text-2xl">{lab.title}</h2>
+        <p className="mt-1.5 max-w-2xl text-sm leading-6 text-ink-soft">{lab.summary}</p>
+        <Link
+          href={`/labs/${lab.slug}`}
+          className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-brand to-cyan px-5 py-2.5 text-sm font-bold text-white shadow-sm shadow-brand/20 transition hover:brightness-110"
+        >
+          Start lab →
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+type Filter = "all" | "yours" | "locked";
+
+function FilterChips({
+  filter,
+  onPick,
+  counts,
+}: {
+  filter: Filter;
+  onPick: (f: Filter) => void;
+  counts: Record<Filter, number>;
+}) {
+  const opts: { key: Filter; label: string }[] = [
+    { key: "all", label: "All" },
+    { key: "yours", label: "Yours" },
+    { key: "locked", label: "Locked" },
+  ];
+  return (
+    <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Filter labs">
+      {opts.map((o) => (
+        <button
+          key={o.key}
+          type="button"
+          role="tab"
+          aria-selected={filter === o.key}
+          onClick={() => onPick(o.key)}
+          className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+            filter === o.key
+              ? "bg-brand text-white shadow-sm"
+              : "border border-line text-ink-soft hover:bg-canvas"
+          }`}
+        >
+          {o.label} <span className="opacity-70">({counts[o.key]})</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const { user, loading, hasAccess } = useAuth();
+  const [filter, setFilter] = useState<Filter>("all");
 
   if (loading) {
     return <div className="mx-auto max-w-[1536px] px-4 py-16 text-muted sm:px-6 lg:px-10">Loading…</div>;
@@ -53,41 +127,84 @@ export default function DashboardPage() {
     );
   }
 
-  const ready = LABS.filter((l) => l.ready);
-  const yours = ready.filter((l) => hasAccess(l.slug));
-  const more = ready.filter((l) => !hasAccess(l.slug));
+  return <SignedInDashboard firstName={user.name.split(" ")[0]} hasAccess={hasAccess} filter={filter} setFilter={setFilter} />;
+}
+
+function SignedInDashboard({
+  firstName,
+  hasAccess,
+  filter,
+  setFilter,
+}: {
+  firstName: string;
+  hasAccess: (slug: string) => boolean;
+  filter: Filter;
+  setFilter: (f: Filter) => void;
+}) {
+  const ready = useMemo(() => LABS.filter((l) => l.ready), []);
+  const yours = useMemo(() => ready.filter((l) => hasAccess(l.slug)), [ready, hasAccess]);
+  const launchableCount = yours.length;
+
+  // Deterministic hero pick: the free lab if the learner doesn't already have a
+  // paid one, else the first lab they have access to, else the first ready lab.
+  const heroLab = useMemo(() => {
+    const ownedPaid = yours.find((l) => !l.free);
+    if (!ownedPaid) {
+      const free = ready.find((l) => l.free);
+      if (free) return free;
+    }
+    return yours[0] ?? ready[0] ?? null;
+  }, [ready, yours]);
+
+  // Grid excludes the hero to avoid duplication.
+  const gridLabs = useMemo(() => ready.filter((l) => l.slug !== heroLab?.slug), [ready, heroLab]);
+  const locked = useMemo(() => gridLabs.filter((l) => !hasAccess(l.slug) && !l.free), [gridLabs, hasAccess]);
+  const gridYours = useMemo(() => gridLabs.filter((l) => hasAccess(l.slug)), [gridLabs, hasAccess]);
+
+  const counts: Record<Filter, number> = {
+    all: gridLabs.length,
+    yours: gridYours.length,
+    locked: locked.length,
+  };
+
+  const filtered = filter === "yours" ? gridYours : filter === "locked" ? locked : gridLabs;
 
   return (
-    <div className="mx-auto max-w-[1536px] px-4 py-10 sm:px-6 lg:px-10">
-      <h1 className="text-2xl font-extrabold text-ink">Welcome back, {user.name.split(" ")[0]}</h1>
-      <p className="mt-1 text-base text-ink-soft">Pick a lab and spin up your own isolated AWS account in a couple of minutes.</p>
+    <div className="mx-auto max-w-[1536px] px-4 py-8 sm:px-6 lg:px-10">
+      {/* Slim header row */}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h1 className="text-2xl font-extrabold text-ink">Welcome back, {firstName}</h1>
+        <p className="text-sm text-ink-soft">
+          {ready.length} lab{ready.length === 1 ? "" : "s"} · {launchableCount} you can launch now · first lab free
+        </p>
+      </div>
 
-      <h2 className="mb-3 mt-8 text-lg font-extrabold text-ink">Your labs</h2>
-      {yours.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-line bg-surface p-6 text-base text-ink-soft">
-          Nothing unlocked yet.{" "}
-          <Link href="/" className="font-semibold text-brand hover:underline">
-            Browse the catalog
-          </Link>{" "}
-          — the first beginner lab is free.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {yours.map((lab) => (
-            <LabCard key={lab.slug} lab={lab} owned />
-          ))}
+      {/* Hero: recommended next action */}
+      {heroLab && (
+        <div className="mt-5">
+          <HeroLab lab={heroLab} />
         </div>
       )}
 
-      {more.length > 0 && (
+      {/* Unified filterable grid */}
+      {gridLabs.length > 0 && (
         <>
-          <h2 className="mb-1 mt-10 text-lg font-extrabold text-ink">More to unlock</h2>
-          <p className="mb-3 text-sm text-ink-soft">One-time purchase per lab — hands-on, auto-graded, fully isolated.</p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {more.map((lab) => (
-              <LabCard key={lab.slug} lab={lab} owned={false} />
-            ))}
+          <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-extrabold text-ink">All labs</h2>
+            <FilterChips filter={filter} onPick={setFilter} counts={counts} />
           </div>
+
+          {filtered.length === 0 ? (
+            <div className="mt-3 rounded-2xl border border-dashed border-line bg-surface p-6 text-base text-ink-soft">
+              {filter === "yours" ? "Nothing unlocked here yet." : "Nothing locked here — you have access to everything."}
+            </div>
+          ) : (
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((lab) => (
+                <LabCard key={lab.slug} lab={lab} owned={hasAccess(lab.slug)} />
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>
