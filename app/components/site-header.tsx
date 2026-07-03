@@ -18,9 +18,16 @@ export function SiteHeader() {
             className="h-7 w-7 flex-none select-none rounded-[22%]"
             draggable={false}
           />
-          <span className="whitespace-nowrap">
-            Shield<span className="text-brand">Sync</span>
-            <span className="hidden font-semibold text-muted sm:inline"> Labs</span>
+          <span className="flex items-center gap-2 whitespace-nowrap">
+            <span>
+              Shield<span className="text-emerald-400">Sync</span>
+            </span>
+            <span
+              className="rounded-full px-2 py-0.5 text-[10px] font-bold tracking-widest text-emerald-400"
+              style={{ border: "1px solid rgba(52,211,153,0.5)" }}
+            >
+              LABS
+            </span>
           </span>
         </Link>
 
