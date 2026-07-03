@@ -23,6 +23,30 @@
 
 :root {
   color-scheme: light;
+  /* Chrome above + below the workspace grid on lg+ desktop, used to size the
+     no-page-scroll workspace region (see --ss-workspace-h below). Measured at
+     1280x800 with the intro banner shown + "About" collapsed:
+       66px  sticky site header
+       32px  page container top padding (py-8)
+       42px  slim hero band
+        8px  gap (mt-2) to the About disclosure
+       34px  About disclosure (collapsed)
+        8px  gap (mt-2) to the intro banner
+       34px  intro banner (one line; dismissing it only shrinks this, never
+             causing scroll, since the grid height reserves worst-case space)
+       16px  gap (mt-4) to the workspace grid
+       32px  page container bottom padding (lg:pb-8)
+       69px  site-wide <footer> rendered below <main> by app/layout.tsx (not a
+             lab-page file, so its height is accounted for here instead of
+             hidden/changed)
+        6px  rounding safety margin
+     If the EntitlementStatus pill also renders (paid-lab users only) it adds
+     one more thin row; --ss-chrome-h intentionally has a few px of slack but
+     an unusually tall combination can still scroll the outer page on lg+ --
+     acceptable, since the inner step-content region is what must never need
+     scrolling to reach Back/Next. */
+  --ss-chrome-h: 347px;
+  --ss-workspace-h: calc(100dvh - var(--ss-chrome-h));
 }
 
 html,
@@ -42,6 +66,23 @@ body {
 
 a {
   color: inherit;
+}
+
+/* "About this lab" disclosure under the slim hero band -- collapsed by default;
+   a small rotating chevron replaces the native marker (hidden via list-none on
+   the summary in JSX). */
+.ss-about summary::before {
+  content: "";
+  display: inline-block;
+  margin-right: 6px;
+  border-style: solid;
+  border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent currentColor;
+  transition: transform 0.15s ease;
+  vertical-align: middle;
+}
+.ss-about[open] summary::before {
+  transform: rotate(90deg);
 }
 
 /* level badge colours */
@@ -124,6 +165,56 @@ a {
   padding: 0;
   color: inherit;
   font-size: 13px;
+}
+
+/* Terminal-style wrapper for fenced code blocks: dark background, mono text, and
+   an always-visible copy button pinned top-right. The wrapper carries the margin
+   that used to live on `pre` (pre itself is unstyled here besides layout). */
+.lab-md .ss-terminal {
+  position: relative;
+  margin: 12px 0;
+}
+.lab-md .ss-terminal pre {
+  margin: 0;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 44px 14px 16px;
+  overflow-x: auto;
+}
+.lab-md .ss-terminal pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.ss-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+.ss-copy-btn:hover {
+  background: #334155;
+  color: #f1f5f9;
+}
+.ss-copy-btn-active {
+  border-color: #16a34a;
+  background: #14532d;
+  color: #86efac;
 }
 .lab-md table {
   border-collapse: collapse;

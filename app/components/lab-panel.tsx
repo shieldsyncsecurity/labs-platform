@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth/context";
-import { getLab } from "@/lib/labs";
+import { getLab, readyLabs } from "@/lib/labs";
 import { rulesForLab } from "@/lib/access-rules";
 import { CheckoutSheet } from "@/components/checkout-sheet";
 import { useLabWorkspace } from "@/components/lab-workspace";
@@ -99,6 +99,22 @@ function fmtRetry(iso: string | null): { exact: string; rel: string } | null {
     `about ${Math.round(mins / 60 / 24)} day${Math.round(mins / 60 / 24) === 1 ? "" : "s"}`;
   return { exact, rel };
 }
+// Deterministic "what's next" pick for the done-card upsell: the next READY lab
+// after the current one in catalog order, wrapping around, skipping the current
+// slug. Pure catalog lookup — no grading/session/entitlement logic involved.
+// (If it's paid and payments are off, we still link to the lab page — its own
+// panel explains "Get this lab" / launch soon.)
+function nextLab(currentSlug: string) {
+  const labs = readyLabs();
+  if (labs.length <= 1) return null;
+  const i = labs.findIndex((l) => l.slug === currentSlug);
+  for (let step = 1; step <= labs.length; step++) {
+    const candidate = labs[(i + step) % labs.length];
+    if (candidate.slug !== currentSlug) return candidate;
+  }
+  return null;
+}
+
 const card = "rounded-2xl border border-line bg-surface p-5 shadow-sm";
 // Shared button styles — a branded gradient primary (premium feel, matches the
 // marketing site) + a quiet secondary. Presentational only.
@@ -715,22 +731,30 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         </p>
         <p className="mt-1 text-base text-ink-soft">
           {limitReason === "RATE_LIMITED"
-            ? "We saw a burst of launches from your network. Give it a couple of minutes, then try again."
+            ? "We saw a burst of launches from your network. Give it a couple of minutes, then try again. Monthly members skip these limits."
             : limitReason === "FREE_IP_LIMIT"
-            ? "The free lab is one run per person — and it's been used several times from your network already. Try again later, or unlock a paid lab for instant, unlimited access."
+            ? "The free lab is one run per person — and it's been used several times from your network already. Try again later, or unlock a paid lab for instant, unlimited access. Monthly members skip these limits."
             : (() => {
                 const retry = fmtRetry(limitRetryAt);
-                if (lab?.free) {
-                  return retry
+                const base = lab?.free
+                  ? retry
                     ? `The free lab is ${launchPolicy}. Your next run unlocks at ${retry.exact} (${retry.rel} from now).`
-                    : `The free lab includes ${launchPolicy}. It resets on a rolling ${rule?.windowHours}-hour window — your next run frees up about ${rule?.windowHours}h after your last one.`;
-                }
-                return retry
+                    : `The free lab includes ${launchPolicy}. It resets on a rolling ${rule?.windowHours}-hour window — your next run frees up about ${rule?.windowHours}h after your last one.`
+                  : retry
                   ? `You've used all your launches for this lab (${launchPolicy}). Your next run unlocks at ${retry.exact} (${retry.rel} from now).`
                   : `You've used all your launches for this lab (${launchPolicy}). It resets on a rolling ${rule?.windowHours}-hour window — check back a little later.`;
+                return `${base} Monthly members skip these limits.`;
               })()}
         </p>
-        <button onClick={() => setFlash(null)} className="mt-4 w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">OK</button>
+        <div className="mt-4 flex flex-col gap-2">
+          <button onClick={() => setFlash(null)} className="w-full rounded-xl border border-line px-5 py-2.5 text-base font-semibold text-ink hover:bg-canvas">OK</button>
+          <a
+            href="https://shieldsyncsecurity.com/labs-wizard"
+            className="block w-full rounded-xl px-5 py-2.5 text-center text-base font-semibold text-brand hover:underline"
+          >
+            See plans →
+          </a>
+        </div>
       </div>
     );
   }
@@ -838,6 +862,22 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
             </div>
           )}
         </div>
+        {(() => {
+          const next = nextLab(slug);
+          if (!next) return null;
+          return (
+            <div className="mt-5 border-t border-line pt-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-muted">Keep going</p>
+              <p className="mt-2 text-base text-ink-soft">
+                Next challenge: <strong className="text-ink">{next.title}</strong>{" "}
+                <span className="text-sm text-muted">({next.level} · ~{next.estimatedActiveMinutes} min)</span>
+              </p>
+              <Link href={`/labs/${next.slug}`} className="mt-2 inline-block text-base font-semibold text-brand hover:underline">
+                Open {next.title} →
+              </Link>
+            </div>
+          );
+        })()}
       </div>
     );
   }
@@ -1002,6 +1042,8 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   // no session — idle (the conversion moment: make it inviting)
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+      {/* 3px brand gradient top edge */}
+      <div className="h-[3px] w-full bg-gradient-to-r from-brand to-cyan" aria-hidden />
       {/* Accent header strip */}
       <div className="bg-gradient-to-r from-brand/[0.08] to-cyan/[0.04] px-5 pb-3 pt-4">
         <div className="flex items-center gap-2">

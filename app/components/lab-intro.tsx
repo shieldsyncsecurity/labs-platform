@@ -40,25 +40,18 @@ export function LabIntro() {
   if (!show) return null;
 
   return (
-    <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-brand/30 bg-brand/5 p-3.5 text-sm text-ink-soft">
-      <span aria-hidden className="text-base leading-none">👋</span>
-      <div className="flex-1">
-        <p className="font-semibold text-ink">New here? Here&apos;s how a lab works</p>
-        <p className="mt-0.5">
-          Follow the <strong>step-by-step guide</strong>, then use the <strong>Launch</strong> panel
-          to spin up your own isolated AWS account with a countdown. Open the console, work through
-          the steps, and hit <strong>Check my work</strong>{" "}
-          to grade yourself. When you&apos;re done
-          the account is wiped automatically.
-          {isMobile && (
-            <>
-              {" "}
-              <strong>Best on a laptop or desktop</strong> — you can read the guide here, but the
-              hands-on console steps work best on a bigger screen.
-            </>
-          )}
-        </p>
-      </div>
+    <div className="mt-2 flex items-center gap-2 rounded-lg border border-brand/30 bg-brand/5 px-3 py-1.5 text-sm text-ink-soft">
+      <span aria-hidden className="flex-none text-sm leading-none">👋</span>
+      <p className="flex-1 leading-snug">
+        <strong className="text-ink">New here?</strong> Follow the guide, hit <strong>Launch</strong> on the
+        right, then <strong>Check my work</strong> — the account wipes itself.
+        {isMobile && (
+          <>
+            {" "}
+            <strong>Best on a laptop or desktop</strong> — the hands-on console steps work best on a bigger screen.
+          </>
+        )}
+      </p>
       <button
         onClick={dismiss}
         aria-label="Got it"

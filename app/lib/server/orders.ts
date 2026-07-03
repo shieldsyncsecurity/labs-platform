@@ -1,20 +1,15 @@
 import type { Order } from "@/lib/payments/types";
 import { engineFetch } from "./engine";
 
-// Server-side order record — the source of truth the webhook validates a
-// provider payment against, INSTEAD of a self-describing, client-replayable
-// payload. Persisted in the engine (DynamoDB) so it survives across the
-// stateless Cloudflare Worker invocations, exactly like entitlements.
+// Server-side order record — the source of truth the payment-confirm routes
+// validate a provider payment against, INSTEAD of a self-describing,
+// client-replayable payload. Persisted in the engine (DynamoDB) so it survives
+// across the stateless Cloudflare Worker invocations, exactly like entitlements.
 //
-// ⚠️ ENGINE TODO (required before PAYMENTS_LIVE=1): the engine handler
-// (engine/handler.mjs) must expose, behind the x-engine-token guard:
-//   POST /orders          { order }                 -> persist with status "created"
-//   GET  /orders?orderId=  ...                       -> fetch one order
-//   POST /orders/paid     { orderId, paymentId }    -> CAS created->paid, idempotent
-//                                                       ({ transitioned: boolean })
-// Until those land, getOrder() returns null and the webhook fails CLOSED
-// (rejects "unknown order") — the safe direction. Do NOT set PAYMENTS_LIVE=1
-// before the engine side and a real provider are wired.
+// Engine endpoints (handler.mjs, behind the x-engine-token guard) are BUILT and
+// deployed (commit 8dd205a): POST /orders, GET /orders?orderId=, POST /orders/paid
+// (CAS created->paid, idempotent). If the engine is unreachable, getOrder()
+// returns null and payment confirmation fails CLOSED — the safe direction.
 
 export async function createOrder(order: Order): Promise<void> {
   try {

@@ -87,9 +87,8 @@ export async function grantPayPerLab(
  * Returns { ok, launchesRemaining?, windowExpiresAt? } on success, or
  * { ok:false, code:"CONCURRENT_LAUNCH_OR_LIMIT" } on ConditionalCheckFailed.
  *
- * ⚠️ ENGINE TODO: implement POST /entitlements/reserve-launch and
- * POST /entitlements/rollback-launch matching this shape. Until those land,
- * !ok will be returned and the launch route will reject with 409.
+ * Engine side is BUILT and deployed (commit b6209fc): POST /entitlements/reserve-launch
+ * and POST /entitlements/rollback-launch in engine/handler.mjs.
  */
 export type ReserveLaunchResult =
   | { ok: true; launchesRemaining: number; windowExpiresAt: string | null }

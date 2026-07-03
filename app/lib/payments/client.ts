@@ -1,9 +1,9 @@
 import type { Currency, Plan } from "./types";
 
 // Client-side gateway seam. The mock talks to our /api/payments/* routes.
-// A RazorpayPaymentClient (later) would open Razorpay Checkout and let
-// Razorpay's servers call /api/payments/webhook — the rest of the app (the
-// checkout sheet, entitlements) is unchanged.
+// The live path opens Paytm JS Checkout and confirms server-side via
+// /api/payments/paytm/confirm — the rest of the app (the checkout sheet,
+// entitlements) is unchanged.
 
 export type CheckoutInfo = {
   orderId: string;

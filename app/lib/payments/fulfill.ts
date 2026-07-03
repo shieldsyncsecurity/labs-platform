@@ -4,11 +4,11 @@ import { grantEntitlement } from "@/lib/server/store";
 // DEV SIMULATOR ONLY — used solely by the mock-pay route (ALLOW_MOCK_PAY,
 // hard-404 in production). This verifies an INTERNALLY mock-signed payload, so
 // it is inherently replayable by anyone who can obtain that payload and MUST
-// NOT back the real-provider trust path. The production webhook
-// (app/api/payments/webhook) does NOT import this — it verifies the provider's
-// own signature (lib/payments/provider.ts) against a server-persisted order
-// (lib/server/orders.ts) with amount + idempotency checks. Do not re-wire the
-// webhook to this function.
+// NOT back the real-provider trust path. The production Paytm routes
+// (app/api/payments/paytm/confirm + /paytm/callback) do NOT import this — they
+// re-confirm server-to-server via Paytm's Order Status API against a
+// server-persisted order (lib/server/orders.ts). Do not re-wire them to this
+// function.
 //
 // NOTE: Orders are embedded directly in the signed payload rather than stored
 // in a separate in-memory map. This avoids cross-Worker-instance state loss on

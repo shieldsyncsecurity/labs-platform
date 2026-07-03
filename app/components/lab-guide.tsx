@@ -83,11 +83,75 @@ function chipify(md: string): string {
     .replace(/\[\[([^\]]+)\]\]/g, (_m, p) => `\`chip:${p.trim()}\``);
 }
 
-// Custom react-markdown renderers. The only override is `code`: tokens produced by
-// chipify ("navpath:" / "chip:") become breadcrumbs / chips; everything else (block
-// code, ordinary inline code) renders unchanged. react-markdown v9 dropped the
-// `inline` prop, so we detect inline = no language class + single line.
+// Small clipboard-copy button pinned to the top-right of a terminal code block.
+// Always visible (not hover-only) so it's discoverable on touch devices too.
+// Swaps to a "Copied" confirmation for 1.5s, then reverts. Best-effort: a failed
+// clipboard write (unsupported browser, permissions) just silently no-ops.
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const onClick = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`ss-copy-btn ${copied ? "ss-copy-btn-active" : ""}`}
+      aria-label="Copy code"
+    >
+      {copied ? (
+        <>
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+          Copied
+        </>
+      ) : (
+        <>
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="9" y="9" width="11" height="11" rx="2" />
+            <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+          </svg>
+          Copy
+        </>
+      )}
+    </button>
+  );
+}
+
+// A dark "terminal" wrapper for fenced code blocks — dark bg, mono text, and a
+// copy button. Reads the raw text from the single <code> child so the copy
+// button always copies the exact source (not whatever syntax-highlighting nodes
+// react-markdown may wrap it in).
+function TerminalPre({ children, ...props }: { children?: ReactNode }) {
+  const codeText = (() => {
+    const child = Array.isArray(children) ? children[0] : children;
+    const txt = (child as { props?: { children?: unknown } } | undefined)?.props?.children;
+    if (typeof txt === "string") return txt;
+    if (Array.isArray(txt)) return txt.join("");
+    return "";
+  })();
+  return (
+    <div className="ss-terminal not-prose">
+      <CopyButton text={codeText} />
+      <pre {...props}>{children}</pre>
+    </div>
+  );
+}
+
+// Custom react-markdown renderers. `code` overrides: tokens produced by chipify
+// ("navpath:" / "chip:") become breadcrumbs / chips; everything else (block code,
+// ordinary inline code) renders unchanged. react-markdown v9 dropped the `inline`
+// prop, so we detect inline = no language class + single line. `pre` wraps fenced
+// code blocks in the dark terminal chrome + copy button.
 const mdComponents: Components = {
+  pre({ children, ...props }) {
+    return <TerminalPre {...props}>{children}</TerminalPre>;
+  },
   code({ node, className, children, ...props }) {
     void node; // drop the AST node so it isn't spread onto the DOM element
     const txt = String(children);
@@ -169,24 +233,22 @@ function leadInOf(md: string): string {
   return idx >= 0 ? md.slice(0, idx) : md;
 }
 
-// Sticky so it's always reachable while scrolling the steps. The caption swaps with
-// the track, so flipping it is visibly confirmed even before you look at the steps.
+// Compact segmented control (was a looser toolbar) so it fits neatly in the step
+// card's header band next to the step title. The caption moved out — it's implied
+// by context now — keeping this small and scannable.
 function TrackToggle({ track, onPick }: { track: Track; onPick: (t: Track) => void }) {
   const seg = (active: boolean) =>
-    `flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition ${
-      active ? "bg-brand text-white shadow-sm" : "text-ink-soft hover:bg-surface"
+    `flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+      active ? "bg-brand text-white shadow-sm" : "text-ink-soft hover:bg-white"
     }`;
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-canvas p-1.5" role="tablist" aria-label="Instruction style">
+    <div className="flex flex-none items-center gap-0.5 rounded-lg border border-line bg-canvas p-1" role="tablist" aria-label="Instruction style">
       <button role="tab" aria-selected={track === "console"} onClick={() => onPick("console")} className={seg(track === "console")}>
         🖱️ Console
       </button>
       <button role="tab" aria-selected={track === "cli"} onClick={() => onPick("cli")} className={seg(track === "cli")}>
         ⌨️ CLI
       </button>
-      <span className="ml-auto pr-1 text-xs font-medium text-muted">
-        {track === "console" ? "Point-and-click in the AWS web UI" : "Commands in CloudShell ( >_ top bar )"}
-      </span>
     </div>
   );
 }
@@ -281,61 +343,149 @@ const btnNext =
 const btnBack =
   "inline-flex items-center justify-center gap-1.5 rounded-xl border border-line-strong px-5 py-2.5 text-sm font-semibold text-ink transition hover:bg-canvas disabled:opacity-50";
 
-/**
- * Sticky player header: step dropdown (jump to any step, shows done/current state),
- * the Console/CLI toggle, and "Step N of M". Sits above a thin progress bar.
- */
-function GuideHeader({
+// Thin brand progress bar — "Step N of M" (or "Overview") + a filled track.
+// Shared by the desktop rail (under its divider) and the mobile header band.
+function StepProgress({ step, total }: { step: number; total: number }) {
+  const pct = total > 0 ? Math.round((step / total) * 100) : 0;
+  return (
+    <div>
+      <p className="font-mono text-xs font-semibold text-muted">
+        {step === 0 ? "Overview" : `Step ${step} of ${total}`}
+      </p>
+      <div className="ss-bar-track mt-1.5" aria-hidden>
+        <div className="h-full rounded-full bg-brand transition-all duration-300" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// Desktop (lg+) sticky left rail: Overview + every step, with done/current/upcoming
+// states, plus a progress readout under a divider at the bottom. Replaces the old
+// select dropdown on wide viewports — jumping uses the same `goTo`/onJump as before.
+function StepRail({
   step,
   total,
   titles,
   onJump,
+}: {
+  step: number; // 0 = Overview
+  total: number;
+  titles: string[];
+  onJump: (i: number) => void;
+}) {
+  const itemClass = (state: "done" | "current" | "upcoming") =>
+    `flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition ${
+      state === "current"
+        ? "bg-brand/10 font-semibold text-brand"
+        : state === "done"
+        ? "font-medium text-green-600 hover:bg-canvas"
+        : "text-muted hover:bg-canvas hover:text-ink-soft"
+    }`;
+  return (
+    <nav className="hidden lg:sticky lg:top-[4.5rem] lg:block lg:max-h-[var(--ss-workspace-h)] lg:overflow-y-auto lg:overscroll-contain" aria-label="Lab steps">
+      <button type="button" onClick={() => onJump(0)} className={itemClass(step === 0 ? "current" : "done")}>
+        {step === 0 ? (
+          <span className="h-4 w-4 flex-none rounded-full border-2 border-brand" aria-hidden />
+        ) : (
+          <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-green-600" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+        )}
+        Overview
+      </button>
+      <ul className="mt-1 space-y-0.5">
+        {titles.map((t, i) => {
+          const n = i + 1;
+          const state = n < step ? "done" : n === step ? "current" : "upcoming";
+          return (
+            <li key={i}>
+              <button type="button" onClick={() => onJump(n)} className={itemClass(state)}>
+                {state === "done" ? (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-green-600" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                ) : state === "current" ? (
+                  <span className="h-4 w-4 flex-none rounded-full border-2 border-brand" aria-hidden />
+                ) : (
+                  <span className="h-4 w-4 flex-none rounded-full border-2 border-line" aria-hidden />
+                )}
+                <span className="truncate">{n}. {t}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-3 border-t border-line pt-3">
+        <StepProgress step={step} total={total} />
+      </div>
+    </nav>
+  );
+}
+
+// <lg viewports: a horizontal scrollable row of rounded chips instead of the rail
+// (and instead of the old native select). Same states/behavior as the rail.
+function StepChips({
+  step,
+  total,
+  titles,
+  onJump,
+}: {
+  step: number;
+  total: number;
+  titles: string[];
+  onJump: (i: number) => void;
+}) {
+  const chipClass = (state: "done" | "current" | "upcoming") =>
+    `flex-none whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+      state === "current"
+        ? "bg-brand text-white"
+        : state === "done"
+        ? "bg-brand/10 text-brand"
+        : "border border-line text-muted"
+    }`;
+  return (
+    <div className="lg:hidden">
+      <div className="flex gap-1.5 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <button type="button" onClick={() => onJump(0)} className={chipClass(step === 0 ? "current" : "done")}>
+          Overview
+        </button>
+        {titles.map((t, i) => {
+          const n = i + 1;
+          const state = n < step ? "done" : n === step ? "current" : "upcoming";
+          void t;
+          return (
+            <button key={i} type="button" onClick={() => onJump(n)} className={chipClass(state)}>
+              {state === "done" ? "✓ " : ""}Step {n}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-2">
+        <StepProgress step={step} total={total} />
+      </div>
+    </div>
+  );
+}
+
+// Step card header band: step title on the left, the (restyled, compact) track
+// toggle on the right. Shown for both Overview and numbered steps.
+function StepHeaderBand({
+  step,
+  title,
   hasTracks,
   track,
   onPickTrack,
 }: {
   step: number; // 0 = Overview
-  total: number; // total steps, NOT counting Overview
-  titles: string[];
-  onJump: (i: number) => void;
+  title: string;
   hasTracks: boolean;
   track: Track;
   onPickTrack: (t: Track) => void;
 }) {
-  const pct = total > 0 ? Math.round((step / total) * 100) : 0;
   return (
-    <div className="ss-guide-header sticky top-2 z-20 -mx-6 -mt-6 mb-6 rounded-t-2xl border-b border-line bg-surface/95 px-6 pt-5 pb-3 backdrop-blur sm:-mx-7 sm:-mt-7 sm:px-7">
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="sr-only">Jump to step</span>
-          <select
-            value={step}
-            onChange={(e) => onJump(Number(e.target.value))}
-            className="w-full min-w-0 rounded-lg border border-line bg-canvas px-3 py-1.5 text-sm font-semibold text-ink outline-none focus:border-brand sm:w-auto"
-          >
-            <option value={0}>{step === 0 ? "▸ " : ""}Overview</option>
-            {titles.map((t, i) => (
-              <option key={i} value={i + 1}>
-                {i + 1 < step ? "✓ " : i + 1 === step ? "▸ " : ""}Step {i + 1} — {t}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {hasTracks && step > 0 && (
-          <div className="order-3 w-full sm:order-none sm:w-auto">
-            <TrackToggle track={track} onPick={onPickTrack} />
-          </div>
-        )}
-
-        <span className="flex-none font-mono text-xs font-bold text-muted">
-          {step === 0 ? `Overview` : `Step ${step} of ${total}`}
-        </span>
-      </div>
-
-      <div className="ss-bar-track mt-3" aria-hidden>
-        <div className="h-full rounded-full bg-brand transition-all duration-300" style={{ width: `${pct}%` }} />
-      </div>
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-[#fafbff] px-5 py-3">
+      <p className="font-semibold text-ink">{step === 0 ? "Overview" : title}</p>
+      {hasTracks && step > 0 && <TrackToggle track={track} onPick={onPickTrack} />}
     </div>
   );
 }
@@ -468,8 +618,10 @@ export function LabGuide({
     const clamped = Math.max(0, Math.min(totalSteps, i));
     setStepIndex(clamped);
     try { localStorage.setItem(storageKey, String(clamped)); } catch {}
-    // Scroll the guide card into view on step change.
+    // Scroll the guide card into view on step change, and start the new step's
+    // content from the top (the walkthrough region scrolls internally on lg+).
     articleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    articleRef.current?.querySelector(".ss-walkthrough")?.scrollTo({ top: 0 });
   };
 
   const isLastStep = totalSteps > 0 && stepIndex === totalSteps;
@@ -501,66 +653,90 @@ export function LabGuide({
   // Free labs and already-paid users get immediate access.
   // hasAccess() returns true for free labs without needing entitlements.
   if (hasAccess(slug)) {
-    return (
-      <article ref={articleRef} className="lab-md ss-guide relative rounded-2xl border border-line bg-surface p-6 sm:p-7" data-track={track}>
-        {!hasWalkthrough || !launched ? (
-          <>
-            {overviewRendered.overviewNodes}
-            {!hasWalkthrough ? null : <LaunchGate steps={stepTitles} />}
-          </>
-        ) : wtSource === null ? (
-          <>
-            {overviewRendered.overviewNodes}
-            <p className="mt-6 text-sm text-muted">Loading the walkthrough&hellip;</p>
-          </>
-        ) : (
-          <>
-            <GuideHeader
-              step={stepIndex}
-              total={totalSteps}
-              titles={headerTitles}
-              onJump={goToStep}
-              hasTracks={hasTracksAnywhere}
-              track={track}
-              onPickTrack={pick}
-            />
-            <div className="ss-walkthrough">
-              {stepIndex === 0 ? (
-                <>
-                  {overviewRendered.overviewNodes}
-                  {overviewRendered.leadIn && (
-                    <>
-                      {overviewRendered.leadIn.refcardNodes}
-                      {overviewRendered.leadIn.bodyNodes}
-                    </>
-                  )}
-                </>
-              ) : (
-                currentStepRendered && (
-                  <>
-                    {currentStepRendered.refcardNodes}
-                    {currentStepRendered.bodyNodes}
-                  </>
-                )
-              )}
-            </div>
+    const showPlayer = hasWalkthrough && launched && wtSource !== null;
+    const currentTitle = stepIndex === 0 ? "Overview" : headerTitles[stepIndex - 1] ?? "";
+    const nextTitle = !isLastStep && stepIndex < headerTitles.length ? headerTitles[stepIndex] : "";
 
-            {totalSteps > 0 && (
-              <div className="mt-8 flex items-center justify-between gap-3 border-t border-line pt-5">
-                <button type="button" onClick={onBack} disabled={stepIndex === 0} className={btnBack}>
-                  ← Back
-                </button>
-                <span className="font-mono text-xs font-semibold text-muted">
-                  {stepIndex === 0 ? "Overview" : `Step ${stepIndex} of ${totalSteps}`}
-                </span>
-                <button type="button" onClick={onNext} className={btnNext}>
-                  {isLastStep ? "Finish — check your work" : "Next →"}
-                </button>
-              </div>
-            )}
-          </>
+    return (
+      <div
+        className={
+          showPlayer
+            ? "lg:grid lg:h-full lg:min-h-0 lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-6"
+            : "lg:h-full lg:min-h-0"
+        }
+      >
+        {showPlayer && (
+          <StepRail step={stepIndex} total={totalSteps} titles={headerTitles} onJump={goToStep} />
         )}
-      </article>
+        <article
+          ref={articleRef}
+          className="lab-md ss-guide relative flex flex-col overflow-hidden rounded-2xl border border-line bg-surface lg:h-full lg:min-h-0"
+          data-track={track}
+        >
+          {!hasWalkthrough || !launched ? (
+            <div className="overflow-y-auto p-6 sm:p-7 lg:min-h-0 lg:flex-1 lg:overscroll-contain">
+              {overviewRendered.overviewNodes}
+              {!hasWalkthrough ? null : <LaunchGate steps={stepTitles} />}
+            </div>
+          ) : wtSource === null ? (
+            <div className="overflow-y-auto p-6 sm:p-7 lg:min-h-0 lg:flex-1 lg:overscroll-contain">
+              {overviewRendered.overviewNodes}
+              <p className="mt-6 text-sm text-muted">Loading the walkthrough&hellip;</p>
+            </div>
+          ) : (
+            <>
+              <div className="flex-none">
+                <StepHeaderBand
+                  step={stepIndex}
+                  title={currentTitle}
+                  hasTracks={hasTracksAnywhere}
+                  track={track}
+                  onPickTrack={pick}
+                />
+                <div className="lg:hidden px-5 pt-3">
+                  <StepChips step={stepIndex} total={totalSteps} titles={headerTitles} onJump={goToStep} />
+                </div>
+              </div>
+
+              {/* Only this region scrolls on lg+ — the header band above and the
+                  Back/Next footer below stay pinned so all controls are always
+                  reachable without moving the page. overscroll-contain stops a
+                  scroll-to-end here from chaining into the page. */}
+              <div className="ss-walkthrough px-5 py-4 focus:outline-none lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain" tabIndex={-1}>
+                {stepIndex === 0 ? (
+                  <>
+                    {overviewRendered.overviewNodes}
+                    {overviewRendered.leadIn && (
+                      <>
+                        {overviewRendered.leadIn.refcardNodes}
+                        {overviewRendered.leadIn.bodyNodes}
+                      </>
+                    )}
+                  </>
+                ) : (
+                  currentStepRendered && (
+                    <>
+                      {currentStepRendered.refcardNodes}
+                      {currentStepRendered.bodyNodes}
+                    </>
+                  )
+                )}
+              </div>
+
+              {totalSteps > 0 && (
+                <div className="flex flex-none items-center justify-between gap-3 border-t border-line px-5 py-4">
+                  <button type="button" onClick={onBack} disabled={stepIndex === 0} className={btnBack}>
+                    ← Back
+                  </button>
+                  <button type="button" onClick={onNext} className={btnNext}>
+                    {isLastStep ? "Finish — check your work" : nextTitle ? `Next: ${nextTitle} →` : "Next →"}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </article>
+      </div>
     );
   }
 

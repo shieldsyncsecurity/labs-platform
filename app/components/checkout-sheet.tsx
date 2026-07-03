@@ -55,7 +55,7 @@ export function CheckoutSheet({
 }) {
   const { user } = useAuth();
   const [info, setInfo] = useState<CheckoutInit | null>(null);
-  const [phase, setPhase] = useState<"loading" | "summary" | "processing" | "confirming" | "done" | "failed">("loading");
+  const [phase, setPhase] = useState<"loading" | "summary" | "processing" | "confirming" | "done" | "failed" | "notlaunched">("loading");
   const [err, setErr] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const invoked = useRef(false);
@@ -82,6 +82,13 @@ export function CheckoutSheet({
         const d = (await r.json().catch(() => ({}))) as Partial<CheckoutInit> & { error?: string };
         if (!alive) return;
         if (!r.ok || !d.txnToken) {
+          // Payments aren't live yet — this isn't a failure to retry, it's an
+          // expected state. Show a distinct "not launched" card instead of the
+          // failed state (whose "Try again" would just re-fire the same 503 forever).
+          if (r.status === 503 && d.error === "payments not available yet") {
+            setPhase("notlaunched");
+            return;
+          }
           setErr(d.error ?? "Couldn't start checkout");
           setPhase("failed");
           return;
@@ -214,6 +221,28 @@ export function CheckoutSheet({
             <p className="mt-1 text-base text-muted">Your access is unlocked.</p>
             <button onClick={() => onPaid()} className="mt-4 w-full rounded-xl bg-brand px-6 py-3 text-base font-semibold text-white hover:bg-brand-strong">
               Start the lab
+            </button>
+          </div>
+        )}
+
+        {phase === "notlaunched" && (
+          <div className="mt-5">
+            <p className="text-base font-semibold text-ink">Online payments launch soon</p>
+            <p className="mt-1 text-base text-ink-soft">
+              We&apos;re completing payment-gateway approval. Leave your email on the waitlist and you&apos;ll get
+              early access — or explore the free lab meanwhile.
+            </p>
+            <a
+              href="https://shieldsyncsecurity.com/labs-wizard"
+              className="mt-4 block rounded-xl bg-brand px-6 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong"
+            >
+              See plans &amp; pricing
+            </a>
+            <button
+              onClick={onClose}
+              className="mt-2 w-full rounded-xl border border-line px-6 py-3 text-base font-semibold text-ink hover:bg-canvas"
+            >
+              Close
             </button>
           </div>
         )}

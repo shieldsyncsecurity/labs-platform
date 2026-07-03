@@ -1,8 +1,8 @@
 import crypto from "crypto";
 
-// HMAC-SHA256 webhook signing/verification — the SAME scheme Razorpay and Stripe
-// use. The simulated gateway signs server-side; the real provider will sign with
-// its own webhook secret. Only the secret source changes when we go live.
+// HMAC-SHA256 signing/verification for INTERNAL dev-simulator order tokens
+// (mock-pay route only). The live provider is Paytm, whose flow does not use
+// this module — confirmation is server-to-server via the Order Status API.
 //
 // SECURITY: must come from env. The previous default string was published with
 // the source, which would let an attacker who saw the source forge signatures.

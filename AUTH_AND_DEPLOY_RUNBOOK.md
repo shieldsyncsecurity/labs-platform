@@ -13,6 +13,13 @@
 > **narrowed**; `SESSION_SECRET` was **rotated**; the grader **false-pass** was fixed.
 > Two deploy gotchas were learned (CI-token account, ISP-DNS on Function URLs).
 >
+> **2026-07-03 — Razorpay removed; Paytm is THE provider (owner decision):** the dormant
+> Razorpay-shaped `/api/payments/webhook` route and `lib/payments/provider.ts`
+> (`RAZORPAY_WEBHOOK_SECRET`) were **deleted**. The production trust path is now solely the
+> Paytm pair `/api/payments/paytm/confirm` + `/paytm/callback` — both re-confirm
+> server-to-server via Paytm's Order Status API against the server-persisted order and grant
+> idempotently via `POST /orders/paid`. Any Razorpay mention below this line is historical.
+>
 > **2026-06-25 — payment trust-path hardening (pre-go-live):** the payment-confirmation
 > path was re-architected so it can't be replayed into a self-grant. `/api/payments/checkout`
 > is auth-only (session sub, never `body.userId`); the real-provider `/api/payments/webhook`
@@ -55,7 +62,7 @@ STALE — THIS file is the source of truth.**
 | `SESSION_SECRET` rotation | DONE | rotated 2026-06-22 (wrangler secret put; sessions invalidated) |
 | `COGNITO_CLIENT_SECRET` rotation | PENDING | no in-place rotation -> needs a NEW app client + re-test (your action; not web-exposed -> lower urgency). See section 9 |
 | Payment trust path (bypass fix) | HARDENED 2026-06-25 | checkout is auth-only; webhook verifies the **provider** secret (not the mock one) against a server-persisted order w/ amount + idempotency checks; old replayable fulfill path is dev-sim-only. Still gated OFF (`PAYMENTS_LIVE` unset). See 6d |
-| Real Razorpay | deferred | mock gateway off in prod; real blocked on GST (~1 mo). Paid tier not sellable until this + a live payment path + engine `/orders` endpoints (see 6d) |
+| Real Paytm | WIRED, awaiting merchant approval (days) | Paytm JS Checkout + server-to-server confirm/callback + engine `/orders` all built; Razorpay code deleted 2026-07-03. Go-live = flip `PAYTM_ENV`→production + `PAYMENTS_LIVE=1` + e2e verify |
 
 **Lab catalogue = exactly 2 labs, both live + graded: `s3-misconfiguration-audit`
 (free, Beginner) + `iam-privilege-escalation` (paid, Intermediate).** The 4 not-ready
@@ -72,7 +79,7 @@ labs (kms, vpc, cloudtrail, guardduty) were **DELETED 2026-06-22** (catalogue + 
 ## 1. What this is
 
 A Next.js app that sells/serves browser-based AWS security labs. A user signs in
-(Google via Cognito), pays (mock gateway now; Razorpay later), and launches a lab
+(Google via Cognito), pays (Paytm; gated off until merchant approval), and launches a lab
 that leases a throwaway AWS account brokered by a backend "engine" Lambda.
 
 - **Frontend/app:** Next.js 16 on **Cloudflare Workers** (via the OpenNext adapter).
@@ -257,10 +264,12 @@ see the ISP-DNS gotcha in section 4).
 
 **Payments (ALL UNSET in prod until go-live — the flow is dormant):** documented in
 `app/.env.example`. See section 6d for the trust model.
-- `PAYMENTS_LIVE` (non-secret) — master switch. Unset -> `/checkout` 503 + `/webhook` 404.
-- `RAZORPAY_WEBHOOK_SECRET` (**secret**) — the REAL provider webhook secret; the webhook
-  verifies `X-Razorpay-Signature` with this. Required (>=16 chars) before `PAYMENTS_LIVE=1`;
-  if unset the webhook fails closed and grants nothing.
+- `PAYMENTS_LIVE` (non-secret) — master switch. Unset -> `/checkout` 503 + Paytm
+  `/paytm/confirm` + `/paytm/callback` 404.
+- `PAYTM_*` (`PAYTM_ENV`/`PAYTM_MID`/`PAYTM_WEBSITE` in wrangler.jsonc + the merchant-key
+  Worker secret) — the live provider config. (`RAZORPAY_WEBHOOK_SECRET` removed 2026-07-03
+  along with the webhook route; if a Worker secret by that name still exists in the
+  Cloudflare dashboard, delete it.)
 - `MOCK_PAYMENT_SECRET` (**secret**) — signs dev-simulator order tokens ONLY (mock-pay).
   NOT a provider secret; deliberately never shared with the webhook trust path.
 - `ALLOW_MOCK_PAY` (non-secret) — dev/preview only; enables the simulated gateway
@@ -360,19 +369,19 @@ by construction.
    (`getServerUser()`; uses the session sub, never `body.userId`), gated by `PAYMENTS_LIVE`.
    Persists a **server-side order** (`status:"created"`) via `lib/server/orders.ts`. The
    signed payload it still returns is consumed ONLY by the dev simulator (mock-pay).
-2. **`/api/payments/webhook`** (the real-provider path) verifies the **provider** secret
-   `RAZORPAY_WEBHOOK_SECRET` over the raw body via `lib/payments/provider.ts` —
-   **never** `MOCK_PAYMENT_SECRET`. A checkout/mock-signed payload therefore can't validate
-   (wrong secret + wrong event shape). It then validates against the persisted order
-   (amount + currency must match) and grants only on an **idempotent `created->paid`
+2. **Paytm confirm/callback** (`/api/payments/paytm/confirm` + `/paytm/callback`; the old
+   Razorpay-shaped `/api/payments/webhook` + `lib/payments/provider.ts` were DELETED
+   2026-07-03) — neither trusts the client/popup result: both re-confirm
+   **server-to-server** via Paytm's Order Status API (`transactionStatus`), then validate
+   against the persisted order and grant only on an **idempotent `created->paid`
    transition**, so a replayed delivery can't double-grant. Fails CLOSED at every step.
 3. **`lib/payments/fulfill.ts`** (the old internally-signed verify+fulfill) is now
    **dev-simulator-only** — used solely by `mock-pay` (404 in prod). It must never back the
    real webhook again.
 
-**Files:** new `lib/payments/provider.ts` (real-secret verify), new `lib/server/orders.ts`
-(order store), rewritten `webhook/route.ts`, `checkout/route.ts` (persists order),
-`fulfill.ts` (scoped to dev), `.env.example` (payment vars).
+**Files (current):** `lib/payments/paytm.ts` (initiate + Order Status), `lib/server/orders.ts`
+(order store), `paytm/confirm/route.ts` + `paytm/callback/route.ts`, `checkout/route.ts`
+(persists order + initiates Paytm txn), `fulfill.ts` (scoped to dev), `.env.example`.
 
 **✅ Engine order store — BUILT + DEPLOYED + VERIFIED (2026-06-25, commit `8dd205a`):**
 the three token-guarded routes the order store calls now exist in `engine/handler.mjs`
@@ -385,16 +394,16 @@ the three token-guarded routes the order store calls now exist in `engine/handle
 
 Verified live 6/6: create→get(created)→paid(true)→replay(false)→paid keeps the 1st
 paymentId→unknown order returns null. **Remaining before `PAYMENTS_LIVE=1` is now ONLY
-config/provider:** a real Razorpay/Paytm account + `RAZORPAY_WEBHOOK_SECRET` Worker secret
-+ the real provider adapter in `lib/payments/provider.ts` (untested vs live events). The
-whole server-side trust path is code-complete.
+config:** Paytm merchant approval → flip `PAYTM_ENV` to production + set the production
+merchant-key secret, then run the e2e verification. The whole server-side trust path is
+code-complete (Paytm adapter: `lib/payments/paytm.ts`).
 
 **Verified (curl replay, dev, `PAYMENTS_LIVE=1`):**
 - unauthenticated checkout `{plan:monthly,userId:attacker}` -> **401** (can't even mint a token)
-- replay a mock-secret-signed checkout payload to the webhook -> **400 `invalid signature`**
-  (with `RAZORPAY_WEBHOOK_SECRET` both unset AND set — the mock secret can't forge it)
-- a correctly provider-signed event with no matching order -> **400 `unknown order`** (fails closed)
-- tampered provider signature -> **400 `invalid signature`**
+- replay a mock-secret-signed checkout payload to the (since-deleted) webhook -> **400**
+  (historical test of the old route; the route was removed 2026-07-03)
+- Paytm path: confirm/callback never trust the posted result — they re-query Paytm's Order
+  Status API server-to-server, so a forged "success" post can't grant
 
 ---
 
@@ -541,15 +550,12 @@ Engine logs: CloudWatch `/aws/lambda/ShieldSyncEngine` (assume into 750 first).
   `node engine/try-provision.mjs <NNN>` vends a sandbox (create + bootstrap
   `LabExec`/`LabUser` + $10/mo budget + register in pool). The free-pool cap scales with
   the pool. **Then flip `FREE_POOL_PCT` back to ~0.3 once paid is live.**
-- **Razorpay / paid tier (deferred, ~1 mo, blocked on GST):** mock-pay is OFF in prod,
-  so **only the free lab is a working purchasable product right now**. Paid labs need a
-  live payment path before they're sellable. The wait-room "skip the line" upsell is
-  intentionally not wired until then (it would dead-end). The webhook **trust model is
-  already hardened** (section 6d) — but before `PAYMENTS_LIVE=1`, three things must land:
-  (1) the engine `/orders` endpoints + `ShieldSyncLabOrders` table (6d), (2) a real Razorpay
-  account + `RAZORPAY_WEBHOOK_SECRET` set as a Worker secret, (3) a real Razorpay adapter in
-  `lib/payments/provider.ts` (the current parser targets the Razorpay event shape but is
-  untested against live events). Do NOT set `PAYMENTS_LIVE=1` until all three are done.
+- **Paytm / paid tier (awaiting merchant approval, expected days):** mock-pay is OFF in
+  prod, so **only the free lab is a working purchasable product right now**. The full Paytm
+  path (JS Checkout + server-to-server confirm/callback + engine `/orders`) is BUILT and the
+  trust model hardened (6d). Before `PAYMENTS_LIVE=1`: flip `PAYTM_ENV`→production, set the
+  production merchant-key secret, run the e2e verification, do the pre-live security batch,
+  and revert `FREE_POOL_PCT` to ~0.3. (Razorpay was dropped 2026-07-03 — owner decision.)
 - **Cognito Google attribute mapping is mis-wired but INERT — do NOT "fix" casually:**
   `family_name <- given_name`, `given_name`/`email_verified` unmapped. It's load-bearing
   (keeps the required `family_name` populated for federated creation, which happens

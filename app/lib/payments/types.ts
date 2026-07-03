@@ -1,6 +1,6 @@
-// Payment domain types. The simulated gateway mirrors the real Razorpay/Stripe
-// shape (server creates an order, a signed webhook confirms payment) so swapping
-// in a real provider later is mostly an adapter change.
+// Payment domain types. The simulated gateway mirrors the real provider shape
+// (server creates an order, a server-verified confirmation grants access) —
+// the live provider is Paytm (lib/payments/paytm.ts).
 
 export type Plan = "per-lab" | "monthly";
 export type Currency = "INR" | "USD";

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { verifyAndFulfill } from "@/lib/payments/fulfill";
 
 // THE SIMULATED GATEWAY. This route does NOT exist in production — there,
-// Razorpay/Stripe calls /api/payments/webhook.
+// Paytm confirms via /api/payments/paytm/confirm + /paytm/callback.
 // The client sends back the signedPayload + signature it received from /checkout,
 // along with the payment outcome. We run the exact same verify+fulfill path.
 //

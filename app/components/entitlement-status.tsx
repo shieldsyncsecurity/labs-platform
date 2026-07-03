@@ -4,7 +4,7 @@ import { entitlementTypeOf } from "@/lib/server/store";
 // Compact one-line status pill rendered above the lab title. Only renders for
 // PAY_PER_LAB (launch cap + 7-day window) and ACTIVE SUBSCRIPTION rows; LIFETIME
 // and "no entitlement" return null so the page looks exactly like today.
-type Props = { entitlement: Entitlement | null };
+type Props = { entitlement: Entitlement | null; labSlug?: string };
 
 function fmt(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -13,7 +13,7 @@ function fmt(iso: string | null | undefined): string {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-export function EntitlementStatus({ entitlement }: Props) {
+export function EntitlementStatus({ entitlement, labSlug }: Props) {
   if (!entitlement) return null;
   const type = entitlementTypeOf(entitlement);
 
@@ -28,13 +28,17 @@ export function EntitlementStatus({ entitlement }: Props) {
     const exhausted = used >= max;
 
     if (expired || exhausted) {
+      // PAY_PER_LAB entitlements are lab-specific, so send them back to that lab's
+      // page (its panel offers "Get this lab" → CheckoutSheet) rather than a
+      // "/checkout" route that doesn't exist. No labSlug → fall back to the catalog.
+      const repurchaseHref = labSlug ? `/labs/${labSlug}` : "/";
       return (
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-line bg-canvas px-3 py-1.5 text-sm text-ink-soft">
           <strong className="text-ink">
             {expired ? "Your 7-day window has ended" : "All launches used"}
           </strong>
           <span aria-hidden className="text-muted/40">·</span>
-          <a href="/checkout" className="font-semibold text-brand hover:underline">
+          <a href={repurchaseHref} className="font-semibold text-brand hover:underline">
             Re-purchase to continue practising →
           </a>
         </div>
