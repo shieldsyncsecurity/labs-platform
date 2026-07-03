@@ -39,6 +39,13 @@ Real money, smallest amount — use the ₹99 per-lab plan, then refund from the
 - [ ] **Payments-off regression**: N/A after live, but confirm `/api/payments/mock-pay` → 404 in prod.
 - [ ] Watch Worker logs + engine CloudWatch for errors during all of the above.
 
+## 4b. REVERT the temporary IAM ₹99 price (post-review)
+- [ ] The IAM lab was temporarily priced ₹99 (2026-07-03) so the "from ₹99" claim
+      mapped to a real lab during Paytm review. Once approved, revert to level pricing (₹249):
+      remove the `iam-privilege-escalation` entry from `AWS_LAB_PRICE_OVERRIDE` in
+      `shieldsync-website/lib/region.ts` AND from `PER_LAB_OVERRIDE` in
+      `labs-platform/app/lib/payments/pricing.ts`. (Or keep it as a launch promo — product call.)
+
 ## 5. Post-live config reverts + capacity (~15 min)
 - [ ] Revert `FREE_POOL_PCT` to ~0.3 (free tier stops hogging the pool now that paid is live).
 - [ ] Request **Lambda concurrency increase** on account 750 (currently 10) via Service Quotas.
