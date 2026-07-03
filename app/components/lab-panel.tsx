@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth/context";
-import { getLab, readyLabs } from "@/lib/labs";
+import { getLab, nextLab } from "@/lib/labs";
 import { rulesForLab } from "@/lib/access-rules";
 import { CheckoutSheet } from "@/components/checkout-sheet";
-import { useLabWorkspace } from "@/components/lab-workspace";
+import { useLabWorkspace, type ObjectiveStatus } from "@/components/lab-workspace";
 
 // Where "contact support" links go (the marketing contact page — WhatsApp + form).
 const SUPPORT_URL = "https://shieldsyncsecurity.com/contact";
@@ -15,7 +15,7 @@ const SUPPORT_URL = "https://shieldsyncsecurity.com/contact";
 
 const WIPE_LOG: { ms: number; text: string }[] = [
   { ms: 0,    text: "revoking learner console session…" },
-  { ms: 1300, text: "running full account wipe (aws-nuke)…" },
+  { ms: 1300, text: "running full account wipe…" },
   { ms: 3000, text: "scanning all resource types…" },
 ];
 
@@ -99,22 +99,6 @@ function fmtRetry(iso: string | null): { exact: string; rel: string } | null {
     `about ${Math.round(mins / 60 / 24)} day${Math.round(mins / 60 / 24) === 1 ? "" : "s"}`;
   return { exact, rel };
 }
-// Deterministic "what's next" pick for the done-card upsell: the next READY lab
-// after the current one in catalog order, wrapping around, skipping the current
-// slug. Pure catalog lookup — no grading/session/entitlement logic involved.
-// (If it's paid and payments are off, we still link to the lab page — its own
-// panel explains "Get this lab" / launch soon.)
-function nextLab(currentSlug: string) {
-  const labs = readyLabs();
-  if (labs.length <= 1) return null;
-  const i = labs.findIndex((l) => l.slug === currentSlug);
-  for (let step = 1; step <= labs.length; step++) {
-    const candidate = labs[(i + step) % labs.length];
-    if (candidate.slug !== currentSlug) return candidate;
-  }
-  return null;
-}
-
 const card = "rounded-2xl border border-line bg-surface p-5 shadow-sm";
 // Shared button styles — a branded gradient primary (premium feel, matches the
 // marketing site) + a quiet secondary. Presentational only.
@@ -239,7 +223,7 @@ function EndingCard() {
 
 export function LabPanel({ slug, objectives, ready }: { slug: string; objectives: Objective[]; ready: boolean }) {
   const { user, loading, hasAccess, refreshEntitlements } = useAuth();
-  const { setLaunched } = useLabWorkspace();
+  const { setLaunched, setObjectiveStatus, setGradePassed, sessionStartedAt, setSessionStartedAt } = useLabWorkspace();
   const key = `lab:${slug}`;
   const [showCheckout, setShowCheckout] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -365,6 +349,21 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     const s = session?.status;
     setLaunched(s === "leasing" || s === "active" || s === "ending");
   }, [session?.status, setLaunched]);
+
+  // Mirror the session-active moment into context as a client-observed timestamp
+  // (the server doesn't hand us a startedAt) — purely for the guide's "elapsed since
+  // verified" display on the completion card. Cleared when the session ends so a
+  // fresh lab run gets a fresh clock.
+  useEffect(() => {
+    const s = session?.status;
+    if (s === "active" && !sessionStartedAt) setSessionStartedAt(new Date().toISOString());
+    if (!s || s === "done" || s === "error") {
+      setSessionStartedAt(null);
+      setObjectiveStatus({});
+      setGradePassed(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.status]);
 
   // ── Real-time auto-grading ─────────────────────────────────────────────────
   // While the lab is live, quietly re-score the account every ~25s so the
@@ -558,8 +557,22 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         body: JSON.stringify({ sessionId }),
       });
       if (r.ok) {
-        setGrade(await r.json());
+        const g = await r.json();
+        setGrade(g);
         lastGradedAtRef.current = Date.now();
+        // Mirror the result into shared context — read-only broadcast for the guide
+        // (step-verification + completion card). Does not affect grading itself.
+        if (g?.gradable && Array.isArray(g.criteria)) {
+          setObjectiveStatus(
+            Object.fromEntries(
+              g.criteria.map((c: { id: string; passed: boolean; unknown?: boolean }) => [
+                c.id,
+                c.unknown ? "unknown" : c.passed ? "pass" : "fail",
+              ])
+            )
+          );
+          setGradePassed(!!g.passed);
+        }
       } else if (!silent) {
         setGrade(null); // manual check surfaces failure; auto keeps the prior grade
       }
@@ -573,6 +586,23 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   }
 
   const checkWork = () => runGrade({ silent: false });
+
+  // Dev-only preview hatch (paired with lab-workspace.tsx's ?ssgrade parsing): once
+  // that hatch has seeded objectiveStatus from the URL, decide whether it covered
+  // ALL of this lab's objectives — if so, flip gradePassed too, so the completion
+  // card is reachable without a live grade. Needs `objectives` (this component's
+  // prop) to know the lab's full objective set, so it's computed here rather than
+  // in lab-workspace.tsx (which is deliberately lab-agnostic).
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    try {
+      const raw = new URLSearchParams(window.location.search).get("ssgrade");
+      if (!raw) return;
+      const ids = new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+      if (objectives.length > 0 && objectives.every((o) => ids.has(o.id))) setGradePassed(true);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Read the wizard's ?intent=launch handoff once (client-only → no hydration mismatch).
   useEffect(() => {
@@ -841,7 +871,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     return (
       <div className={card} role="status" aria-live="polite">
         <p className="text-base font-extrabold text-ink">⏹ Lab ended</p>
-        <p className="mt-1 text-base text-ink-soft">Your account was wiped clean and returned to the pool — nothing you did leaks to the next learner.</p>
+        <p className="mt-1 text-base text-ink-soft">Your account was wiped clean — nothing you did persists anywhere.</p>
         {/* The IAM revoke kills the federated AWS API session, but the BROWSER
             tab can still look normal until the user clicks something. If they
             opened the console via Copy-URL into an incognito window, our app

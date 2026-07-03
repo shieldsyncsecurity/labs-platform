@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+# TODO: one-paragraph description in the same style as the two live labs:
+#   - what's deliberately misconfigured / vulnerable, and why
+#   - which resources are involved
+#   - confirm: region-agnostic, us-east-1 default, near-zero cost
+#   - confirm: every taggable resource carries ShieldSyncLab=<slug>;
+#     DeletionPolicy: Delete on everything; outputs feed the Session Engine
+# See labs-platform/LAB-FACTORY.md §1 and §6 step 1 before writing this.
+Description: >-
+  ShieldSync Lab - TODO-slug (TODO-level, TODO free/paid).
+  TODO: describe the deliberately misconfigured environment.
+
+Parameters:
+  LabSlug:
+    Type: String
+    Default: TODO-slug  # MUST equal this lab's directory name under labs-platform/labs/
+    Description: Tag value stamped on every resource so aws-nuke can target the lab.
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # TODO 1) First deliberately-flawed resource.
+  #   Naming: prefix with sslab-<purpose>-${AWS::AccountId} for S3, or
+  #           Path: /lab/ for IAM users/roles the learner interacts with
+  #           (the /lab/ path is what learnerPolicy.json scopes IAM actions to —
+  #           see labs-platform/labs/_template/learnerPolicy.json).
+  #   Every resource needs:
+  #     DeletionPolicy: Delete
+  #     UpdateReplacePolicy: Delete   (if the resource type supports replacement)
+  #     Tags: [{Key: ShieldSyncLab, Value: !Ref LabSlug}]   (if the type supports tags —
+  #       IAM::ManagedPolicy and IAM::AccessKey do NOT; aws-nuke falls back to
+  #       name/path-prefix targeting for those, with the account-level nuke as backstop)
+  # ---------------------------------------------------------------------------
+  # ExampleFlawedResource:
+  #   Type: AWS::S3::Bucket
+  #   DeletionPolicy: Delete
+  #   UpdateReplacePolicy: Delete
+  #   Properties:
+  #     BucketName: !Sub "sslab-TODO-${AWS::AccountId}"
+  #     Tags:
+  #       - Key: ShieldSyncLab
+  #         Value: !Ref LabSlug
+
+  # ---------------------------------------------------------------------------
+  # TODO 2) If your scenario needs a seeded state (fake data in a bucket, a
+  #   pre-existing object, etc.), you need a custom-resource Lambda that:
+  #     - on CREATE: writes the seed data
+  #     - on DELETE: EMPTIES anything it wrote, so DeletionPolicy: Delete can
+  #       actually delete the parent resource (a non-empty S3 bucket will not
+  #       delete, and the stack teardown will wedge — see LAB-FACTORY.md §1).
+  #   Copy the SeederRole / SeederFunction / SeedData pattern from
+  #   labs-platform/labs/s3-misconfiguration-audit/template.yaml wholesale and
+  #   adapt the SEED dict + Buckets property.
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  # TODO 3) If your scenario needs a learner-facing IAM identity (an "attacker"
+  #   seat with leaked keys, or an over-privileged service account the learner
+  #   must lock down), model it on OverPrivilegedUser (S3 lab) or
+  #   PipelineDeployer + DeployerPolicy + DeployerAccessKey (IAM lab).
+  #   Remember: IAM::ManagedPolicy and IAM::AccessKey don't support Tags.
+  # ---------------------------------------------------------------------------
+
+Outputs:
+  # TODO: one Output per real resource name/value the instructions.md
+  # placeholders need to reference (the engine collects these but nothing
+  # auto-injects them into instructions.md today — see LAB-FACTORY.md §1
+  # "Outputs" bullet — so instructions.md should present them as a
+  # refcard/table the same way both live labs do).
+  # ExampleResourceName:
+  #   Description: TODO
+  #   Value: !Ref ExampleFlawedResource
+  Region:
+    Value: !Ref AWS::Region

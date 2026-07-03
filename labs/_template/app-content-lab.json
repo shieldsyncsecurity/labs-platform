@@ -1,0 +1,34 @@
+{
+  "_README": "This is the skeleton for the SECOND, separate lab.json copy: labs-platform/app/content/labs/<slug>/lab.json (NOT this labs-platform/labs/_template/ folder — copy this file's content there and delete this _README key, it isn't part of the real schema). See LAB-FACTORY.md sections 1 and 5 (H11) for why this file exists as a duplicate of ../<slug>/lab.json instead of being generated from it. Keep every overlapping field IDENTICAL to the engine-side lab.json in labs-platform/labs/<slug>/lab.json — this copy additionally feeds app/scripts/build-lab-content.mjs, which is what actually generates lib/lab-catalog.ts and lib/lab-content.ts (the files the app renders from). This copy does NOT include learnerPolicy — that field is only ever read from the engine-side copy.",
+
+  "slug": "TODO-slug",
+  "title": "TODO Title Case Lab Name",
+  "level": "TODO-Beginner-or-Intermediate-or-Advanced",
+  "free": false,
+  "track": "aws",
+  "tags": ["TODO", "TODO", "TODO"],
+  "estimatedActiveMinutes": 30,
+  "accessWindowHours": 24,
+  "idleAutoStopMinutes": 30,
+
+  "summary": "TODO — must match the engine-side lab.json's summary verbatim (it's shown in two places: the app catalog card and, mirrored again, the marketing site's AWS_LABS entry).",
+
+  "learningObjectives": [
+    "TODO — should match the engine-side copy."
+  ],
+
+  "successCriteria": [
+    {
+      "id": "TODO-criterion-id",
+      "description": "TODO — this exact array (id/description) becomes labObjectives[slug] via build-lab-content.mjs, which is what the learner's objectives checklist (LabPanel) renders. The `verify` field, if present, is dropped by the generator — it's not needed here (it's documentation for the grader author, keep it in the engine-side copy).",
+      "verify": "TODO — optional here; the generator only pulls id + description."
+    }
+  ],
+
+  "hints": [
+    "TODO — should match the engine-side copy."
+  ],
+
+  "estimatedAwsCostInr": 1,
+  "deploysToRegion": "us-east-1"
+}

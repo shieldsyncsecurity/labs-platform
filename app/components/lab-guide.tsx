@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth/context";
 import { useLabWorkspace } from "@/components/lab-workspace";
+import { getLab, nextLab } from "@/lib/labs";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -200,6 +201,14 @@ function splitGuide(md: string): { overview: string; walkthrough: string } {
 // extractStepTitles uses the same shape) — keep in sync.
 const STEP_HEADING_RE = /^##\s+Step\s+\d+\s*[—–-]\s*(.+?)\s*$/gm;
 
+// Content convention: an HTML comment on the line immediately after a step heading
+// maps that step to one or more opaque objective ids (comma-separated), e.g.:
+//   ## Step 2 — Shut the public access
+//   <!-- ss:obj=block-public-access -->
+// Steps without a marker have no grade affordance. Fully product-line-agnostic —
+// this file never interprets what an id "means".
+const STEP_OBJ_MARKER_RE = /^[ \t]*<!--\s*ss:obj=([^>]+?)\s*-->[ \t]*\n?/m;
+
 /**
  * Break the raw walkthrough markdown into per-step chunks, one per "## Step N —
  * Title" heading (heading line included, so downstream rendering — refcards, track
@@ -207,22 +216,34 @@ const STEP_HEADING_RE = /^##\s+Step\s+\d+\s*[—–-]\s*(.+?)\s*$/gm;
  * here; the caller (LabGuide) surfaces it separately via `leadInOf` and folds it
  * into the Overview segment. If there are no step headings at all, the whole
  * markdown is returned as a single untitled chunk (defensive fallback).
+ * Also parses (and strips from `body`) an optional `ss:obj=` marker comment on the
+ * line right after the heading — see STEP_OBJ_MARKER_RE.
  */
-function splitWalkthroughIntoSteps(md: string): { title: string; body: string }[] {
+function splitWalkthroughIntoSteps(md: string): { title: string; body: string; objectiveIds: string[] }[] {
   const re = /^##\s+Step\s+\d+\s*[—–-]\s*(.+?)\s*$/gm;
   const matches: { index: number; title: string }[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(md)) !== null) matches.push({ index: m.index, title: m[1].trim() });
 
+  const parseChunk = (title: string, raw: string): { title: string; body: string; objectiveIds: string[] } => {
+    const headingEnd = raw.indexOf("\n") + 1 || raw.length;
+    const rest = raw.slice(headingEnd);
+    const marker = rest.match(STEP_OBJ_MARKER_RE);
+    if (!marker) return { title, body: raw, objectiveIds: [] };
+    const objectiveIds = marker[1].split(",").map((s) => s.trim()).filter(Boolean);
+    const body = raw.slice(0, headingEnd) + rest.slice(marker[0].length);
+    return { title, body, objectiveIds };
+  };
+
   if (matches.length === 0) {
-    return md.trim() ? [{ title: "", body: md }] : [];
+    return md.trim() ? [parseChunk("", md)] : [];
   }
 
-  const out: { title: string; body: string }[] = [];
+  const out: { title: string; body: string; objectiveIds: string[] }[] = [];
   for (let i = 0; i < matches.length; i++) {
     const start = matches[i].index;
     const end = i + 1 < matches.length ? matches[i + 1].index : md.length;
-    out.push({ title: matches[i].title, body: md.slice(start, end) });
+    out.push(parseChunk(matches[i].title, md.slice(start, end)));
   }
   return out;
 }
@@ -340,17 +361,24 @@ function goToCheckWork() {
 
 const btnNext =
   "inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-brand to-cyan px-5 py-2.5 text-sm font-bold text-white shadow-sm shadow-brand/20 transition hover:brightness-110 disabled:opacity-50";
+// Verified next-step prompt (#6): same shape as btnNext, green treatment — a step
+// whose mapped objectives are ALL "pass".
+const btnNextVerified =
+  "inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-5 py-2.5 text-sm font-bold text-white shadow-sm shadow-emerald-500/20 transition hover:brightness-110 disabled:opacity-50";
 const btnBack =
   "inline-flex items-center justify-center gap-1.5 rounded-xl border border-line-strong px-5 py-2.5 text-sm font-semibold text-ink transition hover:bg-canvas disabled:opacity-50";
 
 // Thin brand progress bar — "Step N of M" (or "Overview") + a filled track.
 // Shared by the desktop rail (under its divider) and the mobile header band.
-function StepProgress({ step, total }: { step: number; total: number }) {
+// `fixedSummary` (orientation strip, #2): "X of Y fixed" — shown next to the step
+// readout, one short segment, only when a session is active and grading data exists.
+function StepProgress({ step, total, fixedSummary }: { step: number; total: number; fixedSummary?: string | null }) {
   const pct = total > 0 ? Math.round((step / total) * 100) : 0;
   return (
     <div>
-      <p className="font-mono text-xs font-semibold text-muted">
-        {step === 0 ? "Overview" : `Step ${step} of ${total}`}
+      <p className="flex items-center justify-between gap-2 font-mono text-xs font-semibold text-muted">
+        <span>{step === 0 ? "Overview" : `Step ${step} of ${total}`}</span>
+        {fixedSummary && <span className="text-emerald-700">{fixedSummary}</span>}
       </p>
       <div className="ss-bar-track mt-1.5" aria-hidden>
         <div className="h-full rounded-full bg-brand transition-all duration-300" style={{ width: `${pct}%` }} />
@@ -362,20 +390,29 @@ function StepProgress({ step, total }: { step: number; total: number }) {
 // Desktop (lg+) sticky left rail: Overview + every step, with done/current/upcoming
 // states, plus a progress readout under a divider at the bottom. Replaces the old
 // select dropdown on wide viewports — jumping uses the same `goTo`/onJump as before.
+// `verified` (1-based step numbers whose mapped objectives are ALL "pass") layers a
+// distinct emerald treatment on top of done/current — a live-graded confirmation,
+// not just "you scrolled past it".
 function StepRail({
   step,
   total,
   titles,
+  verified,
+  fixedSummary,
   onJump,
 }: {
   step: number; // 0 = Overview
   total: number;
   titles: string[];
+  verified: Set<number>;
+  fixedSummary?: string | null;
   onJump: (i: number) => void;
 }) {
-  const itemClass = (state: "done" | "current" | "upcoming") =>
+  const itemClass = (state: "done" | "current" | "upcoming", isVerified: boolean) =>
     `flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition ${
-      state === "current"
+      isVerified
+        ? "bg-emerald-50 font-semibold text-emerald-700 hover:bg-emerald-100"
+        : state === "current"
         ? "bg-brand/10 font-semibold text-brand"
         : state === "done"
         ? "font-medium text-green-600 hover:bg-canvas"
@@ -383,7 +420,7 @@ function StepRail({
     }`;
   return (
     <nav className="hidden lg:sticky lg:top-[4.5rem] lg:block lg:max-h-[var(--ss-workspace-h)] lg:overflow-y-auto lg:overscroll-contain" aria-label="Lab steps">
-      <button type="button" onClick={() => onJump(0)} className={itemClass(step === 0 ? "current" : "done")}>
+      <button type="button" onClick={() => onJump(0)} className={itemClass(step === 0 ? "current" : "done", false)}>
         {step === 0 ? (
           <span className="h-4 w-4 flex-none rounded-full border-2 border-brand" aria-hidden />
         ) : (
@@ -397,10 +434,15 @@ function StepRail({
         {titles.map((t, i) => {
           const n = i + 1;
           const state = n < step ? "done" : n === step ? "current" : "upcoming";
+          const isVerified = verified.has(n);
           return (
             <li key={i}>
-              <button type="button" onClick={() => onJump(n)} className={itemClass(state)}>
-                {state === "done" ? (
+              <button type="button" onClick={() => onJump(n)} className={itemClass(state, isVerified)}>
+                {isVerified ? (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-emerald-600" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                ) : state === "done" ? (
                   <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-green-600" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="M20 6 9 17l-5-5" />
                   </svg>
@@ -416,7 +458,7 @@ function StepRail({
         })}
       </ul>
       <div className="mt-3 border-t border-line pt-3">
-        <StepProgress step={step} total={total} />
+        <StepProgress step={step} total={total} fixedSummary={fixedSummary} />
       </div>
     </nav>
   );
@@ -428,16 +470,22 @@ function StepChips({
   step,
   total,
   titles,
+  verified,
+  fixedSummary,
   onJump,
 }: {
   step: number;
   total: number;
   titles: string[];
+  verified: Set<number>;
+  fixedSummary?: string | null;
   onJump: (i: number) => void;
 }) {
-  const chipClass = (state: "done" | "current" | "upcoming") =>
+  const chipClass = (state: "done" | "current" | "upcoming", isVerified: boolean) =>
     `flex-none whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-      state === "current"
+      isVerified
+        ? "bg-emerald-100 text-emerald-700"
+        : state === "current"
         ? "bg-brand text-white"
         : state === "done"
         ? "bg-brand/10 text-brand"
@@ -446,22 +494,23 @@ function StepChips({
   return (
     <div className="lg:hidden">
       <div className="flex gap-1.5 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <button type="button" onClick={() => onJump(0)} className={chipClass(step === 0 ? "current" : "done")}>
+        <button type="button" onClick={() => onJump(0)} className={chipClass(step === 0 ? "current" : "done", false)}>
           Overview
         </button>
         {titles.map((t, i) => {
           const n = i + 1;
           const state = n < step ? "done" : n === step ? "current" : "upcoming";
+          const isVerified = verified.has(n);
           void t;
           return (
-            <button key={i} type="button" onClick={() => onJump(n)} className={chipClass(state)}>
-              {state === "done" ? "✓ " : ""}Step {n}
+            <button key={i} type="button" onClick={() => onJump(n)} className={chipClass(state, isVerified)}>
+              {isVerified ? "✓ " : state === "done" ? "✓ " : ""}Step {n}
             </button>
           );
         })}
       </div>
       <div className="mt-2">
-        <StepProgress step={step} total={total} />
+        <StepProgress step={step} total={total} fixedSummary={fixedSummary} />
       </div>
     </div>
   );
@@ -490,6 +539,81 @@ function StepHeaderBand({
   );
 }
 
+// Elapsed time since `sessionStartedAt`, mm format, rounded to the nearest minute
+// (never shown as "0m" — floors at 1m once any time has passed so it doesn't read
+// as broken). Returns null until we have both timestamps.
+function elapsedMinutes(startedAt: string | null): number | null {
+  if (!startedAt) return null;
+  const start = new Date(startedAt).getTime();
+  if (Number.isNaN(start)) return null;
+  const ms = Date.now() - start;
+  return Math.max(ms > 0 ? 1 : 0, Math.round(ms / 60000));
+}
+
+// Completion moment (#3): rendered at the TOP of the step-content region once
+// gradePassed flips true. Session-scoped dismissal — a plain useState in the
+// parent is enough since this never needs to persist across reloads.
+function CompletionCard({
+  objectiveCount,
+  sessionStartedAt,
+  slug,
+  onDismiss,
+}: {
+  objectiveCount: number;
+  sessionStartedAt: string | null;
+  slug: string;
+  onDismiss: () => void;
+}) {
+  const lab = getLab(slug);
+  const next = nextLab(slug);
+  const mins = elapsedMinutes(sessionStartedAt);
+  return (
+    <div className="not-prose mb-5 overflow-hidden rounded-2xl border border-emerald-300/70 bg-emerald-50/60 shadow-sm">
+      <div className="flex items-start justify-between gap-3 px-5 py-4">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-full bg-emerald-500 text-white" aria-hidden>
+            <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          </span>
+          <div>
+            <p className="text-base font-extrabold text-emerald-800">
+              All {objectiveCount} fix{objectiveCount === 1 ? "" : "es"} verified
+            </p>
+            {mins != null && (
+              <p className="mt-0.5 text-sm text-emerald-700">Done in {mins}m — nice work.</p>
+            )}
+            {lab && lab.tags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {lab.tags.map((t) => (
+                  <span key={t} className="rounded-md border border-emerald-300 bg-white px-2 py-0.5 font-mono text-xs text-emerald-700">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            )}
+            {next && (
+              <Link href={`/labs/${next.slug}`} className="mt-3 inline-block text-sm font-semibold text-emerald-800 hover:underline">
+                Keep going: {next.title} →
+              </Link>
+            )}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          className="flex-none rounded-md p-1 text-emerald-700/60 hover:bg-emerald-100 hover:text-emerald-800"
+        >
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function LabGuide({
   slug,
   instructions,
@@ -504,10 +628,11 @@ export function LabGuide({
   stepTitles?: string[];
 }) {
   const { user, hasAccess, loading } = useAuth();
-  const { launched } = useLabWorkspace();
+  const { launched, objectiveStatus, gradePassed, sessionStartedAt } = useLabWorkspace();
   const [track, setTrack] = useState<Track>("console"); // default to point-and-click (beginner-friendly)
   const [remoteWt, setRemoteWt] = useState<string | null>(null); // gated walkthrough, once fetched
   const [stepIndex, setStepIndex] = useState(0); // 0 = Overview, 1..M = steps
+  const [completionDismissed, setCompletionDismissed] = useState(false); // session-scoped (#3)
   const articleRef = useRef<HTMLElement | null>(null);
   const restoredRef = useRef(false);
 
@@ -577,6 +702,37 @@ export function LabGuide({
     () => stepChunks.some((c) => splitTracks(c.body).some((s) => s.kind === "console" || s.kind === "cli")),
     [stepChunks]
   );
+
+  // Step ↔ objective live verification (#1): a step is "verified" once ALL of its
+  // mapped objective ids read "pass" in the mirrored grade context. Steps with no
+  // marker (objectiveIds.length === 0) are never verified — unchanged/no affordance.
+  const hasGradeData = Object.keys(objectiveStatus).length > 0;
+  const verifiedSteps = useMemo(() => {
+    const set = new Set<number>();
+    if (!hasGradeData) return set;
+    stepChunks.forEach((c, i) => {
+      if (c.objectiveIds.length > 0 && c.objectiveIds.every((id) => objectiveStatus[id] === "pass")) {
+        set.add(i + 1);
+      }
+    });
+    return set;
+  }, [stepChunks, objectiveStatus, hasGradeData]);
+
+  // Orientation strip (#2): "X of Y fixed" — Y = every objective id referenced by
+  // ANY step marker in this lab (the mechanism doesn't know the lab's full objective
+  // list otherwise; it only sees what's mapped in content). Only shown once grading
+  // data exists.
+  const fixedSummary = useMemo(() => {
+    if (!hasGradeData) return null;
+    const allIds = new Set<string>();
+    stepChunks.forEach((c) => c.objectiveIds.forEach((id) => allIds.add(id)));
+    if (allIds.size === 0) return null;
+    const passed = [...allIds].filter((id) => objectiveStatus[id] === "pass").length;
+    return `${passed} of ${allIds.size} fixed`;
+  }, [stepChunks, objectiveStatus, hasGradeData]);
+
+  // Current step's mapped objectives all "pass" → the verified next-step prompt (#6).
+  const currentStepVerified = stepIndex > 0 && verifiedSteps.has(stepIndex);
 
   // Launch-gate step preview: prefer server-provided titles (so the preview works even
   // when the walkthrough body is gated), else derive from a local walkthrough.
@@ -666,7 +822,14 @@ export function LabGuide({
         }
       >
         {showPlayer && (
-          <StepRail step={stepIndex} total={totalSteps} titles={headerTitles} onJump={goToStep} />
+          <StepRail
+            step={stepIndex}
+            total={totalSteps}
+            titles={headerTitles}
+            verified={verifiedSteps}
+            fixedSummary={fixedSummary}
+            onJump={goToStep}
+          />
         )}
         <article
           ref={articleRef}
@@ -694,7 +857,14 @@ export function LabGuide({
                   onPickTrack={pick}
                 />
                 <div className="lg:hidden px-5 pt-3">
-                  <StepChips step={stepIndex} total={totalSteps} titles={headerTitles} onJump={goToStep} />
+                  <StepChips
+                    step={stepIndex}
+                    total={totalSteps}
+                    titles={headerTitles}
+                    verified={verifiedSteps}
+                    fixedSummary={fixedSummary}
+                    onJump={goToStep}
+                  />
                 </div>
               </div>
 
@@ -703,6 +873,16 @@ export function LabGuide({
                   reachable without moving the page. overscroll-contain stops a
                   scroll-to-end here from chaining into the page. */}
               <div className="ss-walkthrough px-5 py-4 focus:outline-none lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain" tabIndex={-1}>
+                {/* Completion moment (#3) — top of the step-content region, doesn't
+                    replace content. Session-scoped dismissal. */}
+                {gradePassed && !completionDismissed && (
+                  <CompletionCard
+                    objectiveCount={Object.keys(objectiveStatus).length}
+                    sessionStartedAt={sessionStartedAt}
+                    slug={slug}
+                    onDismiss={() => setCompletionDismissed(true)}
+                  />
+                )}
                 {stepIndex === 0 ? (
                   <>
                     {overviewRendered.overviewNodes}
@@ -728,8 +908,20 @@ export function LabGuide({
                   <button type="button" onClick={onBack} disabled={stepIndex === 0} className={btnBack}>
                     ← Back
                   </button>
-                  <button type="button" onClick={onNext} className={btnNext}>
-                    {isLastStep ? "Finish — check your work" : nextTitle ? `Next: ${nextTitle} →` : "Next →"}
+                  <button
+                    type="button"
+                    onClick={onNext}
+                    className={currentStepVerified ? btnNextVerified : btnNext}
+                  >
+                    {isLastStep
+                      ? "Finish — check your work"
+                      : currentStepVerified
+                      ? nextTitle
+                        ? `Verified — Next: ${nextTitle} →`
+                        : "Verified — Next →"
+                      : nextTitle
+                      ? `Next: ${nextTitle} →`
+                      : "Next →"}
                   </button>
                 </div>
               )}

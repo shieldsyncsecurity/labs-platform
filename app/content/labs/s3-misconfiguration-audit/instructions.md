@@ -13,7 +13,7 @@ You'll close **four real misconfigurations** — public buckets, missing encrypt
 <!-- ss:walkthrough -->
 
 :::refcard
-**Your environment** — the Session Engine fills in the real names.
+**Your environment** — the real resource names appear here once your lab is live.
 
 | Role | Name |
 |---|---|
@@ -61,6 +61,7 @@ curl -s "https://<data-bucket>.s3.amazonaws.com/customers.csv"   # you'll see th
 ```
 
 ## Step 2 — Shut the public access
+<!-- ss:obj=no-public-buckets -->
 
 Belt **and** braces: turn on **Block Public Access** at the **account** level (catches
 future mistakes too) and the **bucket** level, then remove the actual public grants.
@@ -115,6 +116,7 @@ aws s3api put-public-access-block --bucket <bucket> \
 Re-run the `curl` from Step 1 — it should now be **AccessDenied**. ✅
 
 ## Step 3 — Require encryption at rest
+<!-- ss:obj=encryption-required -->
 
 Turn on default encryption **and** add a bucket policy that *rejects* any unencrypted
 upload (the grader looks for the explicit **Deny**). Here you flip on default encryption;
@@ -144,6 +146,7 @@ The Deny statement (included in Step 4's combined policy):
 ```
 
 ## Step 4 — Require TLS (HTTPS) — and apply the combined policy
+<!-- ss:obj=encryption-required,tls-only -->
 
 One hardened bucket policy carries **both** the encryption-required and TLS-only denies.
 
@@ -173,6 +176,7 @@ aws s3api put-bucket-policy --bucket <bucket> --policy file://secure-policy.json
 ```
 
 ## Step 5 — Least-privilege the IAM user
+<!-- ss:obj=least-privilege-iam -->
 
 `auditor` should only read the two lab buckets — not `s3:*` on everything.
 
@@ -240,4 +244,4 @@ aws iam get-user-policy --user-name auditor --policy-name s3-read-lab-buckets   
 
 ## Cleanup
 
-Nothing to do — when your session ends the account is wiped (`aws-nuke`) and returned to the pool. There's no bill to worry about.
+Nothing to do — when your session ends, the entire account is automatically wiped clean. There's no bill to worry about.

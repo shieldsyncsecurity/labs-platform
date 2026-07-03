@@ -1,0 +1,38 @@
+{
+  "slug": "TODO-slug",
+  "title": "TODO Title Case Lab Name",
+  "level": "TODO-Beginner-or-Intermediate-or-Advanced",
+  "free": false,
+  "track": "aws",
+  "tags": ["TODO", "TODO", "TODO"],
+  "estimatedActiveMinutes": 30,
+  "accessWindowHours": 24,
+  "idleAutoStopMinutes": 30,
+
+  "summary": "TODO — one sentence, learner-facing, same tone as the two live labs (what's broken, what you'll do).",
+
+  "learningObjectives": [
+    "TODO — one bullet per skill the learner walks away with."
+  ],
+
+  "successCriteria": [
+    {
+      "id": "TODO-criterion-id",
+      "description": "TODO — human-readable, shown in the learner's objectives checklist.",
+      "verify": "TODO — PROSE description of the AWS API check (documentation only, NOT executed). The actual pass/fail logic lives in engine/graders.mjs's grade<YourLab>() function; this 'verify' string must describe the same check that function implements. See LAB-FACTORY.md section 2 — the grader is NOT data-driven from this field. This id MUST exactly match the id your grade<YourLab>() function returns."
+    }
+  ],
+
+  "hints": [
+    "TODO — 3-5 hints, ordered easiest-clue-first, matching the S3/IAM labs' style (a command to run, or the name of the exact console panel)."
+  ],
+
+  "_learnerPolicy": "LEAST-PRIVILEGE: bare IAM Statement[] applied as an STS SESSION POLICY on the learner's console (effective = ShieldSyncLabUser(admin) INTERSECT this INTERSECT SCP). The engine adds the Version envelope + a fixed control-plane guardrail-deny. Scope to exactly what THIS lab needs — anything not listed is denied. Keep minified under ~1000 chars bare (build gate; STS packs session policies so the effective ceiling is well under the nominal 2048). See learnerPolicy.json in this folder for an annotated skeleton of the Statement[] to paste in below — this file needs the SAME array, just without comments since this is real JSON.",
+  "learnerPolicy": [
+    { "Sid": "CloudShell", "Effect": "Allow", "Action": "cloudshell:*", "Resource": "*" },
+    { "Sid": "Identity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" }
+  ],
+
+  "estimatedAwsCostInr": 1,
+  "deploysToRegion": "us-east-1"
+}

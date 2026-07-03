@@ -9,7 +9,7 @@ Its access keys leaked. On paper it can barely do anything — but the policy hi
 flaw that lets it promote itself to **full administrator**. Your job: **prove the
 escalation, then close it** without breaking the user's legitimate function.
 
-The Session Engine gives you the leaked keys:
+You're handed the leaked keys when your lab goes live:
 
 | Output | Use |
 |---|---|
@@ -77,6 +77,7 @@ aws ssm get-parameter --name /shieldsync/lab/flag --profile attacker --query Par
 That flag is your proof the path is real. Now shut it.
 
 ## Step 4 — Remediate (use your admin console/CloudShell, NOT the attacker profile)
+<!-- ss:obj=admin-detached,escalation-primitive-removed,deployer-still-works -->
 
 Drop the `--profile attacker` from here on — remediate as your own admin identity.
 
@@ -127,4 +128,4 @@ or don't grant them at all — and use `simulate-principal-policy` in CI to catc
 
 ## Cleanup
 
-Nothing to do — the account is wiped (`aws-nuke`) and recycled when your session ends.
+Nothing to do — the entire account is automatically wiped clean when your session ends.

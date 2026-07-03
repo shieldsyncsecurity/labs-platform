@@ -1,0 +1,34 @@
+{
+  "_README": "This file is a WORKED-EXAMPLE / SCRATCHPAD for authoring learnerPolicy — it is NOT read by the engine. The real learnerPolicy lives INSIDE lab.json (the 'learnerPolicy' key, a bare Statement[] — no Version envelope, the engine adds that). Draft/edit the Statement[] here where JSON comments (via _comment keys) are easier to leave for reviewers, then copy the finished 'statements' array (minus this README/comment scaffolding) into lab.json's learnerPolicy field. See LAB-FACTORY.md section 3 for the full model.",
+
+  "_mechanics": [
+    "Passed as an STS AssumeRole session Policy when minting the learner's federated console (engine/labinfra.mjs mintConsoleUrl -> labLearnerPolicy).",
+    "Effective permissions = ShieldSyncLabUser role policy INTERSECT this policy INTERSECT account SCPs. The role itself stays broad/admin-ish; THIS is what scopes the session down to one lab.",
+    "The engine ALWAYS appends a fixed guardrailDeny (iam:*/sts:AssumeRole on ShieldSyncLab*/OrganizationAccountAccessRole roles, plus organizations:*/account:* deny) after your statements — you do not author this and cannot override it. Don't bother re-adding denies for those — they're already covered.",
+    "A lab with NO learnerPolicy (or an empty Statement[]) gets an UNSCOPED admin-within-SCP console at runtime (soft warning only) — but the BUILD gate (app/scripts/build-lab-content.mjs) hard-fails any 'ready' lab (has a template.yaml) missing a non-empty learnerPolicy in the ENGINE-side lab.json. Don't rely on the runtime warning; the build will already have stopped you."
+  ],
+
+  "_sizeConstraint": "Keep the bare (un-enveloped) JSON.stringify({Version:'2012-10-17', Statement: [...]}) length under ~1000 chars. The nominal STS session-policy limit is 2048 chars, but STS PACKS (compresses) session policies before applying them, and the PACKED size is the real ceiling — a ~1166-char bare doc has already blown the packed budget in practice. Prefer resource-scoped wildcards (e.g. 'arn:aws:s3:::sslab-*') over long enumerated Action lists to stay well under this.",
+
+  "_alwaysInclude": [
+    { "Sid": "CloudShell", "Effect": "Allow", "Action": "cloudshell:*", "Resource": "*", "_why": "Every lab's CLI track runs in CloudShell (the >_ icon in the AWS console top bar) — without this the learner can't open a terminal at all." },
+    { "Sid": "Identity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*", "_why": "How the learner (and your instructions.md CLI snippets) confirm who they are / discover their account id for ARN substitution." }
+  ],
+
+  "_scopingExamples": {
+    "_why": "Copy the Sid shape that matches your lab's resource types. Resource ARNs should use this platform's established naming/path conventions (see LAB-FACTORY.md section 1) so the scoping and the CFN template naming line up.",
+    "s3BucketsByPrefix": { "Sid": "S3LabBuckets", "Effect": "Allow", "Action": "s3:*", "Resource": ["arn:aws:s3:::sslab-*", "arn:aws:s3:::sslab-*/*"], "_why": "Prefix-scoped, not per-bucket-named, because bucket names carry an account-id suffix the author can't predict ahead of deploy." },
+    "s3AccountLevelSettings": { "Sid": "S3ListAndAccountBpa", "Effect": "Allow", "Action": ["s3:ListAllMyBuckets", "s3:GetAccountPublicAccessBlock", "s3:PutAccountPublicAccessBlock"], "Resource": "*", "_why": "Account-level Block Public Access is an account-scoped API (no bucket ARN target) — only grant the specific actions the lab needs, not s3:* on '*'." },
+    "iamLabPathUsers": { "Sid": "IamLabUser", "Effect": "Allow", "Action": "iam:*", "Resource": "arn:aws:iam::*:user/lab/*", "_why": "Scoped to the /lab/ path convention — every learner-facing IAM user/role in template.yaml MUST use Path: /lab/ for this to actually constrain anything." },
+    "iamLabPolicies": { "Sid": "IamLabPolicy", "Effect": "Allow", "Action": "iam:*", "Resource": "arn:aws:iam::*:policy/*", "_why": "Only needed if the lab has the learner editing a customer-managed policy directly (as in iam-privilege-escalation) — omit if not." },
+    "iamConsoleNav": { "Sid": "IamConsoleNav", "Effect": "Allow", "Action": ["iam:ListUsers", "iam:ListPolicies", "iam:SimulatePrincipalPolicy"], "Resource": "*", "_why": "Read-only list/simulate actions needed to even LOAD the IAM console pages or verify a fix — these can't be resource-scoped (IAM list APIs don't take a resource ARN), so keep this list to only the specific read actions actually needed, never a broad iam:List* or iam:Get*." },
+    "flagOrSecretParameter": { "Sid": "Flag", "Effect": "Allow", "Action": "ssm:GetParameter", "Resource": "arn:aws:ssm:*:*:parameter/shieldsync/lab/flag", "_why": "If your lab has a 'prove you escalated/exploited' flag (SSM Parameter, Secrets Manager, etc.), scope read access to that exact resource only." }
+  },
+
+  "_twoIdentityLabs": "If your lab has a separate 'attacker' seat with its own leaked credentials (minted by template.yaml, e.g. an IAM::AccessKey Output) rather than the learner's own console session, that identity's permissions are defined by ITS OWN policy resource in template.yaml (intentionally over-broad — that IS the vulnerability the lab teaches). Do NOT try to fold the attacker's permissions into this learnerPolicy — this file only scopes the learner's OWN console/CloudShell session (typically the defender/admin seat: remediate + verify + read the flag). See iam-privilege-escalation/lab.json's _learnerPolicy comment for the canonical example of this split.",
+
+  "statements": [
+    { "Sid": "CloudShell", "Effect": "Allow", "Action": "cloudshell:*", "Resource": "*" },
+    { "Sid": "Identity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" }
+  ]
+}
