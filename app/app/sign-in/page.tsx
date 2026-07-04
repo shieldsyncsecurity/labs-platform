@@ -104,8 +104,8 @@ export default function SignInPage() {
 
       {!COGNITO_ENABLED && (
         <p className="mt-6 text-sm text-muted">
-          Demo sign-in (offline). In production these route through Amazon Cognito — Google as a
-          built-in social provider, LinkedIn via OpenID Connect.
+          Demo sign-in (offline). In production, sign-in happens securely through Google or
+          LinkedIn — this demo skips that step.
         </p>
       )}
     </div>

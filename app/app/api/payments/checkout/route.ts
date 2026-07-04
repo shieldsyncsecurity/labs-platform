@@ -3,15 +3,16 @@ import { priceFor } from "@/lib/payments/pricing";
 import { getServerUser } from "@/lib/auth/session";
 import { getLab } from "@/lib/labs";
 import { createOrder } from "@/lib/server/orders";
-import { initiateTransaction, paytmConfig } from "@/lib/payments/paytm";
+import { initiateTransaction, paytmConfig, paymentsEnabled } from "@/lib/payments/paytm";
 import type { CheckoutRequest, Order } from "@/lib/payments/types";
 
 export async function POST(req: Request) {
   try {
     // Read at request time — Workers inject env per-request, module-level reads fire
-    // before the Worker env is fully populated and can evaluate to "".
-    const PAYMENTS_LIVE = process.env.PAYMENTS_LIVE === "1";
-    if (!PAYMENTS_LIVE) {
+    // before the Worker env is fully populated and can evaluate to "". Requires BOTH
+    // PAYMENTS_LIVE=1 and PAYTM_ENV=production, so a staging gateway can never be hit
+    // by a real user even if the master switch is flipped early.
+    if (!paymentsEnabled()) {
       return NextResponse.json({ error: "payments not available yet" }, { status: 503 });
     }
 

@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { getOrder, markOrderPaid } from "@/lib/server/orders";
-import { transactionStatus } from "@/lib/payments/paytm";
+import { transactionStatus, paymentsEnabled } from "@/lib/payments/paytm";
 
 // Paytm's redirect/callback target (used if the flow redirects instead of using the JS
 // popup). Paytm POSTs the result here — but we don't trust the posted body; we re-confirm
 // server-to-server via the Order Status API and grant only on a real TXN_SUCCESS (the
 // engine re-validates the amount against the persisted order). The grant goes to the
 // order's owner (from server state), so no user session is needed on this POST.
-const PAYMENTS_LIVE = process.env.PAYMENTS_LIVE === "1";
-
 export async function POST(req: Request) {
-  if (!PAYMENTS_LIVE) {
+  // Read at request time (Worker env isn't populated at module scope). Requires
+  // PAYMENTS_LIVE=1 AND PAYTM_ENV=production so staging can't confirm real users.
+  if (!paymentsEnabled()) {
     return new NextResponse("not found", { status: 404 });
   }
   const url = new URL(req.url);

@@ -34,6 +34,16 @@ export function paytmConfig(): PaytmConfig {
   };
 }
 
+// A real user must NEVER reach a live-looking checkout while Paytm still points at
+// staging. Payments are reachable only when the master switch is on AND the gateway
+// is production — so if PAYMENTS_LIVE=1 ever ships while PAYTM_ENV is still "staging"
+// (as it is pre-go-live), checkout/confirm/callback stay closed (503/404) instead of
+// taking a real payment method against a sandbox MID.
+export function paymentsEnabled(): boolean {
+  const env = (process.env.PAYTM_ENV ?? "staging").trim().toLowerCase();
+  return process.env.PAYMENTS_LIVE === "1" && env === "production";
+}
+
 // ── byte helpers ─────────────────────────────────────────────────────────────
 const enc = new TextEncoder();
 function bytesToB64(b: Uint8Array): string {

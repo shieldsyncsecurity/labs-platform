@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { getServerUser } from "@/lib/auth/session";
 import { getOrder, markOrderPaid } from "@/lib/server/orders";
-import { transactionStatus } from "@/lib/payments/paytm";
+import { transactionStatus, paymentsEnabled } from "@/lib/payments/paytm";
 
 // Server-AUTHORITATIVE payment confirmation. The browser's Paytm JS Checkout calls this
 // after the popup completes — but we do NOT trust the client's claim of success. We ask
 // Paytm directly (Order Status API) and only grant on a real TXN_SUCCESS. The engine then
 // re-validates the amount against the persisted order and grants idempotently.
-const PAYMENTS_LIVE = process.env.PAYMENTS_LIVE === "1";
-
 export async function POST(req: Request) {
-  if (!PAYMENTS_LIVE) {
+  // Read at request time (Worker env isn't populated at module scope). Requires
+  // PAYMENTS_LIVE=1 AND PAYTM_ENV=production so staging can't confirm real users.
+  if (!paymentsEnabled()) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   const user = await getServerUser();

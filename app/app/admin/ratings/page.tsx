@@ -59,7 +59,7 @@ export default async function AdminRatingsPage() {
         </p>
       ) : (
         <>
-          <div className="mt-6 overflow-hidden rounded-xl border border-line">
+          <div className="mt-6 overflow-x-auto rounded-xl border border-line">
             <table className="w-full text-left">
               <thead className="bg-canvas text-sm font-semibold text-ink-soft">
                 <tr>
