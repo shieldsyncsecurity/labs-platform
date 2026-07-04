@@ -8,12 +8,10 @@ const PER_LAB_INR: Record<LabLevel, number> = { Beginner: 9900, Intermediate: 24
 const PER_LAB_USD: Record<LabLevel, number> = { Beginner: 300, Intermediate: 500, Advanced: 700 };
 const MONTHLY: Record<Currency, number> = { INR: 200000, USD: 2500 };
 
-// TEMP (2026-07-03): per-lab price override — IAM marked ₹99 during Paytm merchant
-// review so the "from ₹99" claim maps to a real ₹99 lab (level price is ₹249).
-// REVERT after Paytm approval — see PAYTM-GOLIVE-RUNBOOK.md. amountMinor (paise/cents).
-const PER_LAB_OVERRIDE: Record<string, Record<Currency, number>> = {
-  "iam-privilege-escalation": { INR: 9900, USD: 300 },
-};
+// Optional per-lab price override (e.g. a launch promo). Empty = pure level
+// pricing. amountMinor (paise/cents). (Held the temporary IAM ₹99 during Paytm
+// review; reverted 2026-07-04.)
+const PER_LAB_OVERRIDE: Record<string, Record<Currency, number>> = {};
 
 export function priceFor(labSlug: string | null, plan: Plan, currency: Currency): number {
   if (plan === "monthly") return MONTHLY[currency];
