@@ -65,7 +65,10 @@ export function SiteHeader() {
           ) : (
             <Link
               href="/sign-in"
-              className="ml-1 rounded-lg bg-brand px-3 py-2 text-white hover:bg-brand-strong sm:ml-2 sm:px-4"
+              // Inline color: an unlayered `a { color: inherit }` in globals.css
+              // overrides the text-white utility on links, so set white directly.
+              style={{ color: "#ffffff" }}
+              className="ml-1 rounded-lg bg-gradient-to-r from-brand to-cyan px-3.5 py-2 font-bold shadow-sm transition hover:brightness-110 sm:ml-2 sm:px-4"
             >
               Sign in
             </Link>
