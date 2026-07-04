@@ -61,7 +61,7 @@ export default function CatalogPage() {
   };
 
   return (
-    <div className="mx-auto max-w-[1536px] px-4 py-10 sm:px-6 lg:px-10">
+    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-10">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(itemListSchema) }} />
       <Suspense><AutoCheckout /></Suspense>
 

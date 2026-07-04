@@ -1,14 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth/context";
+import { shellMaxWidth } from "@/lib/shell";
 
 export function SiteHeader() {
   const { user, loading, signOut } = useAuth();
+  const pathname = usePathname();
+  const shell = shellMaxWidth(pathname);
 
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-surface/90 backdrop-blur">
-      <div className="mx-auto flex max-w-[1536px] items-center justify-between gap-2 px-4 py-3.5 sm:px-6 lg:px-10">
+      <div className={`mx-auto flex ${shell} items-center justify-between gap-2 px-4 py-3.5 sm:px-6 lg:px-10`}>
         <Link href="/" className="flex shrink-0 items-center gap-2 font-extrabold text-ink">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
