@@ -5,6 +5,21 @@ import type { Lab } from "./labs";
 
 export const labCatalog: Lab[] = [
   {
+    "slug": "bedrock-prompt-injection",
+    "title": "Secure the Bedrock assistant (prompt injection & Guardrails)",
+    "level": "Beginner",
+    "free": true,
+    "ready": true,
+    "summary": "A Bedrock-backed support assistant leaks restricted internal notes to a simple prompt injection. Prove the leak, then fix it — attach a Guardrail, scope the invoke role, and turn on model-invocation logging.",
+    "tags": [
+      "Bedrock",
+      "GenAI",
+      "Guardrails",
+      "Prompt Injection"
+    ],
+    "estimatedActiveMinutes": 35
+  },
+  {
     "slug": "iam-privilege-escalation",
     "title": "IAM privilege escalation",
     "level": "Intermediate",
