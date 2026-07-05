@@ -15,7 +15,24 @@ import {
   GetUserPolicyCommand,
   GetPolicyCommand,
   GetPolicyVersionCommand,
+  GetRolePolicyCommand,
+  ListRolePoliciesCommand,
+  ListAttachedRolePoliciesCommand,
 } from "@aws-sdk/client-iam";
+// TODO/VERIFY (bedrock-prompt-injection, no live AWS access to confirm at authoring
+// time): @aws-sdk/client-bedrock is the CONTROL-PLANE client (Guardrails, model
+// invocation logging config) — distinct from @aws-sdk/client-bedrock-runtime (used
+// only by the lab's own Lambda to call Converse/InvokeModel, not by the grader).
+// This package is NOT currently in engine/package.json's dependencies — confirm it
+// gets added ("@aws-sdk/client-bedrock": "^3.700.0" or newer, matching the other
+// @aws-sdk/client-* pins) and that the Lambda bundling step includes it before this
+// grader can run for real. Command/shape names below match the documented Bedrock
+// control-plane API as of this writing but are UNVERIFIED against a live call.
+// @aws-sdk/client-bedrock is imported LAZILY inside gradeBedrockPromptInjection so
+// the engine Lambda still loads even if the control-plane client isn't in the
+// runtime bundle. The bedrock lab isn't `ready` yet, so this grader never runs in
+// prod — the dynamic import can't fail-at-load. Make it a top-level import again
+// once the client is confirmed bundled and the lab is live-tested.
 import { assumeInSandbox } from "./labinfra.mjs";
 
 const REGION = "us-east-1";
@@ -179,6 +196,151 @@ async function gradeIam(creds) {
   ];
 }
 
+// ── Bedrock prompt injection & Guardrails ────────────────────────────────────
+// TODO/VERIFY (no live AWS access at authoring time — flagged in the lab build
+// report): every SDK call shape below is written against the DOCUMENTED Bedrock
+// control-plane API, not confirmed against a live account. Before this lab flips
+// to launch-ready, deploy the stack, run through the fix, and re-grade to confirm:
+//   - ListGuardrailsCommand's response shape (guardrails[].id / .arn / .status)
+//   - GetGuardrailCommand's response shape (topicPolicy.topics[] vs
+//     topicPolicyConfig — the *Config suffix is the CREATE-request shape; the
+//     GET-response shape may differ, e.g. `topicPolicy` not `topicPolicyConfig`)
+//   - GetModelInvocationLoggingConfigurationCommand's response shape
+//     (loggingConfig.cloudWatchConfig / .s3Config vs a differently-nested field)
+// If ANY of these shapes are wrong, the try/catch below will surface it as a
+// non-absence error -> the criterion reports `unknown: true` (never a false
+// pass), so a shape mismatch fails safe, but should still be fixed before ready:true.
+const NOVA_LITE_ID = "amazon.nova-lite-v1:0";
+const ASSISTANT_ROLE_POLICY_NAME = "bedrock-over-broad-invoke";
+
+// Does this guardrail (from a GetGuardrail response) have a real denied-topic or
+// denied-content policy configured (not just an empty/default guardrail)?
+function guardrailHasDeniedPolicy(g) {
+  if (!g) return false;
+  const topics =
+    g.topicPolicy?.topics ?? g.topicPolicyConfig?.topicsConfig ?? [];
+  const contentFilters =
+    g.contentPolicy?.filters ?? g.contentPolicyConfig?.filtersConfig ?? [];
+  return (asArray(topics).length > 0 && asArray(topics).some((t) => (t.type || "DENY") === "DENY")) ||
+    asArray(contentFilters).length > 0;
+}
+
+// Does the assistant role's policy grant bedrock:InvokeModel scoped to exactly
+// the Nova Lite model ARN, with NO bedrock:* and NO bedrock action on Resource "*"?
+function isInvokeScopedToNovaLite(policy) {
+  if (!policy) return false;
+  let hasScopedInvoke = false;
+  let hasOverBroad = false;
+  for (const st of asArray(policy.Statement)) {
+    if (st.Effect !== "Allow") continue;
+    const actions = asArray(st.Action).map(String);
+    const resources = asArray(st.Resource).map(String);
+    const grantsBedrockStar = actions.some((a) => a === "bedrock:*" || a === "*");
+    const grantsInvoke = actions.some((a) => a === "bedrock:InvokeModel");
+    const onStar = resources.some((r) => r === "*");
+    if (grantsBedrockStar && onStar) hasOverBroad = true;
+    // Any bedrock action (not just InvokeModel) on Resource "*" is over-broad too.
+    if (onStar && actions.some((a) => String(a).startsWith("bedrock:"))) hasOverBroad = true;
+    if (grantsInvoke && resources.some((r) => r.includes(NOVA_LITE_ID)) && !onStar) hasScopedInvoke = true;
+  }
+  return hasScopedInvoke && !hasOverBroad;
+}
+
+async function gradeBedrockPromptInjection(creds, accountId) {
+  const {
+    BedrockClient,
+    ListGuardrailsCommand,
+    GetGuardrailCommand,
+    GetModelInvocationLoggingConfigurationCommand,
+  } = await import("@aws-sdk/client-bedrock");
+  const bedrock = new BedrockClient({ region: REGION, credentials: creds });
+  const iam = new IAMClient({ region: REGION, credentials: creds });
+
+  // ── guardrail-attached ──────────────────────────────────────────────────
+  let guardrailOk = false, guardrailErr = null;
+  try {
+    const list = await bedrock.send(new ListGuardrailsCommand({}));
+    const guardrails = list.guardrails ?? [];
+    for (const g of guardrails) {
+      try {
+        const id = g.id ?? g.guardrailId;
+        if (!id) continue;
+        const detail = await bedrock.send(new GetGuardrailCommand({ guardrailIdentifier: id }));
+        if (guardrailHasDeniedPolicy(detail)) { guardrailOk = true; break; }
+      } catch (e) {
+        if (!isAbsenceError(e)) guardrailErr = e; // else: this guardrail vanished mid-check, keep scanning
+      }
+    }
+  } catch (e) {
+    // No guardrails yet is NOT an absence-error code from ListGuardrails (it
+    // returns an empty array, not a NotFound), so any thrown error here is real.
+    guardrailErr = e;
+  }
+
+  // ── invoke-least-privilege ──────────────────────────────────────────────
+  // The lab's role is created by template.yaml with Path: /lab/ and an inline
+  // policy named ASSISTANT_ROLE_POLICY_NAME. The learner may keep it inline
+  // (put-role-policy, same name) or the grader also checks for a differently-
+  // named inline policy / an attached managed policy, since the instructions
+  // only ask the learner to edit the existing inline policy in place.
+  let roleName = null;
+  let invokeOk = false, invokeErr = null;
+  try {
+    // Discover the lab role by convention: template.yaml names it
+    // sslab-bedrock-assistant-<region> (see Outputs.AssistantRoleName). The
+    // grader is handed accountId but not the exact role name, so it derives it
+    // from the fixed naming convention rather than requiring a lookup API that
+    // needs a resource name anyway.
+    roleName = `sslab-bedrock-assistant-${REGION}`;
+    const policyDocs = [];
+    try {
+      const inlineNames = await iam.send(new ListRolePoliciesCommand({ RoleName: roleName }));
+      for (const pn of inlineNames.PolicyNames ?? []) {
+        const p = await iam.send(new GetRolePolicyCommand({ RoleName: roleName, PolicyName: pn }));
+        policyDocs.push(parsePolicy(p.PolicyDocument));
+      }
+    } catch (e) { if (!isAbsenceError(e)) invokeErr = e; }
+    try {
+      const attached = await iam.send(new ListAttachedRolePoliciesCommand({ RoleName: roleName }));
+      for (const p of attached.AttachedPolicies ?? []) {
+        const gp = await iam.send(new GetPolicyCommand({ PolicyArn: p.PolicyArn }));
+        const ver = gp?.Policy?.DefaultVersionId;
+        if (ver) {
+          const pv = await iam.send(new GetPolicyVersionCommand({ PolicyArn: p.PolicyArn, VersionId: ver }));
+          policyDocs.push(parsePolicy(pv.PolicyVersion?.Document));
+        }
+      }
+    } catch (e) { if (!isAbsenceError(e)) invokeErr = e; }
+    invokeOk = policyDocs.some(isInvokeScopedToNovaLite) &&
+      !policyDocs.some((pol) => pol && asArray(pol.Statement).some((st) =>
+        st.Effect === "Allow" &&
+        asArray(st.Resource).some((r) => r === "*") &&
+        asArray(st.Action).some((a) => String(a) === "bedrock:*" || String(a) === "*" || String(a).startsWith("bedrock:"))));
+  } catch (e) { if (!isAbsenceError(e)) invokeErr = e; }
+
+  // ── model-logging-enabled ────────────────────────────────────────────────
+  let loggingOk = false, loggingErr = null;
+  try {
+    const cfg = await bedrock.send(new GetModelInvocationLoggingConfigurationCommand({}));
+    const lc = cfg.loggingConfig;
+    loggingOk = !!(lc && (lc.cloudWatchConfig || lc.s3Config));
+  } catch (e) {
+    // A ResourceNotFoundException-style response here (no logging configured
+    // yet) is the expected BROKEN state, not a grading failure — but VERIFY the
+    // actual error name Bedrock returns for "logging never configured" (it may
+    // be a normal 200 with an empty loggingConfig instead of a thrown error —
+    // if so, the try block above already handles that via the `!!(lc && ...)`
+    // check and this catch only fires on a real fault).
+    if (!isAbsenceError(e)) loggingErr = e;
+  }
+
+  return [
+    { id: "guardrail-attached", description: "A Bedrock Guardrail exists with a denied-topic/content policy configured.", passed: guardrailOk, ...unk(guardrailErr) },
+    { id: "invoke-least-privilege", description: "The assistant's invoke role allows bedrock:InvokeModel scoped to the Nova Lite model ARN only — no bedrock:* and no Resource '*'.", passed: invokeOk, ...unk(invokeErr) },
+    { id: "model-logging-enabled", description: "Bedrock model-invocation logging is configured with a destination.", passed: loggingOk, ...unk(loggingErr) },
+  ];
+}
+
 /**
  * gradeLab(): assume the sandbox exec role and score the lab against its criteria.
  * Returns { gradable, criteria: [{id, description, passed}], passed }.
@@ -189,6 +351,7 @@ export async function gradeLab(labSlug, execRoleArn, accountId) {
   let criteria = null;
   if (labSlug === "s3-misconfiguration-audit") criteria = await gradeS3(creds, accountId);
   else if (labSlug === "iam-privilege-escalation") criteria = await gradeIam(creds);
+  else if (labSlug === "bedrock-prompt-injection") criteria = await gradeBedrockPromptInjection(creds, accountId);
   if (!criteria) return { gradable: false, criteria: [], passed: false };
   // Overall pass requires every criterion verified passing — an `unknown`
   // (a check that couldn't run) never counts as a pass.

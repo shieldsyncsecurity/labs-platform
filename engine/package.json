@@ -8,6 +8,7 @@
     "start": "node server.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock": "^3.1079.0",
     "@aws-sdk/client-budgets": "^3.1063.0",
     "@aws-sdk/client-cloudformation": "^3.700.0",
     "@aws-sdk/client-dynamodb": "^3.700.0",

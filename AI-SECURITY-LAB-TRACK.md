@@ -48,7 +48,9 @@
 ---
 
 ## Sequencing & dependencies
-1. **Pre-req (one-time):** enable Bedrock model access in the sandbox account/region; confirm the engine's teardown (aws-nuke include-list) covers Bedrock resources (Guardrails, Agents, KBs, logging config) so labs recycle cleanly. **Verify this before Lab 1.**
+1. **Pre-req (one-time):**
+   - ✅ DONE 2026-07-03 — **Bedrock invoke unblocked, scoped to Nova Lite only.** The Sandbox-OU SCP (`p-rhz4lucu`) previously denied `bedrock:InvokeModel`; edited to a `DenyBedrockInvokeExceptNovaLite` statement (NotResource = `amazon.nova-lite-v1:0`). Verified: Nova Lite invoke works, Nova Micro still denied. Cost guard now enforced at the org level (only Nova Lite runnable). Original SCP backed up in scratchpad. Use **model id `amazon.nova-lite-v1:0`** for the graded/cheap path. Fine-tuning (`CreateModelCustomizationJob`) stays denied.
+   - ⏳ TODO at Lab-1 build: confirm teardown covers Bedrock resources — provision Guardrails/etc. **via CloudFormation** so stack-delete cleans them (the aws-nuke include-list has no Bedrock types, but `CloudFormationStack` deletion does); add explicit cleanup for account-level model-invocation-logging config.
 2. Build order: **Lab 1 first** (simplest, biggest "wow", best SEO hook: "Bedrock prompt injection lab"), then 3 (agent — doubles as multi-learner pilot), then 2, 4, 5.
 3. Each lab reuses LAB-FACTORY.md; add the `ss:obj` step↔objective markers so the grade-aware UI lights up automatically.
 

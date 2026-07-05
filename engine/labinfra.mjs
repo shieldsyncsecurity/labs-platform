@@ -36,6 +36,13 @@ const REGION = "us-east-1";
 const MGMT_ACCOUNT = "851236938541";
 const PLATFORM_ACCOUNT = "750294427884";
 const ACCOUNTS_TABLE = "ShieldSyncLabAccounts";
+
+// Labs that invoke a Bedrock foundation model at runtime can only run in a sandbox
+// account with non-zero Nova Lite on-demand quota. Fresh AWS accounts are throughput-
+// gated to 0 (not self-service raisable), so a 0-quota account would throttle the
+// learner's very first prompt. lease() requires a `bedrockOk` flag on the account for
+// these; set it via the pool health cycle / backfill (get-service-quota L-45E0AD92).
+const NOVA_LITE_LABS = new Set(["bedrock-prompt-injection"]);
 const SESSIONS_TABLE = "ShieldSyncLabSessions";
 const USERS_TABLE = "ShieldSyncLabUsers";
 const ENTITLEMENTS_TABLE = "ShieldSyncLabEntitlements";
@@ -322,9 +329,13 @@ export async function lease(userId, labSlug, windowMinutes = 30, ipHash = null) 
     })
   );
   const avail = scan.Items ?? [];
+  // Bedrock labs must land on an account that has Nova Lite quota (NOVA_LITE_LABS):
+  // a 0-quota account would throttle the learner's first prompt. If none is free,
+  // lease returns no account (caller waits/retries) — never hand out a 0-quota one.
+  const pool = NOVA_LITE_LABS.has(labSlug) ? avail.filter((a) => a.bedrockOk?.BOOL === true) : avail;
   const isWarmFor = (a) => a.warmLab?.S === labSlug && a.warmReady?.BOOL === true;
   // warmed-for-this-lab accounts first
-  const ordered = [...avail.filter(isWarmFor), ...avail.filter((a) => !isWarmFor(a))];
+  const ordered = [...pool.filter(isWarmFor), ...pool.filter((a) => !isWarmFor(a))];
 
   for (const acct of ordered) {
     const accountId = acct.accountId.S;
@@ -1245,6 +1256,36 @@ export async function teardown(sessionId) {
     );
   } catch (e) {
     if (e.name !== "NoSuchEntity") console.log(`  [teardown] revoke-policy cleanup skipped on ${accountId}: ${e.name}`);
+  }
+
+  // Non-CFN Bedrock cleanup: aws-nuke does NOT remove learner-created Bedrock
+  // Guardrails, and model-invocation logging is an account-level SINGLETON (not a
+  // nukeable resource). The AI lab (bedrock-prompt-injection) creates BOTH as the
+  // graded fix, so without this a recycled account carries a live guardrail +
+  // "logging enabled" into the next tenant — stale state AND a false-pass on that
+  // lab's grader. Wipe them here. Best-effort, NEVER throws (a wipe failure must
+  // not block the account returning to the pool); a cheap no-op for non-Bedrock
+  // labs (ListGuardrails returns empty). Verified against live Bedrock 2026-07-05.
+  try {
+    const {
+      BedrockClient,
+      ListGuardrailsCommand,
+      DeleteGuardrailCommand,
+      DeleteModelInvocationLoggingConfigurationCommand,
+    } = await import("@aws-sdk/client-bedrock");
+    const bedrock = new BedrockClient({
+      region: REGION,
+      credentials: { accessKeyId: c.AccessKeyId, secretAccessKey: c.SecretAccessKey, sessionToken: c.SessionToken },
+    });
+    const gl = await bedrock.send(new ListGuardrailsCommand({}));
+    for (const g of gl.guardrails ?? []) {
+      const gid = g.id ?? g.guardrailId;
+      if (gid) await bedrock.send(new DeleteGuardrailCommand({ guardrailIdentifier: gid })).catch(() => {});
+    }
+    await bedrock.send(new DeleteModelInvocationLoggingConfigurationCommand({})).catch(() => {});
+    console.log(`  bedrock cleanup on ${accountId}: guardrails removed + model-logging reset`);
+  } catch (e) {
+    console.error(`  [teardown] bedrock cleanup skipped on ${accountId}: ${e.name}: ${e.message}`);
   }
 
   await db.send(
