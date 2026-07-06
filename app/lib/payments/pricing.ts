@@ -5,7 +5,7 @@ import { getLab, type LabLevel } from "@/lib/labs";
 // in the currency's minor unit (paise / cents). Final India numbers stay editable
 // here. Free labs never reach checkout (handled by hasAccess), so no zero case.
 const PER_LAB_INR: Record<LabLevel, number> = { Beginner: 19900, Intermediate: 24900, Advanced: 49900 };
-const PER_LAB_USD: Record<LabLevel, number> = { Beginner: 300, Intermediate: 500, Advanced: 700 };
+const PER_LAB_USD: Record<LabLevel, number> = { Beginner: 400, Intermediate: 500, Advanced: 700 };
 const MONTHLY: Record<Currency, number> = { INR: 200000, USD: 2500 };
 
 // Optional per-lab price override (e.g. a launch promo). Empty = pure level
