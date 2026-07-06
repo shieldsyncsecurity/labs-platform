@@ -14,7 +14,7 @@
 // screen preview and the PDF/PNG export rasterize from, so they can never
 // drift apart.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const CERT_W = 1120;
 const CERT_H = 792; // A4 landscape ratio (1.414)
@@ -161,7 +161,17 @@ export function Certificate({ data, onClose }: { data: CertificateData; onClose?
   const [busy, setBusy] = useState<"pdf" | "png" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const verify = useMemo(() => verifyUrl(data.credentialId), [data.credentialId]);
+
+  // A11y: move focus into the dialog on open and close on Escape (mirrors checkout-sheet.tsx).
+  useEffect(() => {
+    dialogRef.current?.focus();
+    if (!onClose) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   // Inline preview uses the SAME markup as the export path (just against the
   // real, same-origin /logo/... href instead of a data URI — cheaper on
@@ -210,10 +220,10 @@ export function Certificate({ data, onClose }: { data: CertificateData; onClose?
   const linkedInShareUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(verify)}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+    <div ref={dialogRef} tabIndex={-1} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 focus:outline-none" role="dialog" aria-modal="true" aria-labelledby="cert-title">
       <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-line px-5 py-3">
-          <p className="text-sm font-bold text-ink">Your certificate</p>
+          <p id="cert-title" className="text-sm font-bold text-ink">Your certificate</p>
           {onClose && (
             <button onClick={onClose} aria-label="Close" className="rounded-lg px-2 py-1 text-lg text-muted hover:bg-canvas hover:text-ink">
               ×
