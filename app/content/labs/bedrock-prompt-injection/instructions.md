@@ -9,13 +9,15 @@ Your job: **prove the leak, then close it.**
 
 ## What you'll do
 
-First you'll **break it** — prompt-inject the assistant into revealing the
-restricted notes (this step just proves the vulnerability; it isn't graded).
-Then you'll close **three real gaps**: no Guardrail, an over-broad invoke role,
-and no invocation logging — and verify each fix with **Check my work** (panel
-on the right).
+First you'll **break it** — prompt-inject the assistant into leaking its
+restricted notes (this proves the vulnerability; it isn't graded). Then you'll
+close **three real gaps**:
 
-**Launch the lab** (panel on the right) to spin up your own isolated AWS account — the full step-by-step walkthrough unlocks the moment it's ready.
+- **No Guardrail** — attach one with a denied topic that blocks the leak
+- **An over-broad invoke role** — scope `bedrock:*` on `*` down to `InvokeModel` on the one model
+- **No invocation logging** — turn it on for an audit trail
+
+Each fix is checked live against your account by **Check my work**.
 
 <!-- ss:walkthrough -->
 

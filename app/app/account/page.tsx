@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useAuth } from "@/lib/auth/context";
+import { getLab } from "@/lib/labs";
 
 export default function AccountPage() {
   const { user, loading, entitlements, signOut } = useAuth();
@@ -14,6 +15,7 @@ export default function AccountPage() {
     return (
       <div className="mx-auto max-w-md px-5 py-16 text-center">
         <h1 className="text-2xl font-extrabold text-ink">You&apos;re signed out</h1>
+        <p className="mt-2 text-base text-ink-soft">Sign in to see your entitlements and download your certificates.</p>
         <Link href="/sign-in" className="mt-6 inline-block rounded-xl bg-brand px-6 py-3 text-base font-semibold text-white hover:bg-brand-strong">
           Sign in
         </Link>
@@ -43,7 +45,7 @@ export default function AccountPage() {
         <ul className="divide-y divide-line rounded-2xl border border-line bg-surface">
           {entitlements.map((e) => (
             <li key={e.labSlug} className="flex items-center justify-between px-5 py-3 text-base">
-              <span className="text-ink">{e.labSlug === "*" ? "All AWS labs" : e.labSlug}</span>
+              <span className="text-ink">{e.labSlug === "*" ? "All AWS labs" : (getLab(e.labSlug)?.title ?? e.labSlug)}</span>
               <span className="text-sm text-muted">
                 {e.kind}
                 {e.accessUntil ? ` · until ${new Date(e.accessUntil).toLocaleDateString()}` : ""}

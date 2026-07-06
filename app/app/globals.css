@@ -68,6 +68,16 @@ a {
   color: inherit;
 }
 
+/* Consistent branded keyboard-focus ring across the whole app (WCAG 2.4.7).
+   Mirrors the marketing site so a learner moving between the two properties sees
+   the same ring instead of the browser default (often invisible on our gradient
+   buttons). Applies to every interactive element for free. */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-brand) 70%, transparent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 /* "About this lab" disclosure under the slim hero band -- collapsed by default;
    a small rotating chevron replaces the native marker (hidden via list-none on
    the summary in JSX). */
