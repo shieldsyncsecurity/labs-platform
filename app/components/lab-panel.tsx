@@ -839,7 +839,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     return (
       <div className={card}>
         <p className="text-base font-extrabold text-ink">Get this lab</p>
-        <p className="mt-1 text-base text-ink-soft">One-time purchase — simulated checkout, 24h access.</p>
+        <p className="mt-1 text-base text-ink-soft">One-time purchase — up to 30 launches over a 7-day access window.</p>
         <button onClick={() => setShowCheckout(true)} className={`mt-4 ${btnPrimary}`}>Get this lab</button>
         {showCheckout && (
           <CheckoutSheet labSlug={slug} labTitle={lab?.title ?? "Lab"} plan="per-lab" onClose={() => setShowCheckout(false)} onPaid={async () => { await refreshEntitlements(); setShowCheckout(false); }} />

@@ -8,13 +8,13 @@ export default function AccountPage() {
   const { user, loading, entitlements, signOut } = useAuth();
 
   if (loading) {
-    return <div className="mx-auto max-w-3xl px-5 py-16 text-muted">Loading…</div>;
+    return <div className="mx-auto max-w-3xl px-5 py-8 text-muted sm:py-10">Loading…</div>;
   }
 
   if (!user) {
     return (
-      <div className="mx-auto max-w-md px-5 py-16 text-center">
-        <h1 className="text-2xl font-extrabold text-ink">You&apos;re signed out</h1>
+      <div className="mx-auto max-w-md px-5 py-8 text-center sm:py-10">
+        <h1 className="text-2xl font-bold text-ink">You&apos;re signed out</h1>
         <p className="mt-2 text-base text-ink-soft">Sign in to see your entitlements and download your certificates.</p>
         <Link href="/sign-in" className="mt-6 inline-block rounded-xl bg-brand px-6 py-3 text-base font-semibold text-white hover:bg-brand-strong">
           Sign in
@@ -25,7 +25,7 @@ export default function AccountPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-10">
-      <h1 className="text-2xl font-extrabold text-ink">Account</h1>
+      <h1 className="text-2xl font-bold text-ink">Account</h1>
 
       <div className="mt-6 rounded-2xl border border-line bg-surface p-6">
         <dl className="grid grid-cols-[120px_1fr] gap-y-3 text-base">

@@ -73,8 +73,8 @@ export default function SignInPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-md flex-col px-5 py-16">
-      <h1 className="text-2xl font-extrabold text-ink">{ctx.heading}</h1>
+    <div className="mx-auto flex max-w-md flex-col px-5 py-8 sm:py-10">
+      <h1 className="text-2xl font-bold text-ink">{ctx.heading}</h1>
       <p className="mt-2 text-base text-ink-soft">{ctx.sub}</p>
 
       {authError && (

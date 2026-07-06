@@ -63,11 +63,11 @@ export default async function VerifyPage({ params }: { params: Promise<{ id: str
 
   if (!credential) {
     return (
-      <div className="mx-auto max-w-lg px-5 py-16 text-center">
+      <div className="mx-auto max-w-lg px-5 py-8 text-center sm:py-10">
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#fef2f2] text-2xl" aria-hidden>
           ✕
         </div>
-        <h1 className="mt-4 text-2xl font-extrabold text-ink">Credential not found</h1>
+        <h1 className="mt-4 text-2xl font-bold text-ink">Credential not found</h1>
         <p className="mt-2 text-base text-ink-soft">
           We couldn&apos;t verify <span className="font-mono text-sm">{id}</span>. It may be mistyped, or the
           credential doesn&apos;t exist.
@@ -83,7 +83,7 @@ export default async function VerifyPage({ params }: { params: Promise<{ id: str
   const labTitle = lab?.title ?? credential.labSlug;
 
   return (
-    <div className="mx-auto max-w-lg px-5 py-16">
+    <div className="mx-auto max-w-lg px-5 py-8 sm:py-10">
       <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
         <div className="h-[3px] w-full bg-gradient-to-r from-brand to-cyan" aria-hidden />
         <div className="p-6 text-center sm:p-8">
@@ -91,7 +91,7 @@ export default async function VerifyPage({ params }: { params: Promise<{ id: str
             ✓
           </div>
           <p className="mt-3 text-sm font-bold uppercase tracking-wider text-emerald-700">Valid credential</p>
-          <h1 className="mt-2 text-2xl font-extrabold text-ink">{credential.name}</h1>
+          <h1 className="mt-2 text-2xl font-bold text-ink">{credential.name}</h1>
           <p className="mt-2 text-base leading-6 text-ink-soft">
             completed the hands-on security lab
             <br />

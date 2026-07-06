@@ -10,6 +10,7 @@ import { LabWorkspaceProvider } from "@/components/lab-workspace";
 import { EntitlementStatus } from "@/components/entitlement-status";
 import { getServerUser } from "@/lib/auth/session";
 import { listEntitlements } from "@/lib/server/store";
+import { priceFor } from "@/lib/payments/pricing";
 
 type Objective = { id: string; description: string };
 
@@ -123,7 +124,9 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
             },
             offers: {
               "@type": "Offer",
-              price: lab.free ? "0" : "99",
+              // Real per-level price from the single pricing source (was a stale
+              // hardcoded "99" left over from the reverted launch promo).
+              price: lab.free ? "0" : String(priceFor(lab.slug, "per-lab", "INR") / 100),
               priceCurrency: "INR",
               availability: "https://schema.org/InStock",
               category: lab.free ? "Free" : "Paid",

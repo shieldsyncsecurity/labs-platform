@@ -5,6 +5,7 @@ import { LABS } from "@/lib/labs";
 import { LabCard } from "@/components/lab-card";
 import { LabRequest } from "@/components/lab-request";
 import { AutoCheckout } from "@/components/auto-checkout";
+import { priceFor, formatMoney } from "@/lib/payments/pricing";
 
 const FREE_SLUG = "s3-misconfiguration-audit";
 const MARKETING_WIZARD = "https://shieldsyncsecurity.com/labs-wizard";
@@ -52,7 +53,9 @@ export default function CatalogPage() {
         inLanguage: "en",
         offers: {
           "@type": "Offer",
-          price: l.free ? "0" : "99",
+          // Real per-level price from the single pricing source (was a stale
+          // hardcoded "99" left over from the reverted launch promo).
+          price: l.free ? "0" : String(priceFor(l.slug, "per-lab", "INR") / 100),
           priceCurrency: "INR",
           availability: "https://schema.org/InStock",
         },
@@ -68,7 +71,7 @@ export default function CatalogPage() {
       {/* Hero — brief summary */}
       <section className="mb-8">
         <p className="text-sm font-bold uppercase tracking-widest text-brand">AWS Security Labs</p>
-        <h1 className="mt-2 max-w-3xl text-3xl font-extrabold leading-tight text-ink sm:text-4xl">
+        <h1 className="mt-2 max-w-3xl text-2xl font-bold leading-tight text-ink sm:text-3xl lg:text-4xl">
           AWS Security Labs — practise cloud security in real, isolated AWS accounts.
         </h1>
         <p className="mt-3 max-w-2xl text-base text-ink-soft">
@@ -90,7 +93,7 @@ export default function CatalogPage() {
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Link
-            href={`/labs/${FREE_SLUG}?intent=launch`}
+            href={`/labs/${FREE_SLUG}`}
             className="flex flex-col rounded-2xl border border-line bg-canvas p-5 transition hover:border-brand"
           >
             <div className="flex items-start justify-between gap-3">
@@ -103,7 +106,7 @@ export default function CatalogPage() {
               <li>✓ No card needed</li>
             </ul>
             <span className="mt-auto pt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-brand">
-              Launch now →
+              Start free lab →
             </span>
           </Link>
 
@@ -113,7 +116,7 @@ export default function CatalogPage() {
           >
             <div className="flex items-start justify-between gap-3">
               <h3 className="text-base font-bold text-ink">Pay per lab</h3>
-              <span className="shrink-0 text-sm font-bold text-brand">From ₹199</span>
+              <span className="shrink-0 text-sm font-bold text-brand">From {formatMoney(priceFor(null, "per-lab", "INR"), "INR")}</span>
             </div>
             <ul className="mt-3 space-y-1.5 text-sm text-ink-soft">
               <li>✓ Buy only the labs you want</li>
@@ -134,12 +137,12 @@ export default function CatalogPage() {
             </span>
             <div className="flex items-start justify-between gap-3">
               <h3 className="text-base font-bold text-ink">Monthly — full access</h3>
-              <span className="shrink-0 text-sm font-bold text-brand">₹2,000/mo</span>
+              <span className="shrink-0 text-sm font-bold text-brand">{formatMoney(priceFor(null, "monthly", "INR"), "INR")}/mo</span>
             </div>
             <ul className="mt-3 space-y-1.5 text-sm text-ink-soft">
               <li>✓ Every AWS lab unlocked</li>
               <li>✓ New labs included</li>
-              <li>✓ Cancel within 24h</li>
+              <li>✓ Cancel anytime</li>
             </ul>
             <span className="mt-auto pt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-brand">
               Get started →

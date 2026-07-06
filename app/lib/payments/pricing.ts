@@ -23,7 +23,8 @@ export function priceFor(labSlug: string | null, plan: Plan, currency: Currency)
 
 export function formatMoney(amountMinor: number, currency: Currency): string {
   const major = amountMinor / 100;
-  return currency === "INR"
-    ? `₹${major.toLocaleString("en-IN")}`
-    : `$${major.toFixed(2)}`;
+  if (currency === "INR") return `₹${major.toLocaleString("en-IN")}`;
+  // Whole dollars render without the ".00" so checkout matches the marketing
+  // site ("$4", not "$4.00"); keep decimals for any future non-integer price.
+  return Number.isInteger(major) ? `$${major.toLocaleString("en-US")}` : `$${major.toFixed(2)}`;
 }

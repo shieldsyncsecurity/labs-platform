@@ -131,13 +131,13 @@ export default function DashboardPage() {
   const [filter, setFilter] = useState<Filter>("all");
 
   if (loading) {
-    return <div className="mx-auto max-w-[1536px] px-4 py-16 text-muted sm:px-6 lg:px-10">Loading…</div>;
+    return <div className="mx-auto max-w-[1536px] px-4 py-8 text-muted sm:px-6 sm:py-10 lg:px-10">Loading…</div>;
   }
 
   if (!user) {
     return (
-      <div className="mx-auto max-w-md px-5 py-16 text-center">
-        <h1 className="text-2xl font-extrabold text-ink">Sign in to see your labs</h1>
+      <div className="mx-auto max-w-md px-5 py-8 text-center sm:py-10">
+        <h1 className="text-2xl font-bold text-ink">Sign in to see your labs</h1>
         <p className="mt-2 text-base text-ink-soft">Your dashboard shows the labs you can launch and your access windows.</p>
         <Link href="/sign-in" className="mt-6 inline-block rounded-xl bg-brand px-6 py-3 text-base font-semibold text-white hover:bg-brand-strong">
           Sign in
@@ -218,7 +218,7 @@ function SignedInDashboard({
     <div className="mx-auto max-w-[1536px] px-4 py-8 sm:px-6 lg:px-10">
       {/* Slim header row */}
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h1 className="text-2xl font-extrabold text-ink">Welcome back, {firstName}</h1>
+        <h1 className="text-2xl font-bold text-ink">Welcome back, {firstName}</h1>
         <p className="text-sm text-ink-soft">
           {ready.length} lab{ready.length === 1 ? "" : "s"} · {launchableCount} you can launch now
           {completedSlugs && <> · {completedCount} of {ready.length} complete</>} · first lab free

@@ -30,8 +30,9 @@ Goal: **same-day go-live**. Everything below is pre-staged; the day Paytm approv
 - [ ] Deploy: `npm run build` (webpack) must pass locally first, then push → CI deploy.
 
 ## 4. E2E verification (task #32) (~45 min)
-Real money, smallest amount — use the ₹99 per-lab plan, then refund from the dashboard if desired.
-- [ ] **Happy path**: sign in with the test account (`himanshujain0901@gmail.com`) → locked paid lab → "Get this lab" → Paytm popup → pay ₹99 (UPI) → sheet shows "Payment confirmed" → "Start the lab" launches. Verify entitlement row (type PAY_PER_LAB, maxLaunches 30, launchCount 1 after launch).
+Real money, smallest amount — the cheapest purchasable lab is the IAM lab at ₹249
+(current price authority: `app/lib/payments/pricing.ts`); refund from the dashboard if desired.
+- [ ] **Happy path**: sign in with the test account (`himanshujain0901@gmail.com`) → locked paid lab → "Get this lab" → Paytm popup → pay ₹249 (UPI) → sheet shows "Payment confirmed" → "Start the lab" launches. Verify entitlement row (type PAY_PER_LAB, maxLaunches 30, launchCount 1 after launch).
 - [ ] **Replay safety**: re-POST `/api/payments/paytm/confirm` with the same orderId → `paid:true` but NO double grant (idempotent CAS; check entitlement version).
 - [ ] **Forged success**: POST confirm with a never-paid orderId → `paid:false`.
 - [ ] **Cross-user guard**: confirm another user's orderId from the test session → 403.
@@ -39,12 +40,10 @@ Real money, smallest amount — use the ₹99 per-lab plan, then refund from the
 - [ ] **Payments-off regression**: N/A after live, but confirm `/api/payments/mock-pay` → 404 in prod.
 - [ ] Watch Worker logs + engine CloudWatch for errors during all of the above.
 
-## 4b. REVERT the temporary IAM ₹99 price (post-review)
-- [ ] The IAM lab was temporarily priced ₹99 (2026-07-03) so the "from ₹99" claim
-      mapped to a real lab during Paytm review. Once approved, revert to level pricing (₹249):
-      remove the `iam-privilege-escalation` entry from `AWS_LAB_PRICE_OVERRIDE` in
-      `shieldsync-website/lib/region.ts` AND from `PER_LAB_OVERRIDE` in
-      `labs-platform/app/lib/payments/pricing.ts`. (Or keep it as a launch promo — product call.)
+## 4b. ~~REVERT the temporary IAM ₹99 price~~ — DONE 2026-07-04
+- [x] Reverted: both `AWS_LAB_PRICE_OVERRIDE` (shieldsync-website/lib/region.ts) and
+      `PER_LAB_OVERRIDE` (labs-platform/app/lib/payments/pricing.ts) are empty again;
+      IAM is back at level pricing (₹249). Beginner tier repriced ₹199/$4 on 2026-07-06.
 
 ## 5. Post-live config reverts + capacity (~15 min)
 - [ ] Revert `FREE_POOL_PCT` to ~0.3 (free tier stops hogging the pool now that paid is live).
