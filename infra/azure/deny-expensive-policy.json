@@ -1,0 +1,119 @@
+{
+  "_comment": "ShieldSync Labs — Azure 'deny expensive' guardrail (the SCP analog of infra/scp-sandbox-deny-expensive.json). This is ONE Azure Policy of policyType 'Custom' whose rule is a deny of anything a free storage-exposure lab would never legitimately create: any VM above the tiny B1s tier, VM scale sets, AKS, any managed database (SQL / MySQL / PostgreSQL / Cosmos / MariaDB), public IPs, NAT gateways, Application Gateways, and Load Balancers — plus a hard allowed-locations lock to eastus. Assign it at the labs-subscription (or the labs management-group) scope so it applies to EVERY leased resource group. setup-landing-zone.ps1 creates this definition and assigns it. The DataActions/least-privilege story lives in the engine lab.json learnerRole; this policy is the coarse cost/blast-radius fence that sits ABOVE the learner's RBAC.",
+  "name": "shieldsync-labs-deny-expensive",
+  "properties": {
+    "displayName": "ShieldSync Labs — deny expensive SKUs, DBs, networking; lock to eastus",
+    "description": "Cost + blast-radius guardrail for the ShieldSync Labs sandbox. Denies any resource that costs money at idle or enables an expensive escape (large VMs, VMSS, AKS, managed databases, public IPs, NAT gateways, App Gateways, Load Balancers) and pins all deployments to the eastus region. Storage accounts (the lab subject) are intentionally NOT denied.",
+    "policyType": "Custom",
+    "mode": "All",
+    "metadata": {
+      "category": "ShieldSync Labs",
+      "version": "1.0.0"
+    },
+    "parameters": {
+      "allowedLocations": {
+        "type": "Array",
+        "metadata": {
+          "displayName": "Allowed locations",
+          "description": "Regions the labs sandbox may deploy into. Kept to eastus to match the deploysToRegion of the labs and keep teardown/RegionLock simple.",
+          "strongType": "location"
+        },
+        "defaultValue": ["eastus"]
+      },
+      "allowedTinyVmSkus": {
+        "type": "Array",
+        "metadata": {
+          "displayName": "Allowed (tiny) VM SKUs",
+          "description": "If a lab ever legitimately needs a VM, only these burstable micro sizes are permitted. Empty-by-intent for storage-only labs; kept as a parameter so the fence does not need editing later."
+        },
+        "defaultValue": ["Standard_B1s", "Standard_B1ls"]
+      }
+    },
+    "policyRule": {
+      "if": {
+        "anyOf": [
+          {
+            "comment": "REGION LOCK — anything outside the allowed region list is denied (global resources report location 'global' and are allowed through).",
+            "allOf": [
+              {
+                "field": "location",
+                "notIn": "[parameters('allowedLocations')]"
+              },
+              {
+                "field": "location",
+                "notEquals": "global"
+              }
+            ]
+          },
+          {
+            "comment": "VMs above the tiny burstable tier.",
+            "allOf": [
+              {
+                "field": "type",
+                "equals": "Microsoft.Compute/virtualMachines"
+              },
+              {
+                "field": "Microsoft.Compute/virtualMachines/hardwareProfile.vmSize",
+                "notIn": "[parameters('allowedTinyVmSkus')]"
+              }
+            ]
+          },
+          {
+            "comment": "VM scale sets — always denied (an easy way to spin up many VMs).",
+            "field": "type",
+            "equals": "Microsoft.Compute/virtualMachineScaleSets"
+          },
+          {
+            "comment": "Managed Kubernetes.",
+            "field": "type",
+            "in": [
+              "Microsoft.ContainerService/managedClusters",
+              "Microsoft.ContainerService/openShiftManagedClusters"
+            ]
+          },
+          {
+            "comment": "Managed databases of every flavour (SQL / MySQL / PostgreSQL / MariaDB / Cosmos).",
+            "field": "type",
+            "in": [
+              "Microsoft.Sql/servers",
+              "Microsoft.Sql/managedInstances",
+              "Microsoft.DBforMySQL/servers",
+              "Microsoft.DBforMySQL/flexibleServers",
+              "Microsoft.DBforPostgreSQL/servers",
+              "Microsoft.DBforPostgreSQL/flexibleServers",
+              "Microsoft.DBforMariaDB/servers",
+              "Microsoft.DocumentDB/databaseAccounts"
+            ]
+          },
+          {
+            "comment": "Costly networking — public IPs, NAT gateways, App Gateways, Load Balancers, VPN/ExpressRoute gateways.",
+            "field": "type",
+            "in": [
+              "Microsoft.Network/publicIPAddresses",
+              "Microsoft.Network/publicIPPrefixes",
+              "Microsoft.Network/natGateways",
+              "Microsoft.Network/applicationGateways",
+              "Microsoft.Network/loadBalancers",
+              "Microsoft.Network/virtualNetworkGateways",
+              "Microsoft.Network/expressRouteCircuits"
+            ]
+          },
+          {
+            "comment": "Other easy-to-forget spend: AKS-adjacent container groups, Redis, Synapse, HDInsight, App Service plans above free, and Cognitive/OpenAI accounts.",
+            "field": "type",
+            "in": [
+              "Microsoft.ContainerInstance/containerGroups",
+              "Microsoft.Cache/redis",
+              "Microsoft.Synapse/workspaces",
+              "Microsoft.HDInsight/clusters",
+              "Microsoft.CognitiveServices/accounts"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "effect": "deny"
+      }
+    }
+  }
+}

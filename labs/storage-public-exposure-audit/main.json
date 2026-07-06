@@ -1,0 +1,80 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_comment": "HAND-COMPILED ARM equivalent of main.bicep. The engine driver (azure-infra.mjs deploy()) deploys THIS JSON, since the build/deploy host may not have the Bicep compiler. If main.bicep changes, regenerate with: az bicep build --file main.bicep --outfile main.json (and diff against this). Keep the two in lockstep — the flaws, names, and outputs must match main.bicep exactly.",
+    "_flaws": "A: allowBlobPublicAccess=true | B: supportsHttpsTrafficOnly=false | C: minimumTlsVersion=TLS1_0 | container public-data publicAccess=Blob (anonymous read)."
+  },
+  "parameters": {
+    "labSlug": {
+      "type": "string",
+      "defaultValue": "storage-public-exposure-audit",
+      "metadata": { "description": "Stamped as the ShieldSyncLab tag on every resource for teardown targeting." }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "eastus",
+      "metadata": { "description": "Region for the scenario. Standard_LRS + a few-KB blob only — near zero cost." }
+    }
+  },
+  "variables": {
+    "storageAccountName": "[concat('sslab', uniqueString(resourceGroup().id))]",
+    "containerName": "public-data",
+    "seedBlobName": "customer-export.csv"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-05-01",
+      "name": "[variables('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "tags": { "ShieldSyncLab": "[parameters('labSlug')]" },
+      "sku": { "name": "Standard_LRS" },
+      "kind": "StorageV2",
+      "properties": {
+        "allowBlobPublicAccess": true,
+        "supportsHttpsTrafficOnly": false,
+        "minimumTlsVersion": "TLS1_0",
+        "accessTier": "Hot",
+        "allowSharedKeyAccess": true
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices",
+      "apiVersion": "2023-05-01",
+      "name": "[concat(variables('storageAccountName'), '/default')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2023-05-01",
+      "name": "[concat(variables('storageAccountName'), '/default/', variables('containerName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]"
+      ],
+      "properties": {
+        "publicAccess": "Blob"
+      }
+    }
+  ],
+  "outputs": {
+    "storageAccountName": {
+      "type": "string",
+      "value": "[variables('storageAccountName')]"
+    },
+    "containerName": {
+      "type": "string",
+      "value": "[variables('containerName')]"
+    },
+    "blobEndpoint": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))).primaryEndpoints.blob]"
+    },
+    "anonymousBlobUrl": {
+      "type": "string",
+      "value": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))).primaryEndpoints.blob, variables('containerName'), '/', variables('seedBlobName'))]"
+    }
+  }
+}
