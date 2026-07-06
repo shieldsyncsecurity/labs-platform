@@ -8,7 +8,6 @@ const NAV = [
   { label: "How it works", href: "#how" },
   { label: "Why it's real", href: "#why-real" },
   { label: "The report", href: "#report" },
-  { label: "Pricing", href: "#pricing" },
 ];
 
 /** Marketing header for the enterprise homepage: sticky, translucent, logo + anchor

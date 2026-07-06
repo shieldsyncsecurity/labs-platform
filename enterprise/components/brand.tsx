@@ -1,23 +1,27 @@
 import Link from "next/link";
 
 /**
- * ShieldSync ENTERPRISE wordmark. Mirrors the labs app's "Shield Sync + LABS pill"
- * lockup, but on this app's light/indigo theme and with an "ENTERPRISE" tag. Pure
- * inline SVG + text (no image asset needed). Renders as a link to `href` (default /).
+ * ShieldSync ENTERPRISE wordmark. Uses the REAL ShieldSync brand mark (the
+ * navy tile + "S" reticle), tinted INDIGO for the enterprise property — the
+ * same way the labs property tints it emerald ("LABS"). Wordmark = "Shield" +
+ * "Sync" (Sync in the brand indigo, matching the marketing site) + an
+ * "ENTERPRISE" tag pill. Renders as a link to `href` (default /).
  */
 export function Logo({
   href = "/",
   className = "",
   tag = true,
+  size = 28,
 }: {
   href?: string | null;
   className?: string;
   tag?: boolean;
+  size?: number;
 }) {
   const inner = (
-    <span className={`inline-flex items-center gap-2.5 font-extrabold text-ink ${className}`}>
-      <ShieldMark className="h-7 w-7 flex-none" />
-      <span className="flex items-center gap-2 whitespace-nowrap text-[17px] leading-none">
+    <span className={`inline-flex items-center gap-2.5 ${className}`}>
+      <ShieldMark size={size} />
+      <span className="flex items-center gap-2 whitespace-nowrap text-[17px] font-extrabold leading-none tracking-tight text-ink">
         <span>
           Shield<span className="text-brand">Sync</span>
         </span>
@@ -38,28 +42,19 @@ export function Logo({
   );
 }
 
-/** The shield mark: rounded shield, indigo->blue gradient, a crisp white check
- *  (verification = the heart of the assessment product). Decorative. */
-export function ShieldMark({ className = "" }: { className?: string }) {
+/** The base ShieldSync mark (indigo tile). Decorative. */
+export function ShieldMark({ size = 28, className = "" }: { size?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 32 32" className={className} role="img" aria-label="ShieldSync" fill="none">
-      <defs>
-        <linearGradient id="ss-ent-shield" x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#4f46e5" />
-          <stop offset="1" stopColor="#2563eb" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M16 2.5l10.5 3.6v8.2c0 6.7-4.4 12-10.5 14.2C9.9 26.3 5.5 21 5.5 14.3V6.1L16 2.5z"
-        fill="url(#ss-ent-shield)"
-      />
-      <path
-        d="M11 16.2l3.3 3.3 6.7-7"
-        stroke="#ffffff"
-        strokeWidth="2.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/logo/shieldsync-enterprise-mark.svg"
+      alt=""
+      aria-hidden="true"
+      width={size}
+      height={size}
+      style={{ height: size, width: size }}
+      className={`flex-none select-none rounded-[22%] ${className}`}
+      draggable={false}
+    />
   );
 }
