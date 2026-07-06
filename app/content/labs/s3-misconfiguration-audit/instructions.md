@@ -4,11 +4,14 @@ A small team shipped fast and left their S3 estate exposed. Two buckets are
 world-readable, neither enforces encryption or HTTPS, and a service account has
 `s3:*` on every resource. Your job: **find the problems and fix them in place.**
 
-## What you'll do
+## What you'll fix
 
-You'll close **four real misconfigurations** — public buckets, missing encryption, non-TLS access, and an over-broad IAM user — and verify each fix with **Check my work** (panel on the right).
+- **Public buckets** — one exposed via a bucket policy, one via an ACL
+- **Missing encryption** — enforce SSE-KMS on both
+- **Non-TLS access** — require HTTPS-only
+- **An over-broad IAM user** — scope `s3:*` down to least privilege
 
-**Launch the lab** (panel on the right) to spin up your own isolated AWS account — the full step-by-step walkthrough unlocks the moment it's ready.
+Each fix is checked live against your account by **Check my work**.
 
 <!-- ss:walkthrough -->
 

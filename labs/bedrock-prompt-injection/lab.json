@@ -47,15 +47,13 @@
 
   "_learnerPolicy": "LEAST-PRIVILEGE: bare IAM Statement[] applied as an STS SESSION POLICY on the learner's console (effective = ShieldSyncLabUser(admin) ∩ this ∩ SCP). The engine adds the Version envelope + a fixed control-plane guardrail-deny. Scope to exactly what THIS lab needs. Keep minified under ~1000 chars bare (build gate).",
   "learnerPolicy": [
-    { "Sid": "CloudShell", "Effect": "Allow", "Action": "cloudshell:*", "Resource": "*" },
-    { "Sid": "Identity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" },
-    { "Sid": "InvokeNovaLite", "Effect": "Allow", "Action": "bedrock:InvokeModel", "Resource": "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0" },
-    { "Sid": "GuardrailManage", "Effect": "Allow", "Action": "bedrock:*Guardrail*", "Resource": "*" },
-    { "Sid": "LoggingConfig", "Effect": "Allow", "Action": "bedrock:*ModelInvocationLoggingConfiguration", "Resource": "*" },
-    { "Sid": "AssistantRole", "Effect": "Allow", "Action": ["iam:GetRolePolicy", "iam:PutRolePolicy"], "Resource": "arn:aws:iam::*:role/lab/*" },
-    { "Sid": "PassLoggingRole", "Effect": "Allow", "Action": "iam:PassRole", "Resource": "arn:aws:iam::*:role/lab/sslab-bedrock-logging-*" },
-    { "Sid": "LambdaLabFn", "Effect": "Allow", "Action": ["lambda:GetFunction", "lambda:InvokeFunction", "lambda:UpdateFunctionConfiguration"], "Resource": "arn:aws:lambda:*:*:function:sslab-*" },
-    { "Sid": "LogsRead", "Effect": "Allow", "Action": ["logs:GetLogEvents", "logs:DescribeLogStreams"], "Resource": "*" }
+    { "Effect": "Allow", "Action": "cloudshell:*", "Resource": "*" },
+    { "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" },
+    { "Effect": "Allow", "Action": "bedrock:InvokeModel", "Resource": "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0" },
+    { "Effect": "Allow", "Action": ["bedrock:*Guardrail*", "bedrock:*ModelInvocationLoggingConfiguration"], "Resource": "*" },
+    { "Effect": "Allow", "Action": ["iam:GetRolePolicy", "iam:PutRolePolicy", "iam:PassRole"], "Resource": "arn:aws:iam::*:role/lab/*" },
+    { "Effect": "Allow", "Action": ["lambda:GetFunction", "lambda:InvokeFunction", "lambda:UpdateFunctionConfiguration"], "Resource": "arn:aws:lambda:*:*:function:sslab-*" },
+    { "Effect": "Allow", "Action": ["logs:GetLogEvents", "logs:DescribeLogStreams"], "Resource": "*" }
   ],
 
   "estimatedAwsCostInr": 1,

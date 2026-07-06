@@ -838,7 +838,10 @@ export function LabGuide({
         >
           {!hasWalkthrough || !launched ? (
             <div className="overflow-y-auto p-6 sm:p-7 lg:min-h-0 lg:flex-1 lg:overscroll-contain">
-              {overviewRendered.overviewNodes}
+              {/* Cap the pre-launch prose to a readable measure (~70ch) so it reads
+                  like a briefing, not a full-width wall; the launch-gate card below
+                  and the post-launch walkthrough (with wide code blocks) stay full width. */}
+              <div className="max-w-2xl">{overviewRendered.overviewNodes}</div>
               {!hasWalkthrough ? null : <LaunchGate steps={stepTitles} />}
             </div>
           ) : wtSource === null ? (
