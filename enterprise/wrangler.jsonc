@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "main": ".open-next/worker.js",
+  "name": "enterprise-platform",
+  "compatibility_date": "2024-12-30",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    // Enterprise engine (Session Engine's B2B sibling) base URL.
+    "ENT_ENGINE_URL": "http://localhost:4001",
+    // Public origin of THIS app.
+    "APP_URL": "http://localhost:3002"
+  }
+  // NOTE: ENT_ENGINE_SECRET and SESSION_SECRET are set as Worker SECRETS
+  // (wrangler secret put ENT_ENGINE_SECRET / SESSION_SECRET), never as `vars`
+  // — vars are visible in `wrangler.jsonc` / the dashboard config, secrets are not.
+}

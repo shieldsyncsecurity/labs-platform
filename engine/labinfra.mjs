@@ -197,8 +197,17 @@ async function activeFreeExpiries() {
  * can show a wait countdown. (Upper bound: a slot can free sooner if a learner
  * finishes early.)
  */
+// Total pool accounts NOT reserved for enterprise — the denominator B2C free-pool
+// capacity is measured against (reserved seats are not part of the B2C pool). With
+// zero reserved accounts this equals poolSize(), so B2C capacity math is unchanged.
+async function b2cPoolSize() {
+  const db = await ddb();
+  const r = await db.send(new ScanCommand({ TableName: ACCOUNTS_TABLE }));
+  return (r.Items ?? []).filter((a) => !isEntReserved(a)).length;
+}
+
 export async function freeCapacity() {
-  const [total, expiries] = await Promise.all([poolSize(), activeFreeExpiries()]);
+  const [total, expiries] = await Promise.all([b2cPoolSize(), activeFreeExpiries()]);
   const busy = expiries.length;
   const cap = Math.max(1, Math.floor(total * FREE_POOL_PCT));
   // ISO timestamps sort lexicographically = chronologically (all UTC) → earliest first.
@@ -314,6 +323,18 @@ function rid(n = 10) {
  * "active" (instant start, no deploy). Otherwise claims a cold account ->
  * "leasing" and the caller deploys in the background.
  */
+// ── Enterprise (B2B) reserved-account pool ──────────────────────────────────
+// Accounts flagged `entReserved:true` are earmarked for enterprise assessments
+// and MUST be invisible to the B2C paths (lease / ensureWarm / freeCapacity) so a
+// free-lab launch can never steal a seat a paying employer booked. SAFE BY
+// CONSTRUCTION: with ZERO reserved accounts (the state today) every filter below
+// excludes nothing, so B2C behaviour is byte-for-byte unchanged until an operator
+// flags one (engine/flag-ent-reserved.mjs). leaseEnt() / ensureWarmEnt() below
+// operate on the COMPLEMENT — only reserved accounts — and stamp `client:'ent'`
+// on their sessions so B2C's user-scoped scans never see them (ent userIds are
+// also namespaced `ent:<inviteToken>`, a second layer of separation).
+const isEntReserved = (a) => a.entReserved?.BOOL === true;
+
 export async function lease(userId, labSlug, windowMinutes = 30, ipHash = null) {
   const db = await ddb();
   const sessionId = "sess_" + rid();
@@ -328,7 +349,7 @@ export async function lease(userId, labSlug, windowMinutes = 30, ipHash = null) 
       ExpressionAttributeValues: { ":avail": { S: "available" } },
     })
   );
-  const avail = scan.Items ?? [];
+  const avail = (scan.Items ?? []).filter((a) => !isEntReserved(a)); // B2C never leases enterprise-reserved accounts
   // Bedrock labs must land on an account that has Nova Lite quota (NOVA_LITE_LABS):
   // a 0-quota account would throttle the learner's first prompt. If none is free,
   // lease returns no account (caller waits/retries) — never hand out a 0-quota one.
@@ -376,6 +397,109 @@ export async function lease(userId, labSlug, windowMinutes = 30, ipHash = null) 
     return { sessionId, accountId, execRoleArn: acct.execRoleArn?.S, expiresAt, warm };
   }
   throw new Error("NO_CAPACITY");
+}
+
+/**
+ * leaseEnt(): the enterprise counterpart to lease(). Identical atomic claim, but
+ * (a) draws ONLY from entReserved accounts (never touches the B2C pool), and
+ * (b) stamps the session `client:"ent"` + a namespaced `entUserId` ("ent:<inviteToken>")
+ * so it is invisible to every B2C user-scoped scan. windowMinutes is the FULL lease
+ * TTL (scored time-box + grace) — the enterprise app tracks the scored clock itself
+ * from first console mint, so a slow start / brief crash-reconnect never eats the box
+ * and the reaper won't reclaim the account until after the grace window.
+ */
+export async function leaseEnt(entUserId, labSlug, windowMinutes = 90) {
+  const db = await ddb();
+  const sessionId = "sess_" + rid();
+  const now = Date.now();
+  const expiresAt = new Date(now + windowMinutes * 60000).toISOString();
+
+  const scan = await db.send(
+    new ScanCommand({
+      TableName: ACCOUNTS_TABLE,
+      FilterExpression: "#s = :avail",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: { ":avail": { S: "available" } },
+    })
+  );
+  // ONLY enterprise-reserved accounts — the exact complement of lease()'s pool.
+  const pool = (scan.Items ?? []).filter(isEntReserved);
+  const isWarmFor = (a) => a.warmLab?.S === labSlug && a.warmReady?.BOOL === true;
+  const ordered = [...pool.filter(isWarmFor), ...pool.filter((a) => !isWarmFor(a))];
+
+  for (const acct of ordered) {
+    const accountId = acct.accountId.S;
+    const warm = isWarmFor(acct);
+    try {
+      await db.send(
+        new UpdateItemCommand({
+          TableName: ACCOUNTS_TABLE,
+          Key: { accountId: { S: accountId } },
+          UpdateExpression: "SET #s = :leased, currentSessionId = :sid",
+          ConditionExpression: "#s = :avail",
+          ExpressionAttributeNames: { "#s": "status" },
+          ExpressionAttributeValues: { ":leased": { S: "leased" }, ":avail": { S: "available" }, ":sid": { S: sessionId } },
+        })
+      );
+    } catch (e) {
+      if (e.name === "ConditionalCheckFailedException") continue;
+      throw e;
+    }
+
+    const item = {
+      sessionId: { S: sessionId },
+      userId: { S: entUserId },
+      labSlug: { S: labSlug },
+      accountId: { S: accountId },
+      status: { S: warm ? "active" : "leasing" },
+      client: { S: "ent" }, // enterprise session marker — excluded from all B2C-only logic
+      startedAt: { S: new Date(now).toISOString() },
+      expiresAt: { S: expiresAt },
+      ttl: { N: String(Math.floor(new Date(expiresAt).getTime() / 1000) + 7 * 24 * 3600) },
+    };
+    if (warm && acct.warmStackName?.S) item.stackName = { S: acct.warmStackName.S };
+    await db.send(new PutItemCommand({ TableName: SESSIONS_TABLE, Item: item }));
+    return { sessionId, accountId, execRoleArn: acct.execRoleArn?.S, expiresAt, warm };
+  }
+  throw new Error("NO_CAPACITY");
+}
+
+/** ensureWarmEnt(): pre-warm every available ENTERPRISE-reserved account for labSlug
+ *  (idempotent) — the reserved-pool counterpart to ensureWarm(). Used to pre-warm an
+ *  account ahead of a booked assessment slot so the candidate's Start is instant. */
+export async function ensureWarmEnt(labSlug) {
+  const db = await ddb();
+  const scan = await db.send(
+    new ScanCommand({
+      TableName: ACCOUNTS_TABLE,
+      FilterExpression: "#s = :avail",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: { ":avail": { S: "available" } },
+    })
+  );
+  const toWarm = (scan.Items ?? []).filter((a) => isEntReserved(a) && !(a.warmLab?.S === labSlug && a.warmReady?.BOOL === true));
+  const warmed = [];
+  for (const a of toWarm) {
+    try {
+      const r = await warmAccount(a.accountId.S, a.execRoleArn?.S, labSlug);
+      if (r) warmed.push(a.accountId.S);
+    } catch (e) {
+      console.log(`  ent warm failed ${a.accountId.S}: ${e.message}`);
+    }
+  }
+  return warmed;
+}
+
+/** entReservedCounts(): census of the enterprise-reserved sub-pool by status. `total`
+ *  is the ceiling on concurrent enterprise assessments (drives bookable slot capacity);
+ *  `available` is how many could start RIGHT NOW. Returns all zeros until an operator
+ *  flags accounts reserved (engine/flag-ent-reserved.mjs). */
+export async function entReservedCounts() {
+  const db = await ddb();
+  const r = await db.send(new ScanCommand({ TableName: ACCOUNTS_TABLE }));
+  const items = (r.Items ?? []).filter(isEntReserved);
+  const n = (s) => items.filter((i) => i.status?.S === s).length;
+  return { total: items.length, available: n("available"), leased: n("leased"), warming: n("warming") };
 }
 
 /**
@@ -1058,7 +1182,7 @@ export async function ensureWarm(labSlug) {
       ExpressionAttributeValues: { ":avail": { S: "available" } },
     })
   );
-  const toWarm = (scan.Items ?? []).filter((a) => !(a.warmLab?.S === labSlug && a.warmReady?.BOOL === true));
+  const toWarm = (scan.Items ?? []).filter((a) => !isEntReserved(a) && !(a.warmLab?.S === labSlug && a.warmReady?.BOOL === true)); // skip enterprise-reserved accounts
   const warmed = [];
   for (const a of toWarm) {
     try {

@@ -1,0 +1,83 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:us-east-1:750294427884:log-group:/aws/lambda/ShieldSyncEnterpriseEngine:*"
+    },
+    {
+      "Sid": "DynamoDBEnt",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:TransactWriteItems"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntOrgs",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAssessments",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAssessments/index/*",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntInvites",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntInvites/index/*",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntSlots",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntResults",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntOrders",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntOrders/index/*"
+      ]
+    },
+    {
+      "Sid": "DynamoDBSharedPool",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabAccounts",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncLabSessions"
+      ]
+    },
+    {
+      "Sid": "S3DeployBucket",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::shieldsync-engine-deploy-750294427884/*"
+    },
+    {
+      "Sid": "AssumeLabRoles",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": [
+        "arn:aws:iam::*:role/ShieldSyncLabExec",
+        "arn:aws:iam::*:role/ShieldSyncLabUser"
+      ]
+    },
+    {
+      "Sid": "SelfInvoke",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": "arn:aws:lambda:us-east-1:750294427884:function:ShieldSyncEnterpriseEngine"
+    },
+    {
+      "Sid": "SESForOtpEmails",
+      "Effect": "Allow",
+      "Action": ["ses:SendEmail", "ses:SendRawEmail"],
+      "Resource": "arn:aws:ses:us-east-1:750294427884:identity/*"
+    },
+    {
+      "Sid": "CloudTrailWorkTimeline",
+      "Effect": "Allow",
+      "Action": "cloudtrail:LookupEvents",
+      "Resource": "*"
+    }
+  ]
+}

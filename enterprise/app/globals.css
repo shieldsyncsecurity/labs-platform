@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+/*
+ * ShieldSync Enterprise - design tokens (mirrors the labs app: light theme,
+ * indigo -> blue accent, Inter). Tailwind v4 @theme generates the utilities
+ * (bg-brand, text-ink, border-line, font-mono, ...).
+ *
+ * IMPORTANT: keep this file ASCII-only and avoid `font:` shorthand + var().
+ * Next dev (Turbopack) Lightning CSS has been observed to silently drop
+ * globals.css rules after a non-ASCII comment or a `font:` shorthand paired
+ * with var() - longhand properties + ASCII comments only.
+ */
+@theme {
+  --color-brand: #4f46e5;
+  --color-brand-strong: #4338ca;
+  --color-cyan: #2563eb;
+  --color-ink: #0f172a;
+  --color-ink-soft: #334155;
+  --color-muted: #64748b;
+  --color-line: #e2e8f0;
+  --color-line-strong: #cbd5e1;
+  --color-surface: #ffffff;
+  --color-canvas: #f8fafc;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+}
