@@ -19,11 +19,11 @@ function LabCard({ lab, owned, completed }: { lab: Lab; owned: boolean; complete
         {lab.free ? (
           <span className="rounded-md bg-brand/10 px-1.5 py-0.5 text-[11px] font-bold text-brand">FREE</span>
         ) : !owned ? (
-          <span className="rounded-md border border-line px-1.5 py-0.5 text-[11px] font-bold text-muted">🔒 Locked</span>
+          <span className="rounded-md border border-line px-1.5 py-0.5 text-[11px] font-bold text-muted"><span aria-hidden>🔒</span> Locked</span>
         ) : null}
         {completed && (
           <span className="rounded-md bg-green-600/10 px-1.5 py-0.5 text-[11px] font-bold text-green-700">
-            ✓ Completed
+            <span aria-hidden>✓</span> Completed
           </span>
         )}
         <span className="ml-auto text-[11px] text-muted">~{lab.estimatedActiveMinutes} min</span>
@@ -47,7 +47,7 @@ function LabCard({ lab, owned, completed }: { lab: Lab; owned: boolean; complete
         {completed && (
           <CertificateButton
             labSlug={lab.slug}
-            label="Certificate 🎓"
+            label="Certificate"
             className="inline-block rounded-lg border border-line px-3.5 py-1.5 text-sm font-semibold text-ink hover:bg-canvas"
           />
         )}

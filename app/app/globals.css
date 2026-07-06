@@ -64,9 +64,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-a {
-  color: inherit;
-}
+/* NOTE: no custom `a { color: inherit }` here. Tailwind preflight already sets that
+   in @layer base, so text-color utilities (text-white on a CTA, text-brand on a link)
+   correctly win. A custom UNLAYERED copy would override those utilities and render
+   link-buttons with dark inherited text (the bug that hit the header and dashboard). */
 
 /* Consistent branded keyboard-focus ring across the whole app (WCAG 2.4.7).
    Mirrors the marketing site so a learner moving between the two properties sees

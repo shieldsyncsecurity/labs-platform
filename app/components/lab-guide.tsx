@@ -965,20 +965,21 @@ export function LabGuide({
 
       {/* lock overlay */}
       <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface/75 p-8 text-center backdrop-blur-[2px]">
-        <span className="text-3xl">🔒</span>
+        <span aria-hidden className="text-3xl">🔒</span>
         <p className="mt-3 text-base font-extrabold text-ink">Guide locked</p>
         <p className="mt-1 max-w-xs text-sm text-ink-soft">
-          Purchase this lab to unlock the full step-by-step guide and start your session.
+          Unlock the full step-by-step guide and start your session.
         </p>
         {!user ? (
           <Link
             href="/sign-in"
-            className="mt-5 rounded-xl bg-brand px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-strong"
+            style={{ color: "#fff" }}
+            className="mt-5 rounded-xl bg-brand px-6 py-2.5 text-sm font-semibold hover:bg-brand-strong"
           >
             Sign in to get access
           </Link>
         ) : (
-          <p className="mt-4 text-xs text-muted">Use the panel on the right to purchase.</p>
+          <p className="mt-4 text-xs text-muted">Click <strong>Get this lab</strong> on the right to unlock it.</p>
         )}
       </div>
     </div>
