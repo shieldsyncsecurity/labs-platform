@@ -113,7 +113,7 @@ export default function CatalogPage() {
           >
             <div className="flex items-start justify-between gap-3">
               <h3 className="text-base font-bold text-ink">Pay per lab</h3>
-              <span className="shrink-0 text-sm font-bold text-brand">From ₹99</span>
+              <span className="shrink-0 text-sm font-bold text-brand">From ₹199</span>
             </div>
             <ul className="mt-3 space-y-1.5 text-sm text-ink-soft">
               <li>✓ Buy only the labs you want</li>
