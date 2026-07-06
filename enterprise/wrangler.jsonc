@@ -8,11 +8,19 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  "routes": [
+    // Workers custom domain: wrangler creates the proxied DNS record + edge TLS cert
+    // for enterprise.shieldsyncsecurity.com (the zone is in this Cloudflare account).
+    { "pattern": "enterprise.shieldsyncsecurity.com", "custom_domain": true }
+  ],
   "vars": {
     // Enterprise engine (Session Engine's B2B sibling) base URL.
-    "ENT_ENGINE_URL": "http://localhost:4001",
+    "ENT_ENGINE_URL": "https://bdkdcbhzme.execute-api.us-east-1.amazonaws.com",
     // Public origin of THIS app.
-    "APP_URL": "http://localhost:3002"
+    "APP_URL": "https://enterprise.shieldsyncsecurity.com",
+    // Enables the temporary employer dev-login (paste-an-orgId). Turn OFF (remove)
+    // once the Cognito enterprise pool replaces it. orgIds are 128-bit unguessable.
+    "PORTAL_DEV_LOGIN": "1"
   }
   // NOTE: ENT_ENGINE_SECRET and SESSION_SECRET are set as Worker SECRETS
   // (wrangler secret put ENT_ENGINE_SECRET / SESSION_SECRET), never as `vars`
