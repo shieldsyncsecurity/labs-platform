@@ -5,8 +5,11 @@ import {
   FinalizingPill,
   PassBadge,
   PreliminaryBanner,
+  ReportHeader,
   ReportNotFound,
+  ReportShell,
   correctnessPct,
+  formatDate,
 } from "../../_components/report-bits";
 
 // Employer-facing single-candidate report — never indexed, never cached.
@@ -64,12 +67,23 @@ export default async function CandidateReportPage({
   // Guard: the invite may exist but have no result yet (not submitted).
   if (!result) {
     return (
-      <div className="mx-auto max-w-lg px-6 py-24 text-center">
-        <h1 className="text-2xl font-bold text-ink">{data?.candidateName ?? "Candidate"}</h1>
-        <p className="mt-3 text-ink-soft">
-          This candidate has not submitted their assessment yet. Check back after they finish.
-        </p>
-      </div>
+      <ReportShell>
+        <div className="mx-auto max-w-lg px-2 py-16 text-center sm:py-24">
+          <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 ring-1 ring-inset ring-amber-200">
+            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M12 7.5v5l3 1.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-ink">
+            {data?.candidateName ?? "Candidate"}
+          </h1>
+          <p className="mx-auto mt-3 max-w-sm text-ink-soft">
+            This candidate has not submitted their assessment yet. Their verified results will appear
+            here automatically once they finish.
+          </p>
+        </div>
+      </ReportShell>
     );
   }
 
@@ -80,107 +94,141 @@ export default async function CandidateReportPage({
   const reflectionText = result.reflectionText?.trim();
   const dims = result.dims ?? {};
 
+  const passedCriteria = criteria.filter((c) => c?.passed).length;
+
   return (
-    <div className="mx-auto max-w-3xl px-6 py-16">
-      <header className="mb-8">
-        <h1 className="text-2xl font-bold text-ink sm:text-3xl">
-          {data?.candidateName ?? "Candidate report"}
-        </h1>
-        {result.gradedAt ? (
-          <p className="mt-1 text-sm text-muted">Graded {new Date(result.gradedAt).toLocaleString()}</p>
-        ) : null}
-      </header>
+    <ReportShell>
+      <div className="mx-auto max-w-3xl">
+        <ReportHeader
+          eyebrow="Candidate report"
+          title={data?.candidateName ?? "Candidate report"}
+          meta={
+            result.gradedAt ? (
+              <span>Graded {formatDate(result.gradedAt)}</span>
+            ) : null
+          }
+        />
 
-      <div className="mb-8">
-        <PreliminaryBanner />
-      </div>
-
-      <section className="mb-8 rounded-xl border border-line bg-surface p-6">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Correctness</h2>
-        <div className="mt-3 flex items-baseline gap-3">
-          <span className="text-3xl font-bold text-ink">
-            {total ? `${passed} / ${total}` : "—"}
-          </span>
-          <span className="text-sm text-ink-soft">objectives passed</span>
+        <div className="mb-8">
+          <PreliminaryBanner />
         </div>
-        <div className="mt-4 flex items-center gap-3">
-          <div className="flex-1">
-            <Bar pct={pct} />
-          </div>
-          <span className="tabular-nums text-sm font-semibold text-ink-soft">{pct}%</span>
-        </div>
-        {result.gradeError ? (
-          <p className="mt-3 text-xs text-amber-700">
-            Note: grading encountered an issue capturing full evidence for this run ({result.gradeError}).
-          </p>
-        ) : null}
-      </section>
 
-      <section className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
-          Objective breakdown
-        </h2>
-        {criteria.length === 0 ? (
-          <div className="rounded-xl border border-line bg-surface px-6 py-8 text-center text-ink-soft">
-            No objective results are available for this run.
-          </div>
-        ) : (
-          <div className="overflow-hidden rounded-xl border border-line bg-surface">
-            <table className="w-full border-collapse text-left text-sm">
-              <tbody>
-                {criteria.map((c, i) => (
-                  <tr key={c?.id ?? i} className="border-b border-line last:border-b-0">
-                    <td className="px-4 py-3 text-ink-soft">
-                      {c?.description ?? c?.id ?? `Objective ${i + 1}`}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
-                      <PassBadge passed={c?.passed} unknown={c?.unknown} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <section className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Reflection</h2>
-        <div className="rounded-xl border border-line bg-surface p-6">
-          {reflectionText ? (
-            <blockquote className="border-l-2 border-brand/40 pl-4 text-ink-soft italic">
-              {reflectionText}
-            </blockquote>
-          ) : (
-            <p className="text-ink-soft">No written reflection submitted.</p>
-          )}
-          <p className="mt-4 text-xs text-muted">AI reflection scoring: finalizing.</p>
-        </div>
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
-          Other dimensions
-        </h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {(
-            [
-              ["Quality", dims.quality],
-              ["Speed", dims.speed],
-              ["Process", dims.process],
-              ["Integrity", result.integrity],
-            ] as const
-          ).map(([label]) => (
-            <div
-              key={label}
-              className="flex flex-col items-start gap-2 rounded-xl border border-line bg-surface p-4"
-            >
-              <span className="text-sm font-medium text-ink">{label}</span>
-              <FinalizingPill />
+        <section className="mb-8 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+          <div className="border-b border-line bg-gradient-to-br from-brand/[0.05] to-cyan/[0.03] px-6 py-6 sm:px-8">
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand">
+              Objective correctness
+            </h2>
+            <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
+              <div className="flex items-baseline gap-3">
+                <span className="text-5xl font-bold tabular-nums leading-none text-ink">
+                  {total ? passed : "—"}
+                </span>
+                {total ? (
+                  <span className="text-2xl font-semibold tabular-nums text-muted">/ {total}</span>
+                ) : null}
+                <span className="ml-1 text-sm text-ink-soft">objectives passed</span>
+              </div>
+              <span className="text-4xl font-bold tabular-nums text-brand">{pct}%</span>
             </div>
-          ))}
-        </div>
-      </section>
-    </div>
+            <div className="mt-5">
+              <Bar pct={pct} />
+            </div>
+          </div>
+          {result.gradeError ? (
+            <p className="flex items-start gap-2 px-6 py-3 text-xs text-amber-700 sm:px-8">
+              <span aria-hidden="true">⚠</span>
+              <span>
+                Note: grading encountered an issue capturing full evidence for this run (
+                {result.gradeError}).
+              </span>
+            </p>
+          ) : null}
+        </section>
+
+        <section className="mb-8">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+              Objective breakdown
+            </h2>
+            {criteria.length ? (
+              <span className="font-mono text-xs text-muted">
+                {passedCriteria}/{criteria.length} passed
+              </span>
+            ) : null}
+          </div>
+          {criteria.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-line-strong bg-surface px-6 py-10 text-center text-ink-soft">
+              No objective results are available for this run.
+            </div>
+          ) : (
+            <ul className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+              {criteria.map((c, i) => (
+                <li
+                  key={c?.id ?? i}
+                  className="flex items-center justify-between gap-4 border-b border-line/70 px-5 py-4 transition-colors last:border-b-0 hover:bg-canvas/60"
+                >
+                  <span className="text-sm text-ink-soft">
+                    {c?.description ?? c?.id ?? `Objective ${i + 1}`}
+                  </span>
+                  <span className="flex-none">
+                    <PassBadge passed={c?.passed} unknown={c?.unknown} />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="mb-8">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
+            Written reflection
+          </h2>
+          <div className="rounded-2xl border border-line bg-surface p-6 shadow-sm sm:p-7">
+            {reflectionText ? (
+              <blockquote className="relative pl-5 text-ink-soft italic">
+                <span
+                  className="absolute left-0 top-0 h-full w-1 rounded-full bg-gradient-to-b from-brand to-cyan"
+                  aria-hidden="true"
+                />
+                {reflectionText}
+              </blockquote>
+            ) : (
+              <p className="text-ink-soft">No written reflection submitted.</p>
+            )}
+            <p className="mt-5 flex items-center gap-2 border-t border-line/70 pt-4 text-xs text-muted">
+              <span>AI reflection scoring</span>
+              <FinalizingPill />
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
+            Other dimensions
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {(
+              [
+                ["Quality", dims.quality],
+                ["Speed", dims.speed],
+                ["Process", dims.process],
+                ["Integrity", result.integrity],
+              ] as const
+            ).map(([label]) => (
+              <div
+                key={label}
+                className="flex flex-col items-start gap-2.5 rounded-xl border border-line bg-surface p-4 shadow-sm"
+              >
+                <span className="text-sm font-medium text-ink">{label}</span>
+                <FinalizingPill />
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-muted">
+            These signals are computed after correctness and will populate automatically.
+          </p>
+        </section>
+      </div>
+    </ReportShell>
   );
 }

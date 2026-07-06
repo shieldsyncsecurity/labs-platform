@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import {
   Bar,
   PassBadge,
   PreliminaryBanner,
   FinalizingPill,
+  RankBadge,
+  ReportHeader,
+  ReportShell,
+  WalkthroughCta,
   correctnessPct,
   formatDate,
 } from "../../r/_components/report-bits";
@@ -58,10 +61,28 @@ const DETAIL_REFLECTION =
 
 function SampleRibbon() {
   return (
-    <div className="mb-8 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-      <span className="font-semibold">Sample report.</span> Every candidate and score below is
-      fictional, shown to illustrate what employers receive. Real reports are private, per-assessment
-      secret links.
+    <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3.5 text-sm text-amber-900 sm:px-5">
+      <span className="mt-0.5 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200">
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
+          <path d="M8 2.5l6 11H2l6-11z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+          <path d="M8 6.5v3.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <circle cx="8" cy="11.6" r="0.9" fill="currentColor" />
+        </svg>
+      </span>
+      <p>
+        <span className="font-semibold">Sample report.</span> Every candidate and score below is
+        fictional, shown to illustrate what employers receive. Real reports are private,
+        per-assessment secret links.
+      </p>
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-line bg-surface px-4 py-3 shadow-sm">
+      <div className="text-lg font-bold tabular-nums text-ink">{value}</div>
+      <div className="mt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted">{label}</div>
     </div>
   );
 }
@@ -71,138 +92,207 @@ export default function DemoReportPage() {
     .map((c) => ({ c, pct: correctnessPct(c.passedCount, c.totalCriteria) }))
     .sort((a, b) => b.pct - a.pct);
 
-  const detailPct = correctnessPct(DETAIL_CRITERIA.filter((x) => x.passed).length, DETAIL_CRITERIA.length);
+  const total = rows.length;
+  const withReflection = rows.filter(({ c }) => c.hasReflection).length;
+  const avgPct = total ? Math.round(rows.reduce((s, { pct }) => s + pct, 0) / total) : 0;
+
+  const detailPassed = DETAIL_CRITERIA.filter((x) => x.passed).length;
+  const detailPct = correctnessPct(detailPassed, DETAIL_CRITERIA.length);
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-16">
-      <SampleRibbon />
-
+    <ReportShell ribbon={<SampleRibbon />}>
       {/* ── Comparison view (what /r/[token] shows) ── */}
-      <header className="mb-8">
-        <h1 className="text-2xl font-bold text-ink sm:text-3xl">{ASSESSMENT.name}</h1>
-        <p className="mt-1 text-sm text-muted">
-          <span className="font-mono">{ASSESSMENT.labSlug}</span>
-          {" · "}
-          <span>Created {formatDate(ASSESSMENT.createdAt)}</span>
-        </p>
-      </header>
+      <ReportHeader
+        eyebrow="Assessment report"
+        title={ASSESSMENT.name}
+        meta={
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="inline-flex items-center rounded-md bg-canvas px-2 py-0.5 font-mono text-xs text-ink-soft ring-1 ring-inset ring-line-strong/60">
+              {ASSESSMENT.labSlug}
+            </span>
+            <span>Created {formatDate(ASSESSMENT.createdAt)}</span>
+          </span>
+        }
+      />
+
+      <div className="mb-6 grid grid-cols-3 gap-3 sm:max-w-md">
+        <StatCard label="Candidates" value={String(total)} />
+        <StatCard label="Avg correctness" value={`${avgPct}%`} />
+        <StatCard label="With reflection" value={`${withReflection}/${total}`} />
+      </div>
 
       <div className="mb-8">
         <PreliminaryBanner />
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-line bg-surface">
-        <table className="w-full border-collapse text-left text-sm">
-          <thead>
-            <tr className="border-b border-line bg-canvas text-xs uppercase tracking-wide text-muted">
-              <th className="px-4 py-3 font-semibold">Candidate</th>
-              <th className="px-4 py-3 font-semibold">Objectives</th>
-              <th className="px-4 py-3 font-semibold">Correctness</th>
-              <th className="px-4 py-3 font-semibold">Time</th>
-              <th className="px-4 py-3 font-semibold">Reflection</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ c, pct }) => (
-              <tr key={c.name} className="border-b border-line last:border-b-0">
-                <td className="px-4 py-3 font-medium text-ink">{c.name}</td>
-                <td className="px-4 py-3 text-ink-soft">
-                  {c.passedCount} / {c.totalCriteria}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-24">
-                      <Bar pct={pct} />
-                    </div>
-                    <span className="tabular-nums text-ink-soft">{pct}%</span>
-                  </div>
-                </td>
-                <td className="px-4 py-3 tabular-nums text-ink-soft">{c.timeUsedMin} min</td>
-                <td className="px-4 py-3">
-                  {c.hasReflection ? (
-                    <span className="text-emerald-700">{"✓"}</span>
-                  ) : (
-                    <span className="text-muted">{"—"}</span>
-                  )}
-                </td>
+      <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+            <thead>
+              <tr className="border-b border-line bg-canvas/70 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
+                <th className="px-5 py-3.5">Rank</th>
+                <th className="px-5 py-3.5">Candidate</th>
+                <th className="px-5 py-3.5">Objectives</th>
+                <th className="px-5 py-3.5">Correctness</th>
+                <th className="px-5 py-3.5">Time</th>
+                <th className="px-5 py-3.5 text-center">Reflection</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map(({ c, pct }, i) => (
+                <tr
+                  key={c.name}
+                  className="border-b border-line/70 transition-colors last:border-b-0 hover:bg-canvas/60"
+                >
+                  <td className="px-5 py-4">
+                    <RankBadge rank={i + 1} />
+                  </td>
+                  <td className="px-5 py-4 font-medium text-ink">{c.name}</td>
+                  <td className="px-5 py-4 tabular-nums text-ink-soft">
+                    {c.passedCount} / {c.totalCriteria}
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-28">
+                        <Bar pct={pct} />
+                      </div>
+                      <span className="w-10 tabular-nums font-semibold text-ink">{pct}%</span>
+                    </div>
+                  </td>
+                  <td className="px-5 py-4 tabular-nums text-ink-soft">{c.timeUsedMin} min</td>
+                  <td className="px-5 py-4 text-center">
+                    {c.hasReflection ? (
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-200">
+                        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
+                          <path d="M3.5 8.5l3 3 6-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        <span className="sr-only">Reflection submitted</span>
+                      </span>
+                    ) : (
+                      <span className="text-muted" aria-label="No reflection">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <p className="mt-6 text-xs text-muted">
+      <p className="mt-6 text-xs leading-relaxed text-muted">
         Candidates are ranked by verified performance on a real, isolated AWS environment — not a
         quiz. Each row links to a full per-candidate breakdown (shown below).
       </p>
 
       {/* ── Candidate detail (what /r/c/[token] shows) ── */}
-      <div className="my-12 border-t border-line" />
-
-      <header className="mb-6">
-        <p className="text-xs uppercase tracking-wide text-muted">Inside a candidate&apos;s report</p>
-        <h2 className="mt-1 text-xl font-bold text-ink sm:text-2xl">Priya S.</h2>
-      </header>
-
-      <div className="mb-8">
-        <PreliminaryBanner />
+      <div className="my-12 flex items-center gap-4">
+        <span className="h-px flex-1 bg-line" />
+        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">
+          Inside a candidate&apos;s report
+        </span>
+        <span className="h-px flex-1 bg-line" />
       </div>
 
-      <div className="mb-8 rounded-xl border border-line bg-surface px-6 py-5">
-        <div className="flex items-baseline justify-between">
-          <span className="text-sm font-semibold uppercase tracking-wide text-muted">Correctness</span>
-          <span className="text-2xl font-bold text-ink">
-            {DETAIL_CRITERIA.filter((x) => x.passed).length} / {DETAIL_CRITERIA.length}
-          </span>
+      <div className="mx-auto max-w-3xl">
+        <ReportHeader eyebrow="Candidate report" title="Priya S." meta={<span>Graded {formatDate(ASSESSMENT.createdAt)}</span>} />
+
+        <div className="mb-8">
+          <PreliminaryBanner />
         </div>
-        <div className="mt-3 flex items-center gap-3">
-          <Bar pct={detailPct} />
-          <span className="tabular-nums text-sm text-ink-soft">{detailPct}%</span>
-        </div>
-      </div>
 
-      <h3 className="mb-3 text-sm font-semibold text-ink">Objectives</h3>
-      <div className="mb-8 overflow-hidden rounded-xl border border-line bg-surface">
-        <ul className="divide-y divide-line">
-          {DETAIL_CRITERIA.map((crit, i) => (
-            <li key={i} className="flex items-center justify-between gap-4 px-4 py-3">
-              <span className="text-sm text-ink-soft">{crit.description}</span>
-              <PassBadge passed={crit.passed} unknown={crit.unknown} />
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <h3 className="mb-3 text-sm font-semibold text-ink">Written reflection</h3>
-      <blockquote className="mb-3 rounded-xl border border-line bg-canvas px-5 py-4 text-sm italic text-ink-soft">
-        {DETAIL_REFLECTION}
-      </blockquote>
-      <p className="mb-8 text-xs text-muted">AI reflection scoring: finalizing.</p>
-
-      <h3 className="mb-3 text-sm font-semibold text-ink">Other dimensions</h3>
-      <div className="mb-12 flex flex-wrap gap-3">
-        {["Solution quality", "Speed", "Process", "Integrity"].map((d) => (
-          <div key={d} className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-soft">
-            <span>{d}</span>
-            <FinalizingPill />
+        <section className="mb-8 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+          <div className="border-b border-line bg-gradient-to-br from-brand/[0.05] to-cyan/[0.03] px-6 py-6 sm:px-8">
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand">
+              Objective correctness
+            </h3>
+            <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
+              <div className="flex items-baseline gap-3">
+                <span className="text-5xl font-bold tabular-nums leading-none text-ink">{detailPassed}</span>
+                <span className="text-2xl font-semibold tabular-nums text-muted">/ {DETAIL_CRITERIA.length}</span>
+                <span className="ml-1 text-sm text-ink-soft">objectives passed</span>
+              </div>
+              <span className="text-4xl font-bold tabular-nums text-brand">{detailPct}%</span>
+            </div>
+            <div className="mt-5">
+              <Bar pct={detailPct} />
+            </div>
           </div>
-        ))}
+        </section>
+
+        <section className="mb-8">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Objective breakdown</h3>
+            <span className="font-mono text-xs text-muted">
+              {detailPassed}/{DETAIL_CRITERIA.length} passed
+            </span>
+          </div>
+          <ul className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+            {DETAIL_CRITERIA.map((crit, i) => (
+              <li
+                key={i}
+                className="flex items-center justify-between gap-4 border-b border-line/70 px-5 py-4 transition-colors last:border-b-0 hover:bg-canvas/60"
+              >
+                <span className="text-sm text-ink-soft">{crit.description}</span>
+                <span className="flex-none">
+                  <PassBadge passed={crit.passed} unknown={crit.unknown} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="mb-8">
+          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Written reflection</h3>
+          <div className="rounded-2xl border border-line bg-surface p-6 shadow-sm sm:p-7">
+            <blockquote className="relative pl-5 text-ink-soft italic">
+              <span
+                className="absolute left-0 top-0 h-full w-1 rounded-full bg-gradient-to-b from-brand to-cyan"
+                aria-hidden="true"
+              />
+              {DETAIL_REFLECTION}
+            </blockquote>
+            <p className="mt-5 flex items-center gap-2 border-t border-line/70 pt-4 text-xs text-muted">
+              <span>AI reflection scoring</span>
+              <FinalizingPill />
+            </p>
+          </div>
+        </section>
+
+        <section className="mb-12">
+          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Other dimensions</h3>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {["Solution quality", "Speed", "Process", "Integrity"].map((d) => (
+              <div
+                key={d}
+                className="flex flex-col items-start gap-2.5 rounded-xl border border-line bg-surface p-4 shadow-sm"
+              >
+                <span className="text-sm font-medium text-ink">{d}</span>
+                <FinalizingPill />
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
 
       {/* ── CTA ── */}
-      <div className="rounded-2xl border border-brand/20 bg-brand/5 px-6 py-8 text-center">
-        <h2 className="text-xl font-bold text-ink">This is what you get for every candidate.</h2>
-        <p className="mx-auto mt-2 max-w-xl text-sm text-ink-soft">
-          Send a link, the candidate solves a real cloud security task in an isolated AWS account, and
-          you get a verified, side-by-side report. No résumé guesswork.
-        </p>
-        <Link
-          href="/"
-          className="mt-5 inline-flex items-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-strong"
-        >
-          Book a walkthrough
-        </Link>
+      <div className="relative overflow-hidden rounded-3xl border border-brand/20 bg-gradient-to-br from-brand/[0.07] via-surface to-cyan/[0.05] px-6 py-10 text-center shadow-sm sm:px-10 sm:py-12">
+        <div
+          className="pointer-events-none absolute -top-16 left-1/2 h-48 w-96 -translate-x-1/2 rounded-full bg-brand/10 blur-3xl"
+          aria-hidden="true"
+        />
+        <div className="relative">
+          <h2 className="text-xl font-bold tracking-tight text-ink sm:text-2xl">
+            This is what you get for every candidate.
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink-soft">
+            Send a link, the candidate solves a real cloud security task in an isolated AWS account,
+            and you get a verified, side-by-side report. No résumé guesswork.
+          </p>
+          <div className="mt-6">
+            <WalkthroughCta href="/" internal label="Book a walkthrough" />
+          </div>
+        </div>
       </div>
-    </div>
+    </ReportShell>
   );
 }

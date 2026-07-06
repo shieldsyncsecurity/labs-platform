@@ -52,6 +52,7 @@ import {
 } from "./labinfra.mjs";
 import { gradeLab } from "./graders.mjs";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { randomInt } from "node:crypto";
 
 // Scored time-box for an enterprise assessment attempt (MVP: fixed for all
@@ -62,6 +63,7 @@ const ENT_TIMEBOX_MIN = 60;
 const ENT_GRACE_MIN = 15;
 
 const entLambda = new LambdaClient({ region: "us-east-1" });
+const ses = new SESClient({ region: "us-east-1" });
 
 // Shared-secret guard for the public HTTP surface (set via Lambda env). The
 // enterprise app sends this in the X-Engine-Token header; without it the
@@ -290,10 +292,39 @@ export async function handler(event) {
 
     if (method === "POST" && path === "/ent/otp/send") {
       const { inviteToken } = parsed;
+      const invite = await getInvite(inviteToken);
+      if (!invite) return resp(404, { error: "not found" });
       const code = String(randomInt(0, 1000000)).padStart(6, "0");
       await setOtp(inviteToken, code);
-      // TODO: dispatch SES email with the code (Fix H)
-      const out = { ok: true };
+      // Deliver the code by email via SES (Fix H). ENT_OTP_FROM must be an
+      // SES-verified sender identity (and in the SES sandbox, the recipient must
+      // be verified too). Never blocks the flow on a send failure — we report
+      // `emailed` so ops can see delivery state.
+      const from = process.env.ENT_OTP_FROM;
+      let emailed = false;
+      if (from && invite.candidateEmail) {
+        try {
+          await ses.send(
+            new SendEmailCommand({
+              Source: from,
+              Destination: { ToAddresses: [invite.candidateEmail] },
+              Message: {
+                Subject: { Data: "Your ShieldSync assessment verification code" },
+                Body: {
+                  Text: { Data: `Your ShieldSync verification code is ${code}. It expires in 10 minutes. If you did not expect this, you can ignore it.` },
+                  Html: {
+                    Data: `<div style="font-family:system-ui,sans-serif;color:#0f172a"><p>Your ShieldSync assessment verification code:</p><p style="font-size:30px;font-weight:800;letter-spacing:6px;color:#4f46e5">${code}</p><p style="color:#64748b">It expires in 10 minutes. If you did not expect this, you can ignore it.</p></div>`,
+                  },
+                },
+              },
+            })
+          );
+          emailed = true;
+        } catch (e) {
+          console.error("[ent/otp/send] SES send failed:", e.name, e.message);
+        }
+      }
+      const out = { ok: true, emailed };
       if (!ENT_ENGINE_SECRET) out.devCode = code; // dev-only: no secret configured
       return resp(200, out);
     }
