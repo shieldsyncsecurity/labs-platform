@@ -15,6 +15,7 @@ import {
   createOrg,
   getOrg,
   addCredits,
+  listAllOrgs,
   createAssessment,
   getAssessment,
   getAssessmentByReportToken,
@@ -200,6 +201,12 @@ export async function handler(event) {
       const org = await getOrg(qs.orgId);
       if (!org) return resp(404, { error: "not found" });
       return resp(200, org);
+    }
+
+    // ShieldSync admin only (app enforces the admin gate before calling this).
+    if (method === "GET" && path === "/ent/admin/orgs") {
+      const orgs = await listAllOrgs();
+      return resp(200, { orgs });
     }
 
     if (method === "POST" && path === "/ent/orgs/credits") {

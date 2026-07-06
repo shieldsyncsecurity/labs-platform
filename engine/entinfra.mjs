@@ -20,6 +20,7 @@ import {
   PutItemCommand,
   UpdateItemCommand,
   QueryCommand,
+  ScanCommand,
   TransactWriteItemsCommand,
 } from "@aws-sdk/client-dynamodb";
 import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
@@ -182,6 +183,15 @@ export async function addCredits(orgId, delta) {
     })
   );
   return itemToObject(r.Attributes);
+}
+
+/** listAllOrgs(): every org (Scan) — for the ShieldSync ADMIN console only (create
+ *  org / adjust credits / oversee accounts). Not employer-facing. Org count is small
+ *  and admin access is infrequent, so a full-table Scan is fine here. */
+export async function listAllOrgs() {
+  const db = await ddb();
+  const r = await db.send(new ScanCommand({ TableName: ORGS_TABLE }));
+  return (r.Items ?? []).map(itemToObject);
 }
 
 // ── ASSESSMENTS ──────────────────────────────────────────────────────────────
