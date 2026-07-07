@@ -48,5 +48,21 @@ export const labCatalog: Lab[] = [
       "CloudTrail"
     ],
     "estimatedActiveMinutes": 30
+  },
+  {
+    "slug": "storage-public-exposure-audit",
+    "title": "Storage account public exposure & data leak",
+    "level": "Beginner",
+    "free": true,
+    "ready": false,
+    "summary": "Find and fix a leaky Azure Storage account — anonymous blob access, insecure HTTP allowed, and account-key access left on — then verify an anonymous download of the seeded 'secret' file is truly blocked.",
+    "tags": [
+      "Azure Storage",
+      "Blob",
+      "Public Access",
+      "Shared Key",
+      "RBAC"
+    ],
+    "estimatedActiveMinutes": 30
   }
 ];
