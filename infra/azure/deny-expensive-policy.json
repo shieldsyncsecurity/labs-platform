@@ -1,8 +1,8 @@
 {
-  "_comment": "ShieldSync Labs — Azure 'deny expensive' guardrail (the SCP analog of infra/scp-sandbox-deny-expensive.json). This is ONE Azure Policy of policyType 'Custom' whose rule is a deny of anything a free storage-exposure lab would never legitimately create: any VM above the tiny B1s tier, VM scale sets, AKS, any managed database (SQL / MySQL / PostgreSQL / Cosmos / MariaDB), public IPs, NAT gateways, Application Gateways, and Load Balancers — plus a hard allowed-locations lock to eastus. Assign it at the labs-subscription (or the labs management-group) scope so it applies to EVERY leased resource group. setup-landing-zone.ps1 creates this definition and assigns it. The DataActions/least-privilege story lives in the engine lab.json learnerRole; this policy is the coarse cost/blast-radius fence that sits ABOVE the learner's RBAC.",
+  "_comment": "ShieldSync Labs - Azure 'deny expensive' guardrail (the SCP analog of infra/scp-sandbox-deny-expensive.json). ONE Custom Azure Policy that denies anything a free storage-exposure lab would never legitimately create: any VM above the tiny B1s tier, VM scale sets, AKS, any managed database (SQL / MySQL / PostgreSQL / Cosmos / MariaDB), public IPs, NAT gateways, Application Gateways, Load Balancers, plus a hard allowed-locations lock to eastus. Assign at the labs-subscription (or labs management-group) scope so it applies to EVERY leased RG. NOTE: Azure Policy rejects inline 'comment' keys inside policyRule conditions, so the per-condition notes live here instead: (1) REGION LOCK - deny anything outside allowedLocations (global resources report 'global' and pass); (2) VMs above the tiny burstable tier; (3) VM scale sets always denied; (4) managed Kubernetes; (5) managed databases; (6) costly networking; (7) other easy-to-forget spend (ACI, Redis, Synapse, HDInsight, Cognitive/OpenAI).",
   "name": "shieldsync-labs-deny-expensive",
   "properties": {
-    "displayName": "ShieldSync Labs — deny expensive SKUs, DBs, networking; lock to eastus",
+    "displayName": "ShieldSync Labs - deny expensive SKUs, DBs, networking; lock to eastus",
     "description": "Cost + blast-radius guardrail for the ShieldSync Labs sandbox. Denies any resource that costs money at idle or enables an expensive escape (large VMs, VMSS, AKS, managed databases, public IPs, NAT gateways, App Gateways, Load Balancers) and pins all deployments to the eastus region. Storage accounts (the lab subject) are intentionally NOT denied.",
     "policyType": "Custom",
     "mode": "All",
@@ -33,7 +33,6 @@
       "if": {
         "anyOf": [
           {
-            "comment": "REGION LOCK — anything outside the allowed region list is denied (global resources report location 'global' and are allowed through).",
             "allOf": [
               {
                 "field": "location",
@@ -46,7 +45,6 @@
             ]
           },
           {
-            "comment": "VMs above the tiny burstable tier.",
             "allOf": [
               {
                 "field": "type",
@@ -59,12 +57,10 @@
             ]
           },
           {
-            "comment": "VM scale sets — always denied (an easy way to spin up many VMs).",
             "field": "type",
             "equals": "Microsoft.Compute/virtualMachineScaleSets"
           },
           {
-            "comment": "Managed Kubernetes.",
             "field": "type",
             "in": [
               "Microsoft.ContainerService/managedClusters",
@@ -72,7 +68,6 @@
             ]
           },
           {
-            "comment": "Managed databases of every flavour (SQL / MySQL / PostgreSQL / MariaDB / Cosmos).",
             "field": "type",
             "in": [
               "Microsoft.Sql/servers",
@@ -86,7 +81,6 @@
             ]
           },
           {
-            "comment": "Costly networking — public IPs, NAT gateways, App Gateways, Load Balancers, VPN/ExpressRoute gateways.",
             "field": "type",
             "in": [
               "Microsoft.Network/publicIPAddresses",
@@ -99,7 +93,6 @@
             ]
           },
           {
-            "comment": "Other easy-to-forget spend: AKS-adjacent container groups, Redis, Synapse, HDInsight, App Service plans above free, and Cognitive/OpenAI accounts.",
             "field": "type",
             "in": [
               "Microsoft.ContainerInstance/containerGroups",

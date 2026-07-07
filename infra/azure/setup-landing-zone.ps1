@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+# Runs in Windows PowerShell 5.1+ or PowerShell 7 (no v7-only syntax; ASCII-only).
 <#
     ShieldSync Labs - Azure landing-zone setup  (ONE-TIME, per account)
     ===================================================================
@@ -65,9 +65,12 @@ function Write-Skip([string]$msg) { Write-Host "    skip (exists): $msg" -Foregr
 
 # az emits JSON on stdout; wrap so a native failure becomes a PowerShell terminating error.
 function Invoke-Az {
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
-    $out = & az @Args
-    if ($LASTEXITCODE -ne 0) { throw "az $($Args -join ' ') failed (exit $LASTEXITCODE)" }
+    # NB: no declared param + no [CmdletBinding] on purpose. If this were an advanced
+    # function, PowerShell would try to bind single-dash az flags like -o/-g as common
+    # parameters (-OutVariable/-OutBuffer) and fail ("parameter 'o' is ambiguous").
+    # Using the automatic $args passes every token straight through to az verbatim.
+    $out = & az @args
+    if ($LASTEXITCODE -ne 0) { throw "az $($args -join ' ') failed (exit $LASTEXITCODE)" }
     return $out
 }
 
@@ -140,7 +143,7 @@ $learnerRoleDef = @{
     AssignableScopes = @($subScope)
 }
 $roleJsonPath = Join-Path ([System.IO.Path]::GetTempPath()) "ss-learner-role.json"
-$learnerRoleDef | ConvertTo-Json -Depth 8 | Set-Content -Path $roleJsonPath -Encoding utf8
+$learnerRoleDef | ConvertTo-Json -Depth 8 | Set-Content -Path $roleJsonPath -Encoding ascii
 if ([string]::IsNullOrWhiteSpace($existingRole)) {
     Invoke-Az role definition create --role-definition $roleJsonPath | Out-Null
     Write-Ok "created learner role"
@@ -150,6 +153,19 @@ if ([string]::IsNullOrWhiteSpace($existingRole)) {
     Write-Ok "updated learner role"
 }
 Remove-Item $roleJsonPath -ErrorAction SilentlyContinue
+
+# A custom role definition takes a few seconds to become queryable across RBAC replicas.
+# Fetch its id ONCE here (with a short retry) so the mgmt SP's RBAC-admin condition below
+# always has a valid GUID - querying it per-iteration hit an empty result under eventual
+# consistency and produced an invalid ({}) condition.
+$learnerRoleId = ""
+for ($r = 0; $r -lt 24; $r++) {
+    $learnerRoleId = (& az role definition list --name $LearnerRoleName --query "[0].name" -o tsv 2>$null)
+    if (-not [string]::IsNullOrWhiteSpace($learnerRoleId)) { break }
+    Start-Sleep -Seconds 5
+}
+if ([string]::IsNullOrWhiteSpace($learnerRoleId)) { throw "learner role '$LearnerRoleName' did not become queryable in time (RBAC propagation)" }
+Write-Ok "learner role id $learnerRoleId"
 
 # ---------------------------------------------------------------------------
 # 3. Service principals  (mgmt = write-on-pool; probe = read-only)
@@ -183,12 +199,11 @@ for ($i = 1; $i -le $PoolSize; $i++) {
     $rgScope = "$subScope/resourceGroups/$rg"
     Invoke-Az role assignment create --assignee $mgmtAppId --role "Contributor" --scope $rgScope | Out-Null
     # seedBlob() uploads the "secret" object via an AAD token (a DATA-plane write), and Contributor
-    # (control plane) does NOT include blob-data write — so the mgmt SP also needs Storage Blob Data
+    # (control plane) does NOT include blob-data write - so the mgmt SP also needs Storage Blob Data
     # Contributor. Scoped to the pool RG only, never the subscription. Without this, seedBlob 403s.
     Invoke-Az role assignment create --assignee $mgmtAppId --role "Storage Blob Data Contributor" --scope $rgScope | Out-Null
     # RBAC-admin so it can grant the learner role. Condition: it may ONLY assign the one learner role,
-    # so a compromised mgmt SP cannot hand out Owner/Contributor.
-    $learnerRoleId = (Invoke-Az role definition list --name $LearnerRoleName --query "[0].name" -o tsv)
+    # so a compromised mgmt SP cannot hand out Owner/Contributor. ($learnerRoleId fetched once above.)
     $cond = "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$learnerRoleId}))"
     Invoke-Az role assignment create --assignee $mgmtAppId `
         --role "Role Based Access Control Administrator" --scope $rgScope `
@@ -232,8 +247,8 @@ $policyName = $policyDoc.name
 # The 'rules' az expects is the properties.policyRule object; params is properties.parameters.
 $rulesPath  = Join-Path ([System.IO.Path]::GetTempPath()) "ss-deny-rules.json"
 $paramsPath = Join-Path ([System.IO.Path]::GetTempPath()) "ss-deny-params.json"
-$policyDoc.properties.policyRule  | ConvertTo-Json -Depth 20 | Set-Content $rulesPath  -Encoding utf8
-$policyDoc.properties.parameters  | ConvertTo-Json -Depth 20 | Set-Content $paramsPath -Encoding utf8
+$policyDoc.properties.policyRule  | ConvertTo-Json -Depth 20 | Set-Content $rulesPath  -Encoding ascii
+$policyDoc.properties.parameters  | ConvertTo-Json -Depth 20 | Set-Content $paramsPath -Encoding ascii
 
 # create-or-update the definition (idempotent).
 Invoke-Az policy definition create `
@@ -247,14 +262,26 @@ Invoke-Az policy definition create `
 Write-Ok "policy definition $policyName"
 
 $assignmentName = "ss-labs-deny-expensive"
+# `policy assignment show` THROWS on not-found (unlike `list`), and under
+# $ErrorActionPreference=Stop that surfaces as a terminating error. Soften it just for this
+# existence probe so a missing assignment (the normal first-run case) means "create it".
+$eap = $ErrorActionPreference; $ErrorActionPreference = 'SilentlyContinue'
 $existingAssign = (& az policy assignment show --name $assignmentName --scope $subScope --query name -o tsv 2>$null)
+$ErrorActionPreference = $eap
 if ([string]::IsNullOrWhiteSpace($existingAssign)) {
+    # Pass assignment params via a temp FILE, not inline JSON: az's shorthand parser
+    # mangles inline '{ "..": {..} }' under Windows PowerShell quoting. Mirrors how the
+    # definition passes --params "@file" above (which works). ConvertTo-Json guarantees
+    # valid JSON; @($Location) keeps it a JSON array even for a single region.
+    $assignParamsPath = Join-Path ([System.IO.Path]::GetTempPath()) "ss-deny-assign-params.json"
+    @{ allowedLocations = @{ value = @($Location) } } | ConvertTo-Json -Depth 5 | Set-Content $assignParamsPath -Encoding ascii
     Invoke-Az policy assignment create `
         --name $assignmentName `
         --display-name "ShieldSync Labs - deny expensive (sub-wide)" `
         --policy $policyName `
         --scope $subScope `
-        --params "{ \"allowedLocations\": { \"value\": [\"$Location\"] } }" | Out-Null
+        --params "@$assignParamsPath" | Out-Null
+    Remove-Item $assignParamsPath -ErrorAction SilentlyContinue
     Write-Ok "assigned policy at $subScope"
 } else {
     Write-Skip "policy assignment $assignmentName"
