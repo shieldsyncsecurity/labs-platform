@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useAuth } from "@/lib/auth/context";
-import { formatMoney } from "@/lib/payments/pricing";
+import { formatMoney, priceFor } from "@/lib/payments/pricing";
 import { getLab } from "@/lib/labs";
 import { rulesSummary } from "@/lib/access-rules";
 import type { Plan, Currency } from "@/lib/payments/types";
@@ -37,9 +36,10 @@ function loadPaytmScript(host: string, mid: string): Promise<void> {
   });
 }
 
-// Real Paytm checkout: server creates + prices the order and gets a txnToken; the browser
-// opens Paytm's secure JS Checkout; on completion we CONFIRM server-to-server (never trust
-// the client) and the engine grants the entitlement.
+// Real Paytm checkout. The sheet opens as a locally-priced summary — the server
+// order (+ Paytm txnToken) is created only when the user clicks Pay (no-auto-actions
+// rule: opening the sheet must not create payment state). On completion we CONFIRM
+// server-to-server (never trust the client) and the engine grants the entitlement.
 export function CheckoutSheet({
   labSlug,
   labTitle,
@@ -53,9 +53,8 @@ export function CheckoutSheet({
   onClose: () => void;
   onPaid: () => void | Promise<void>;
 }) {
-  const { user } = useAuth();
   const [info, setInfo] = useState<CheckoutInit | null>(null);
-  const [phase, setPhase] = useState<"loading" | "summary" | "processing" | "confirming" | "done" | "failed" | "notlaunched">("loading");
+  const [phase, setPhase] = useState<"summary" | "processing" | "confirming" | "done" | "failed" | "notlaunched">("summary");
   const [err, setErr] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const invoked = useRef(false);
@@ -68,39 +67,27 @@ export function CheckoutSheet({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Create + price the order and initiate with Paytm → txnToken.
-  useEffect(() => {
-    if (!user) return;
-    let alive = true;
-    (async () => {
-      try {
-        const r = await fetch("/api/payments/checkout", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ labSlug, plan }),
-        });
-        const d = (await r.json().catch(() => ({}))) as Partial<CheckoutInit> & { error?: string };
-        if (!alive) return;
-        if (!r.ok || !d.txnToken) {
-          // Payments aren't live yet — this isn't a failure to retry, it's an
-          // expected state. Show a distinct "not launched" card instead of the
-          // failed state (whose "Try again" would just re-fire the same 503 forever).
-          if (r.status === 503 && d.error === "payments not available yet") {
-            setPhase("notlaunched");
-            return;
-          }
-          setErr(d.error ?? "Couldn't start checkout");
-          setPhase("failed");
-          return;
-        }
-        setInfo(d as CheckoutInit);
-        setPhase("summary");
-      } catch {
-        if (alive) { setErr("Network error"); setPhase("failed"); }
+  // Create + price the order server-side and initiate with Paytm → txnToken.
+  // Called from pay() — the first user click — never on mount.
+  async function createOrder(): Promise<CheckoutInit | null> {
+    const r = await fetch("/api/payments/checkout", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ labSlug, plan }),
+    });
+    const d = (await r.json().catch(() => ({}))) as Partial<CheckoutInit> & { error?: string };
+    if (!r.ok || !d.txnToken) {
+      // Payments aren't live yet — an expected state, not a retryable failure.
+      if (r.status === 503 && d.error === "payments not available yet") {
+        setPhase("notlaunched");
+        return null;
       }
-    })();
-    return () => { alive = false; };
-  }, [user, labSlug, plan]);
+      throw new Error(d.error ?? "Couldn't start checkout");
+    }
+    const init = d as CheckoutInit;
+    setInfo(init);
+    return init;
+  }
 
   async function confirm(orderId: string) {
     setPhase("confirming");
@@ -120,11 +107,15 @@ export function CheckoutSheet({
   }
 
   async function pay() {
-    if (!info || invoked.current) return;
+    if (invoked.current) return;
     invoked.current = true;
     setPhase("processing");
     try {
-      await loadPaytmScript(info.host, info.mid);
+      // First click: create + price the order now (reuse it on a retry).
+      const init = info ?? (await createOrder());
+      if (!init) { invoked.current = false; return; } // notlaunched path
+
+      await loadPaytmScript(init.host, init.mid);
       const cjs = window.Paytm?.CheckoutJS;
       if (!cjs) throw new Error("Paytm checkout unavailable");
 
@@ -132,19 +123,19 @@ export function CheckoutSheet({
         root: "",
         flow: "DEFAULT",
         data: {
-          orderId: info.orderId,
-          token: info.txnToken,
+          orderId: init.orderId,
+          token: init.txnToken,
           tokenType: "TXN_TOKEN",
-          amount: (info.amountMinor / 100).toFixed(2),
+          amount: (init.amountMinor / 100).toFixed(2),
         },
-        merchant: { mid: info.mid, redirect: false },
+        merchant: { mid: init.mid, redirect: false },
         handler: {
           notifyMerchant: () => {},
           // Fires when the popup completes. We IGNORE the client-reported status and
           // confirm authoritatively server-side.
           transactionStatus: () => {
             try { cjs.close?.(); } catch {}
-            void confirm(info.orderId);
+            void confirm(init.orderId);
           },
         },
       };
@@ -167,7 +158,11 @@ export function CheckoutSheet({
     }
   }
 
-  const price = info ? formatMoney(info.amountMinor, info.currency) : "…";
+  // Until the order exists, price locally from the same table the server uses
+  // (server stays authoritative once the order is created).
+  const price = info
+    ? formatMoney(info.amountMinor, info.currency)
+    : formatMoney(priceFor(labSlug, plan, "INR"), "INR");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" onClick={onClose}>
@@ -200,8 +195,6 @@ export function CheckoutSheet({
           <span className="text-base text-muted">Total</span>
           <span className="text-2xl font-extrabold text-ink">{price}</span>
         </div>
-
-        {phase === "loading" && <p className="mt-5 text-base text-muted">Preparing your order…</p>}
 
         {phase === "summary" && (
           <div className="mt-5 flex flex-col gap-2">
@@ -251,7 +244,7 @@ export function CheckoutSheet({
           <div className="mt-5">
             <p className="text-base font-semibold text-[#b91c1c]">{err ?? "Payment didn't go through"}</p>
             <button
-              onClick={() => { invoked.current = false; setErr(null); setPhase(info ? "summary" : "loading"); }}
+              onClick={() => { invoked.current = false; setErr(null); setPhase("summary"); }}
               className="mt-3 w-full rounded-xl border border-line px-6 py-3 text-base font-semibold text-ink hover:bg-canvas"
             >
               Try again
