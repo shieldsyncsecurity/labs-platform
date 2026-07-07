@@ -46,7 +46,7 @@ STALE — THIS file is the source of truth.**
 | Component | Status | Detail |
 |---|---|---|
 | App — Cloudflare Worker `labs-platform` | LIVE | auto-deployed by CI on push to `master` (app/**); pages + auth + lab UI all 200 |
-| CI/CD — both repos | LIVE | labs app: GitHub Actions `.github/workflows/deploy-labs.yml` (`npm run cf:deploy`) on push to `master` touching `app/**`. Marketing: Cloudflare Workers Builds on push to `main`. Engine still deploys manually (deploy.ps1). |
+| CI/CD — both repos | LIVE | labs app: GitHub Actions `.github/workflows/deploy-labs.yml` (`npm run cf:deploy`) on push to `master` touching `app/**`. Marketing: AWS Amplify auto-build on push to `main` (static export — see shieldsync-website/AGENTS.md). Enterprise app: GitHub Actions `deploy-enterprise.yml` on push touching `enterprise/**`. Engine still deploys manually (deploy.ps1). |
 | Cognito + Google sign-in | LIVE | Google OAuth app In Production; account-chooser forced (`prompt=select_account`); `returnTo` honored; demo/mock login DISABLED in prod (real accounts only) |
 | App -> Engine wiring + shared-secret guard | LIVE | `ENGINE_URL` (API GW) + `ENGINE_SHARED_SECRET` set; engine refuses any non-`/health` request without a matching `x-engine-token`; app attaches it via `lib/server/engine.ts`. Ownership via `x-user-id`. |
 | Engine Lambda `ShieldSyncEngine` (acct 750) | DEPLOYED | `/health` 200; IAM narrowed (dynamodb:* -> 6 verbs); routes incl. `/launch /active /queue /grade /rate /ratings/summary /console /session/*` |
@@ -56,7 +56,7 @@ STALE — THIS file is the source of truth.**
 | Admin ratings readout | LIVE | server-gated `/admin/ratings` (admins = `ADMIN_USER_IDS` Cognito subs) -> engine `/ratings/summary` aggregates `ShieldSyncLabRatings` per lab |
 | Lab account pool | CLEAN | 3 sandboxes `available`. `FREE_POOL_PCT = 1.0` (INTERIM — free can use the whole pool until paid launches; revert to ~0.3 then) -> 3 concurrent free |
 | Lab launch / teardown | VERIFIED | warm hit -> instant; cold ~72s; teardown = aws-nuke -> `available`. Teardown-during-cold-deploy race fixed (conditional `status=leasing` write) |
-| Access rules (session length + launch caps) | LIVE | per-tier; free = 1 launch / **24h** (was 48h — loosened 2026-06-25 for a better first try), surfaced in the UI (idle chip + limit msg + marketing lab page). See section 6b |
+| Access rules (session length + launch caps) | LIVE | per-tier; free = 2 launches / **24h** (authoritative value: app/lib/access-rules.ts FREE_RULE, mirrored in engine labinfra.mjs), surfaced in the UI (idle chip + limit msg + marketing lab page). See section 6b |
 | Auto-grader ("Check my work") | LIVE | scores a live lab vs `successCriteria`; false-pass fixed (only expected-absence errors count clean; transient AWS errors -> `unknown`, never pass) |
 | Pool scaling past 5 accounts | BLOCKED | AWS org account cap = 5 (at limit); needs a Support quota increase (your action). See section 9 |
 | `SESSION_SECRET` rotation | DONE | rotated 2026-06-22 (wrangler secret put; sessions invalidated) |
@@ -305,8 +305,8 @@ see the ISP-DNS gotcha in section 4).
 - **Launch limit** = rolling count of a user's runs for that lab (`launchCount()`),
   excluding failed deploys. Over the cap -> engine **429 `LIMIT_REACHED`**. Reconnecting
   to an *active* session doesn't count. **The cap is surfaced in the UI** so it's not a
-  surprise: LabPanel idle chip ("Free lab - 1 launch every 24h") + the limit-reached
-  message (rolling-window wording) + the marketing lab hero chip ("Free - 1 launch / 24h").
+  surprise: LabPanel idle chip ("Free lab - 2 launches every 24h") + the limit-reached
+  message (rolling-window wording) + the marketing lab hero chip ("Free - 2 launches / 24h").
   (All UI copy is DATA-DRIVEN off the rule, so changing windowHours updates it everywhere.)
 - **Free-pool cap** (`FREE_POOL_PCT` in labinfra): free labs may occupy at most this
   share of the pool at once; over it -> **503 `FREE_AT_CAPACITY`**. **Currently 1.0
@@ -527,7 +527,7 @@ What broke and how it was fixed, in order:
 | Login works but no row in `ShieldSyncLabUsers` | Fire-and-forget `fetch` cancelled on Workers | Wrap the side-effect in `after()` |
 | Lab launch -> `CREATE_FAILED` repeatedly | Account `available` in DDB but holds a stale stack | Nuke the stale stacks, reconcile DDB, run the reaper. Template is NOT the problem |
 | Launch session -> `error`, log `ENOENT .../labs/<slug>/template.yaml` | `deploy.ps1` packaged templates under mangled paths | Fix rel-path calc, redeploy, verify `engine.zip` entries |
-| "You've used all your launches" during testing | Free cap = 1 launch / 24h hit | `node engine/try-reset-rate.mjs s3-misconfiguration-audit 72` (flips ended sessions to error) |
+| "You've used all your launches" during testing | Free cap = 2 launches / 24h hit | `node engine/try-reset-rate.mjs s3-misconfiguration-audit 72` (flips ended sessions to error) |
 | Launch reconnects instead of showing the wait-room | The user already has a live session for that lab (the already-active check runs before the capacity gate) | End the live lab first; or it's working as designed |
 
 Read live Worker logs: `npx wrangler tail --format pretty` (from `app/`).

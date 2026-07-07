@@ -1,0 +1,41 @@
+name: Deploy enterprise app (Cloudflare)
+
+# Auto-deploy the enterprise Worker on push to master when enterprise/ changes —
+# push-to-deploy parity with the labs app (deploy-labs.yml). Runs the SAME
+# command as the manual deploy: `opennextjs-cloudflare build` (which runs
+# `npm run build` = `next build --webpack` — webpack is mandatory; Turbopack
+# breaks OpenNext) then `wrangler deploy` to Worker "enterprise-platform"
+# (custom domain enterprise.shieldsyncsecurity.com).
+#
+# Uses the SAME repo secrets as deploy-labs.yml (already configured):
+#   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
+#
+# Worker secrets (ENT_ENGINE_SECRET, SESSION_SECRET, ADMIN_PANEL_SECRET) and
+# vars (wrangler.jsonc) live on the Worker — `wrangler deploy` preserves them;
+# this workflow never sets or reads them. The enterprise ENGINE (AWS Lambda)
+# is NOT deployed here — that's engine/deploy/deploy-ent.ps1.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "enterprise/**"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: enterprise
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Build (webpack) + deploy to Cloudflare
+        run: npm run cf:deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
