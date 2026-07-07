@@ -42,7 +42,7 @@ const unk = (err) => (err ? { unknown: true } : {});
 // ── Storage account public exposure & data leak ──────────────────────────────
 // Grades the "storage-public-exposure-audit" lab. Three criteria, ids LOAD-
 // BEARING (must match successCriteria in lab.json exactly):
-//   no-anonymous-blob-access | secure-transfer-required | minimum-tls-1-2
+//   no-anonymous-blob-access | secure-transfer-required | shared-key-access-disabled
 export async function gradeStoragePublicExposure(ctx) {
   const { StorageManagementClient } = await import("@azure/arm-storage");
 
@@ -68,7 +68,7 @@ export async function gradeStoragePublicExposure(ctx) {
   // other two flags.
   const allowPublic = account?.allowBlobPublicAccess;   // want === false
   const httpsOnly = account?.enableHttpsTrafficOnly;    // want === true
-  const minTls = account?.minimumTlsVersion;            // want === 'TLS1_2'
+  const sharedKey = account?.allowSharedKeyAccess;      // want === false (Azure treats unset as true)
 
   // ── criterion 1 data-plane probe: unauthenticated HTTPS GET on the seed blob ─
   // Resource Graph / control-plane can't PROVE the blob is truly unreadable —
@@ -141,9 +141,9 @@ export async function gradeStoragePublicExposure(ctx) {
       ...unk(acctErr),
     },
     {
-      id: "minimum-tls-1-2",
-      description: "The account enforces a minimum TLS version of 1.2.",
-      passed: minTls === "TLS1_2",
+      id: "shared-key-access-disabled",
+      description: "Shared Key (account-key) access is disabled; data access requires Microsoft Entra ID.",
+      passed: sharedKey === false,
       ...unk(acctErr),
     },
   ];

@@ -2,7 +2,7 @@
 
 A team spun up an Azure Storage account to share a data export and left the door
 wide open. The account permits **anonymous blob access**, doesn't require
-**HTTPS**, and still accepts **TLS 1.0**. A container named `public-data` is set to
+**HTTPS**, and still allows **account-key (Shared Key) access**. A container named `public-data` is set to
 anonymous read and holds a "secret" file anyone on the internet can pull down. Your
 job: **find the problems and fix them in place.**
 
@@ -10,7 +10,7 @@ job: **find the problems and fix them in place.**
 
 - **Public blob access** — the account allows anonymous reads, and `public-data` is exposed
 - **No secure transfer** — HTTPS isn't enforced, so plaintext HTTP is accepted
-- **Weak TLS floor** — the account still negotiates down to TLS 1.0
+- **Shared Key access on** — data can be reached with the account keys instead of Microsoft Entra ID
 
 Each fix is checked live against your storage account by **Check my work**.
 
@@ -41,7 +41,7 @@ First, see what's exposed — no fixes yet, just confirm the three problems.
    >> Storage accounts › your account › Settings › Configuration
 
    Note **Allow Blob anonymous access = Enabled**, **Secure transfer required = Disabled**,
-   and **Minimum TLS version = Version 1.0**. All three are wrong.
+   and **Allow storage account key access = Enabled**. All three are wrong.
 
 2. **Confirm the container is publicly readable.**
 
@@ -56,8 +56,8 @@ RG=<your-resource-group>
 ACCT=<your-storage-account>
 
 az storage account show -g "$RG" -n "$ACCT" \
-  --query "{anonBlob:allowBlobPublicAccess, httpsOnly:enableHttpsTrafficOnly, minTls:minimumTlsVersion}"
-# -> anonBlob: true, httpsOnly: false, minTls: TLS1_0   (all three are the problem)
+  --query "{anonBlob:allowBlobPublicAccess, httpsOnly:enableHttpsTrafficOnly, sharedKey:allowSharedKeyAccess}"
+# -> anonBlob: true, httpsOnly: false, sharedKey: true   (all three are the problem)
 
 az storage container show-permission -n public-data --account-name "$ACCT" --auth-mode login
 # -> "publicAccess": "blob"
@@ -125,24 +125,25 @@ so credentials and data can't cross the wire in plaintext.
 az storage account update -g "$RG" -n "$ACCT" --https-only true
 ```
 
-## Step 4 — Raise the minimum TLS version to 1.2
-<!-- ss:obj=minimum-tls-1-2 -->
+## Step 4 — Disable Shared Key (account-key) access
+<!-- ss:obj=shared-key-access-disabled -->
 
-TLS 1.0 and 1.1 have known weaknesses and are deprecated. Set the floor to **1.2** so the
-account will only negotiate a modern cipher suite.
+Account keys are all-powerful, RBAC-bypassing credentials — if one leaks, the whole
+account is exposed. Best practice is to turn off Shared Key access so every request
+must authenticate with **Microsoft Entra ID** instead.
 
 🖱️ **Portal**
 
-1. **Set the minimum TLS version.**
+1. **Turn off account-key access.**
 
    >> Storage accounts › your account › Settings › Configuration
 
-   Set **Minimum TLS version** to **Version 1.2**, then click [[Save]].
+   Set **Allow storage account key access** to **Disabled**, then click [[Save]].
 
 ⌨️ **CLI:**
 
 ```bash
-az storage account update -g "$RG" -n "$ACCT" --min-tls-version TLS1_2
+az storage account update -g "$RG" -n "$ACCT" --allow-shared-key-access false
 ```
 
 ---
@@ -157,15 +158,15 @@ open. Prefer to spot-check yourself?
 
 🖱️ **Portal**
 
-- **Configuration** shows anonymous access **Disabled**, secure transfer **Enabled**, minimum TLS **Version 1.2**.
+- **Configuration** shows anonymous access **Disabled**, secure transfer **Enabled**, account-key access **Disabled**.
 - The `public-data` container's access level reads **Private**.
 
 ⌨️ **CLI:**
 
 ```bash
 az storage account show -g "$RG" -n "$ACCT" \
-  --query "{anonBlob:allowBlobPublicAccess, httpsOnly:enableHttpsTrafficOnly, minTls:minimumTlsVersion}"
-# -> anonBlob: false, httpsOnly: true, minTls: TLS1_2
+  --query "{anonBlob:allowBlobPublicAccess, httpsOnly:enableHttpsTrafficOnly, sharedKey:allowSharedKeyAccess}"
+# -> anonBlob: false, httpsOnly: true, sharedKey: false
 
 curl -s -o /dev/null -w "%{http_code}\n" \
   "https://<your-account>.blob.core.windows.net/public-data/customer-export.csv"
@@ -178,7 +179,7 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 - Turning off **Allow Blob anonymous access** at the account level overrides any container that's set to public — it's your strongest single control, and it's what closes the leak.
 - A container set to **Blob** or **Container** access only matters *while* the account allows anonymous access. Fixing the account setting neutralises it, but setting the container to **Private** too keeps the config honest.
 - Enabling **Secure transfer required** doesn't change the blob URL — it just refuses the plaintext HTTP version of it.
-- Bumping **Minimum TLS version** to 1.2 is a one-field change with no downside for any modern client.
+- Disabling **Allow storage account key access** forces every client to authenticate with Microsoft Entra ID — the account keys stop working, so make sure nothing legitimately relies on them first.
 
 ## Cleanup
 

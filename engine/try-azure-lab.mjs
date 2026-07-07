@@ -23,7 +23,7 @@
 import { lease, deploy, seedBlob, grade, teardown } from "./azure-infra.mjs";
 
 const LAB_SLUG = "storage-public-exposure-audit";
-const EXPECTED_IDS = ["no-anonymous-blob-access", "secure-transfer-required", "minimum-tls-1-2"];
+const EXPECTED_IDS = ["no-anonymous-blob-access", "secure-transfer-required", "shared-key-access-disabled"];
 
 let PASS = true;
 function assert(cond, msg) {
@@ -46,17 +46,17 @@ function summarize(label, result) {
 // Remediate the 3 flaws over the SDK — exactly what the grader checks for:
 //   FLAW A allowBlobPublicAccess=true      -> false (+ set container publicAccess None)
 //   FLAW B supportsHttpsTrafficOnly=false  -> true
-//   FLAW C minimumTlsVersion=TLS1_0        -> TLS1_2
+//   FLAW C allowSharedKeyAccess=true       -> false (require Microsoft Entra ID)
 async function remediate(ctx) {
   const { StorageManagementClient } = await import("@azure/arm-storage");
   const { DefaultAzureCredential } = await import("@azure/identity");
   const sc = new StorageManagementClient(new DefaultAzureCredential(), ctx.subscriptionId);
 
-  console.log("  remediating account flags (allowBlobPublicAccess=false, httpsOnly=true, minTls=TLS1_2) ...");
+  console.log("  remediating account flags (allowBlobPublicAccess=false, httpsOnly=true, allowSharedKeyAccess=false) ...");
   await sc.storageAccounts.update(ctx.resourceGroup, ctx.storageAccountName, {
     allowBlobPublicAccess: false,
     enableHttpsTrafficOnly: true,
-    minimumTlsVersion: "TLS1_2",
+    allowSharedKeyAccess: false,
   });
 
   // Best practice + belt-and-braces for criterion 1: lock the container to no

@@ -1,5 +1,18 @@
 # FUNCTIONAL AUDIT — `storage-public-exposure-audit` (Azure lab)
 
+> **⚡ Live-tested on Azure 2026-07-07 — PASS.** On a real sponsored subscription the
+> actual `graders.azure.mjs` returned `passed:false` on the broken deploy and
+> `passed:true` after remediation; teardown clean (~₹0). Two changes came out of the
+> live run and are now applied everywhere: (1) **criterion 3 was swapped**
+> `minimum-tls-1-2` → `shared-key-access-disabled` because Azure now forces
+> `minimumTLS = 1.2` on new accounts, so a weak-TLS-floor flaw is no longer
+> provisionable; (2) the `Microsoft.Storage` provider must be registered on the sub
+> first (already handled by `setup-landing-zone.ps1`). Also observed: right after the
+> fix the anonymous GET briefly returns **404** before settling to **409** — the grader
+> correctly scores that transient as `unknown`, not a pass. The embedded `az` script and
+> criterion table below still name the old TLS flaw (superseded by the shared-key
+> criterion); the flow is otherwise identical.
+
 Adversarial functional review of every authored file. Focus: does the lab actually
 deploy broken, grade `passed:false` on the broken state, grade `passed:true` only
 after the exact remediation the instructions teach, and tear down cleanly.

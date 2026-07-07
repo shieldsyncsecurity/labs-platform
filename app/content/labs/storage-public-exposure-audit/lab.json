@@ -4,19 +4,19 @@
   "level": "Beginner",
   "free": true,
   "track": "azure",
-  "tags": ["Azure Storage", "Blob", "Public Access", "TLS", "RBAC"],
+  "tags": ["Azure Storage", "Blob", "Public Access", "Shared Key", "RBAC"],
   "estimatedActiveMinutes": 30,
   "accessWindowHours": 24,
   "idleAutoStopMinutes": 30,
 
-  "summary": "Find and fix a leaky Azure Storage account — anonymous blob access, insecure HTTP allowed, and a weak TLS floor — then verify an anonymous download of the seeded 'secret' file is truly blocked.",
+  "summary": "Find and fix a leaky Azure Storage account — anonymous blob access, insecure HTTP allowed, and account-key access left on — then verify an anonymous download of the seeded 'secret' file is truly blocked.",
 
   "learningObjectives": [
     "Spot anonymous/public blob exposure at both the account level (allowBlobPublicAccess) and the container level (publicAccess).",
     "Disable anonymous blob access on the account — and understand why that alone breaks the anonymous download.",
     "Confirm a fix at the data plane, not just the control plane — an unauthenticated GET must stop returning 200.",
     "Require secure transfer (HTTPS-only) so blobs can't be read or written over plain HTTP.",
-    "Raise the account's minimum TLS version to 1.2 and understand why TLS 1.0/1.1 is a liability."
+    "Disable Shared Key (account-key) authorization so data access must use Microsoft Entra ID, not a leakable account key."
   ],
 
   "successCriteria": [
@@ -31,14 +31,14 @@
       "verify": "StorageManagementClient.storageAccounts.getProperties reports supportsHttpsTrafficOnly === true."
     },
     {
-      "id": "minimum-tls-1-2",
-      "description": "The account enforces a minimum TLS version of 1.2.",
-      "verify": "StorageManagementClient.storageAccounts.getProperties reports minimumTlsVersion === 'TLS1_2'."
+      "id": "shared-key-access-disabled",
+      "description": "Shared Key (account-key) access is disabled; data access must use Microsoft Entra ID.",
+      "verify": "StorageManagementClient.storageAccounts.getProperties reports allowSharedKeyAccess === false (Azure treats an unset value as true, so an explicit false is required to pass)."
     }
   ],
 
   "hints": [
-    "Start on the storage account's Configuration blade — 'Allow Blob anonymous access', 'Secure transfer required', and 'Minimum TLS version' are all here.",
+    "Start on the storage account's Configuration blade — 'Allow Blob anonymous access', 'Secure transfer required', and 'Allow storage account key access' are all here.",
     "Turning off anonymous access at the account level (allowBlobPublicAccess=false) is what makes the anonymous download start failing — an anonymous GET then returns 409, not 200.",
     "Belt-and-braces: also set the 'public-data' container's public access level back to Private (no anonymous access).",
     "Don't delete the account or the container — the lab grades you on fixing them in place."

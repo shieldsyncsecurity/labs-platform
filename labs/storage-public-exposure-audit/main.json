@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",
   "metadata": {
     "_comment": "HAND-COMPILED ARM equivalent of main.bicep. The engine driver (azure-infra.mjs deploy()) deploys THIS JSON, since the build/deploy host may not have the Bicep compiler. If main.bicep changes, regenerate with: az bicep build --file main.bicep --outfile main.json (and diff against this). Keep the two in lockstep — the flaws, names, and outputs must match main.bicep exactly.",
-    "_flaws": "A: allowBlobPublicAccess=true | B: supportsHttpsTrafficOnly=false | C: minimumTlsVersion=TLS1_0 | container public-data publicAccess=Blob (anonymous read)."
+    "_flaws": "A: allowBlobPublicAccess=true | B: supportsHttpsTrafficOnly=false | C: allowSharedKeyAccess=true (should be false; Azure forces TLS1.2 on new accounts so a weak-TLS flaw is not provisionable) | container public-data publicAccess=Blob (anonymous read)."
   },
   "parameters": {
     "labSlug": {
@@ -34,7 +34,6 @@
       "properties": {
         "allowBlobPublicAccess": true,
         "supportsHttpsTrafficOnly": false,
-        "minimumTlsVersion": "TLS1_0",
         "accessTier": "Hot",
         "allowSharedKeyAccess": true
       }

@@ -1,5 +1,13 @@
 # SECURITY AUDIT — `storage-public-exposure-audit` (Azure lab)
 
+> **⚡ Live-tested on Azure 2026-07-07.** Criterion 3 was swapped `minimum-tls-1-2` →
+> `shared-key-access-disabled` (Azure forces TLS 1.2 on new accounts, so a weak-TLS
+> flaw can't be provisioned). The `learnerRole` is unchanged — `storageAccounts/write`
+> already covers flipping `allowSharedKeyAccess`, and disabling Shared Key access is a
+> strict *reduction* of the learner's data-plane reach (it forces Entra ID auth), so it
+> only tightens the security posture. References to `minimumTlsVersion` below are
+> superseded by `allowSharedKeyAccess`.
+
 Adversarial review of every authored file for the first free Azure lab. Scope of the
 audit is the six security questions posed by the reviewer brief:
 

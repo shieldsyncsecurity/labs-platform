@@ -7,7 +7,7 @@
 // The three planted flaws (the whole point of the lab — do NOT "fix" them here):
 //   FLAW A  allowBlobPublicAccess = true       account permits anonymous blob access
 //   FLAW B  supportsHttpsTrafficOnly = false    "Secure transfer required" is OFF
-//   FLAW C  minimumTlsVersion = 'TLS1_0'        weak TLS floor
+//   FLAW C  allowSharedKeyAccess = true         account-key access left on (should require Entra ID)
 // Plus a blob container "public-data" with publicAccess 'Blob' (anonymous read),
 // which is part of FLAW A at the container scope.
 //
@@ -46,11 +46,13 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     allowBlobPublicAccess: true
     // FLAW B — "Secure transfer required" is OFF (allows plain HTTP).
     supportsHttpsTrafficOnly: false
-    // FLAW C — weak minimum TLS floor.
-    minimumTlsVersion: 'TLS1_0'
     accessTier: 'Hot'
-    // Keep the account key-authable so the driver can seed the blob and the
-    // learner can operate over the data plane during remediation.
+    // FLAW C — Shared Key (account-key) access left enabled. Account keys bypass RBAC,
+    // so if one leaks the whole account is exposed; best practice is to disable it and
+    // require Microsoft Entra ID. (Azure now forces minimumTlsVersion to 1.2 on new
+    // accounts, so a weak-TLS-floor flaw is no longer provisionable — this replaces it.)
+    // Also lets the driver seed the blob via key at deploy time; the learner disables
+    // it as the fix.
     allowSharedKeyAccess: true
   }
 }
