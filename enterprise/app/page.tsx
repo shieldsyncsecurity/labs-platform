@@ -30,6 +30,8 @@ export default function Home() {
         <HowItWorks />
         <WhyReal />
         <TheReport />
+        <WhoItsFor />
+        <Faq />
         <FinalCta />
       </main>
       <SiteFooter />
@@ -329,7 +331,7 @@ function TheReport() {
 
         {/* Decorative mini comparison report card */}
         <div
-          className="rounded-2xl border border-line bg-surface p-6 shadow-[0_20px_50px_-24px_rgba(217, 119, 6,0.35)]"
+          className="rounded-2xl border border-line bg-surface p-6 shadow-[0_20px_50px_-24px_rgba(217,119,6,0.35)]"
           aria-hidden="true"
         >
           <div className="flex items-center justify-between border-b border-line pb-4">
@@ -409,6 +411,89 @@ function FinalCta() {
 }
 
 /* --------------------------------------------------------------- PRIMITIVES */
+
+/* ------------------------------------------------------------- WHO IT'S FOR */
+
+const AUDIENCES = [
+  {
+    title: "Hiring managers & team leads",
+    body: "Screen the shortlist on proof before you spend panel hours. One link per candidate, one comparable report back.",
+  },
+  {
+    title: "Recruiters & staffing panels",
+    body: "Filter a pile of lookalike resumes down to the few who can actually do the work — no cloud expert needed on your side.",
+  },
+  {
+    title: "GCCs & security-services firms",
+    body: "Benchmark candidates across batches with a standardized, auditable assessment — same scenario, same grading, every time.",
+  },
+];
+
+function WhoItsFor() {
+  return (
+    <Section id="who-for">
+      <SectionHeading eyebrow="WHO IT'S FOR" title="Anyone who hires cloud security hands." />
+      <div className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-3">
+        {AUDIENCES.map((a) => (
+          <div key={a.title} className="rounded-2xl border border-line bg-surface p-6 shadow-sm">
+            <h3 className="text-base font-semibold text-ink">{a.title}</h3>
+            <p className="mt-2.5 text-sm leading-relaxed text-ink-soft">{a.body}</p>
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+/* --------------------------------------------------------------------- FAQ */
+
+const FAQS = [
+  {
+    q: "How long does a candidate session take?",
+    a: "One sitting — typically a 60-minute time-box. The candidate books a slot, works in the live AWS account, submits, and your report updates.",
+  },
+  {
+    q: "Is any of our data or our cloud involved?",
+    a: "Never. Each candidate works in a ShieldSync-owned AWS account created for that session, isolated per candidate, and destroyed afterwards. Your environment is never touched.",
+  },
+  {
+    q: "What exactly is graded?",
+    a: "The engine inspects the live AWS configuration the candidate produced — per-objective pass or fail on real cloud state — plus their short written reflection explaining what they found and fixed. No multiple choice, no self-reporting.",
+  },
+  {
+    q: "How do we buy it?",
+    a: "Per-candidate credits, invoiced with GST — no card, no procurement maze. Book a walkthrough and we'll set your team up the same week.",
+  },
+];
+
+function Faq() {
+  const faqSchema = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: FAQS.map((f) => ({
+      "@type": "Question",
+      name: f.q,
+      acceptedAnswer: { "@type": "Answer", text: f.a },
+    })),
+  };
+  return (
+    <Section id="faq" muted>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema).replace(/</g, "\\u003c") }} />
+      <SectionHeading eyebrow="FAQ" title="The questions every hiring team asks." />
+      <div className="mx-auto mt-8 max-w-3xl divide-y divide-line rounded-2xl border border-line bg-surface shadow-sm">
+        {FAQS.map((f) => (
+          <details key={f.q} className="group px-6 py-5">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-semibold text-ink">
+              {f.q}
+              <span aria-hidden="true" className="text-xl leading-none text-brand transition-transform group-open:rotate-45">+</span>
+            </summary>
+            <p className="mt-3 text-sm leading-relaxed text-ink-soft">{f.a}</p>
+          </details>
+        ))}
+      </div>
+    </Section>
+  );
+}
 
 function Section({
   id,

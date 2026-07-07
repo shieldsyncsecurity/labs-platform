@@ -4,43 +4,44 @@ import {
   PassBadge,
   PreliminaryBanner,
   FinalizingPill,
-  RankBadge,
   ReportHeader,
   ReportShell,
   WalkthroughCta,
   correctnessPct,
   formatDate,
 } from "../../r/_components/report-bits";
+import { DemoComparisonTable, type DemoCandidate } from "./demo-table";
 
 // Public sales asset — an illustrative sample of the employer report, rendered
 // with the SAME components as the real /r/[token] pages so prospects see exactly
-// what they get. All data below is fictional. Indexable (unlike real reports).
+// what they get. All data below is fictional. Indexable (unlike real reports —
+// the explicit robots below overrides the layout's global noindex).
 export const metadata: Metadata = {
   title: "Sample assessment report — ShieldSync Enterprise",
   description:
     "See what a ShieldSync hiring-assessment report looks like: candidates ranked by verified performance on a real cloud security task.",
+  robots: { index: true, follow: true },
 };
 
 // ── Fictional data (illustrative only) ───────────────────────────────────────
+// The parameters an employer sets when creating the assessment — surfaced on
+// the report so a hiring panel reading it cold has full context.
 const ASSESSMENT = {
   name: "Cloud Security Engineer — S3 & IAM Hardening",
+  role: "Cloud Security Engineer",
+  seniority: "Mid-level (2–5 yrs)",
   labSlug: "s3-misconfiguration-audit",
   createdAt: "2026-07-02",
-};
-
-type DemoCandidate = {
-  name: string;
-  passedCount: number;
-  totalCriteria: number;
-  timeUsedMin: number;
-  hasReflection: boolean;
+  timeLimitMin: 60,
+  invited: 6,
+  environment: "Real AWS account — isolated per candidate, auto-wiped",
 };
 
 const CANDIDATES: DemoCandidate[] = [
-  { name: "Priya S.", passedCount: 6, totalCriteria: 6, timeUsedMin: 41, hasReflection: true },
-  { name: "Ananya K.", passedCount: 5, totalCriteria: 6, timeUsedMin: 52, hasReflection: true },
-  { name: "Rahul M.", passedCount: 4, totalCriteria: 6, timeUsedMin: 58, hasReflection: true },
-  { name: "Vikram T.", passedCount: 2, totalCriteria: 6, timeUsedMin: 60, hasReflection: false },
+  { name: "Priya S.", role: ASSESSMENT.role, passedCount: 6, totalCriteria: 6, timeUsedMin: 41, hasReflection: true, detailAnchor: "#candidate-report" },
+  { name: "Ananya K.", role: ASSESSMENT.role, passedCount: 5, totalCriteria: 6, timeUsedMin: 52, hasReflection: true },
+  { name: "Rahul M.", role: ASSESSMENT.role, passedCount: 4, totalCriteria: 6, timeUsedMin: 58, hasReflection: true },
+  { name: "Vikram T.", role: ASSESSMENT.role, passedCount: 2, totalCriteria: 6, timeUsedMin: 60, hasReflection: false },
 ];
 
 // One expanded candidate detail (what /r/c/[token] shows).
@@ -95,6 +96,12 @@ export default function DemoReportPage() {
   const total = rows.length;
   const withReflection = rows.filter(({ c }) => c.hasReflection).length;
   const avgPct = total ? Math.round(rows.reduce((s, { pct }) => s + pct, 0) / total) : 0;
+  const sortedTimes = rows.map(({ c }) => c.timeUsedMin).sort((a, b) => a - b);
+  const medianTime = sortedTimes.length
+    ? sortedTimes.length % 2
+      ? sortedTimes[(sortedTimes.length - 1) / 2]
+      : Math.round((sortedTimes[sortedTimes.length / 2 - 1] + sortedTimes[sortedTimes.length / 2]) / 2)
+    : 0;
 
   const detailPassed = DETAIL_CRITERIA.filter((x) => x.passed).length;
   const detailPct = correctnessPct(detailPassed, DETAIL_CRITERIA.length);
@@ -115,9 +122,20 @@ export default function DemoReportPage() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-3 gap-3 sm:max-w-md">
-        <StatCard label="Candidates" value={String(total)} />
+      {/* Assessment parameters — the context a hiring panel needs to read the
+          numbers below cold. */}
+      <div className="mb-5 flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-ink-soft">
+        <span><span className="font-semibold text-ink">Role:</span> {ASSESSMENT.role}</span>
+        <span><span className="font-semibold text-ink">Level:</span> {ASSESSMENT.seniority}</span>
+        <span><span className="font-semibold text-ink">Time limit:</span> {ASSESSMENT.timeLimitMin} min</span>
+        <span><span className="font-semibold text-ink">Environment:</span> {ASSESSMENT.environment}</span>
+      </div>
+
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <StatCard label="Invited" value={String(ASSESSMENT.invited)} />
+        <StatCard label="Completed" value={`${total}/${ASSESSMENT.invited}`} />
         <StatCard label="Avg correctness" value={`${avgPct}%`} />
+        <StatCard label="Median time" value={`${medianTime} min`} />
         <StatCard label="With reflection" value={`${withReflection}/${total}`} />
       </div>
 
@@ -125,63 +143,12 @@ export default function DemoReportPage() {
         <PreliminaryBanner />
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] border-collapse text-left text-sm">
-            <thead>
-              <tr className="border-b border-line bg-canvas/70 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
-                <th className="px-5 py-3.5">Rank</th>
-                <th className="px-5 py-3.5">Candidate</th>
-                <th className="px-5 py-3.5">Objectives</th>
-                <th className="px-5 py-3.5">Correctness</th>
-                <th className="px-5 py-3.5">Time</th>
-                <th className="px-5 py-3.5 text-center">Reflection</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(({ c, pct }, i) => (
-                <tr
-                  key={c.name}
-                  className="border-b border-line/70 transition-colors last:border-b-0 hover:bg-canvas/60"
-                >
-                  <td className="px-5 py-4">
-                    <RankBadge rank={i + 1} />
-                  </td>
-                  <td className="px-5 py-4 font-medium text-ink">{c.name}</td>
-                  <td className="px-5 py-4 tabular-nums text-ink-soft">
-                    {c.passedCount} / {c.totalCriteria}
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-28">
-                        <Bar pct={pct} />
-                      </div>
-                      <span className="w-10 tabular-nums font-semibold text-ink">{pct}%</span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-4 tabular-nums text-ink-soft">{c.timeUsedMin} min</td>
-                  <td className="px-5 py-4 text-center">
-                    {c.hasReflection ? (
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-200">
-                        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
-                          <path d="M3.5 8.5l3 3 6-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                        <span className="sr-only">Reflection submitted</span>
-                      </span>
-                    ) : (
-                      <span className="text-muted" aria-label="No reflection">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DemoComparisonTable candidates={CANDIDATES} />
 
       <p className="mt-6 text-xs leading-relaxed text-muted">
         Candidates are ranked by verified performance on a real, isolated AWS environment — not a
-        quiz. Each row links to a full per-candidate breakdown (shown below).
+        quiz. On a live report, every row links to that candidate&apos;s full private breakdown —
+        the first one is expanded below.
       </p>
 
       {/* ── Candidate detail (what /r/c/[token] shows) ── */}
@@ -193,8 +160,16 @@ export default function DemoReportPage() {
         <span className="h-px flex-1 bg-line" />
       </div>
 
-      <div className="mx-auto max-w-3xl">
-        <ReportHeader eyebrow="Candidate report" title="Priya S." meta={<span>Graded {formatDate(ASSESSMENT.createdAt)}</span>} />
+      <div id="candidate-report" className="mx-auto max-w-3xl scroll-mt-24">
+        <ReportHeader
+          eyebrow="Candidate report"
+          title="Priya S."
+          meta={
+            <span>
+              {ASSESSMENT.role} · Completed in 41 of {ASSESSMENT.timeLimitMin} min · Graded {formatDate(ASSESSMENT.createdAt)}
+            </span>
+          }
+        />
 
         <div className="mb-8">
           <PreliminaryBanner />
@@ -242,7 +217,11 @@ export default function DemoReportPage() {
         </section>
 
         <section className="mb-8">
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Written reflection</h3>
+          <h3 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted">Written reflection</h3>
+          <p className="mb-3 text-xs leading-relaxed text-muted">
+            The candidate&apos;s own 3–5 sentence account of what they found and how they fixed it —
+            proof they understood the problem, not just clicked through it.
+          </p>
           <div className="rounded-2xl border border-line bg-surface p-6 shadow-sm sm:p-7">
             <blockquote className="relative pl-5 text-ink-soft italic">
               <span

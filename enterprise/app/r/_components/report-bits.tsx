@@ -114,7 +114,7 @@ export function Bar({ pct }: { pct: number }) {
       aria-hidden="true"
     >
       <div
-        className="h-full rounded-full bg-gradient-to-r from-brand to-cyan shadow-[0_1px_2px_rgba(217, 119, 6,0.35)] transition-[width] duration-500 ease-out"
+        className="h-full rounded-full bg-gradient-to-r from-brand to-cyan shadow-[0_1px_2px_rgba(217,119,6,0.35)] transition-[width] duration-500 ease-out"
         style={{ width: `${clamped}%` }}
       />
     </div>
