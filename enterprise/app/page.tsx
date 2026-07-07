@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { SiteHeader } from "@/components/marketing/site-header";
 import { SiteFooter } from "@/components/marketing/site-footer";
 import { HeroVisual } from "@/components/marketing/hero-visual";
+import { ProductTour } from "@/components/marketing/product-tour";
 
 export const metadata: Metadata = {
   robots: { index: true, follow: true },
@@ -27,7 +28,7 @@ export default function Home() {
           scroll container (so the sticky header, a sibling, keeps working). */}
       <main className="flex-1 overflow-x-clip">
         <Hero />
-        <HowItWorks />
+        <HowItWorksTour />
         <WhyReal />
         <TheReport />
         <WhoItsFor />
@@ -87,90 +88,19 @@ function Hero() {
 
 /* ---------------------------------------------------------- HOW IT WORKS */
 
-const STEPS = [
-  {
-    title: "Send a magic link",
-    body: "One link, zero setup for the candidate. No account to create, nothing to install.",
-    icon: (
-      <path
-        d="M8 12l-2 2a3 3 0 01-4.2-4.2l2.5-2.5M12 8l2-2a3 3 0 014.2 4.2l-2.5 2.5M8.5 11.5l3-3"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    ),
-  },
-  {
-    title: "They work in a real cloud",
-    body: "A live, isolated AWS account spins up for them, time-boxed. Real console, real services.",
-    icon: (
-      <path
-        d="M6 15a4 4 0 01-.5-7.97 5 5 0 019.6-1.2A3.5 3.5 0 0115 15H6z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    ),
-  },
-  {
-    title: "Auto-graded on live state",
-    body: "The engine inspects the ACTUAL AWS configuration they produced — not multiple choice.",
-    icon: (
-      <path
-        d="M4 10.5l3.5 3.5 8-9M4 15.5l3.5 3.5"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    ),
-  },
-  {
-    title: "Scored, comparable report",
-    body: "Side-by-side ranking, per-objective detail, and the candidate's written reflection.",
-    icon: (
-      <path
-        d="M5 4.5h10v14H5v-14zM8 9h4M8 12h4M8 15h2.5"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    ),
-  },
-];
-
-function HowItWorks() {
+function HowItWorksTour() {
   return (
-    <Section id="how" muted>
-      <SectionHeading
-        eyebrow="HOW IT WORKS"
-        title="From link to scored report in one session."
-      />
-      <ol className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        {STEPS.map((s, i) => (
-          <li
-            key={s.title}
-            className="relative rounded-2xl border border-line bg-surface p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
-          >
-            <div className="flex items-center justify-between">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand/5 text-brand">
-                <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
-                  {s.icon}
-                </svg>
-              </span>
-              <span className="font-mono text-sm font-semibold text-brand/40">
-                0{i + 1}
-              </span>
-            </div>
-            <h3 className="mt-4 text-base font-semibold text-ink">{s.title}</h3>
-            <p className="mt-2 text-[15px] leading-relaxed text-ink-soft">{s.body}</p>
-          </li>
-        ))}
-      </ol>
-    </Section>
+    <section id="how" className="scroll-mt-24 bg-surface">
+      <div className="mx-auto w-full max-w-6xl px-5 py-12 sm:px-6 lg:px-8 lg:py-16">
+        <SectionHeading
+          eyebrow="SEE IT WORK"
+          title="A full hiring assessment, end to end."
+        />
+        <div className="mt-10">
+          <ProductTour />
+        </div>
+      </div>
+    </section>
   );
 }
 
