@@ -104,7 +104,7 @@ export function ReportHeader({
 
 /**
  * A thin horizontal percentage bar, 0-100. Clamped defensively. Rounded track
- * with a soft indigo->blue gradient fill.
+ * with a brand amber gradient fill.
  */
 export function Bar({ pct }: { pct: number }) {
   const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
@@ -264,7 +264,7 @@ export function formatDate(value?: string): string {
 }
 
 /**
- * A tasteful, medal-free rank indicator: #1 gets a subtle indigo emphasis,
+ * A tasteful, medal-free rank indicator: #1 gets a subtle brand emphasis,
  * everyone else a muted mono numeral. Presentation only.
  */
 export function RankBadge({ rank }: { rank: number }) {
@@ -283,7 +283,7 @@ export function RankBadge({ rank }: { rank: number }) {
   );
 }
 
-/** Shared "Book a walkthrough" CTA link, indigo pill. */
+/** Shared "Book a walkthrough" CTA link, brand pill. */
 export function WalkthroughCta({
   href = "https://shieldsyncsecurity.com",
   label = "Book a walkthrough",

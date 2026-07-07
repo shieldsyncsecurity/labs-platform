@@ -14,7 +14,7 @@ export function HeroVisual() {
   return (
     <div className="hv" aria-hidden="true">
       {/* Ambient soft glows + floating dots (2D, behind the 3D scene) */}
-      <div className="hv-glow hv-glow-indigo" />
+      <div className="hv-glow hv-glow-brand" />
       <div className="hv-glow hv-glow-blue" />
       <span className="hv-dot hv-dot-1" />
       <span className="hv-dot hv-dot-2" />

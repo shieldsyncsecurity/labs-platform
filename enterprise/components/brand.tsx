@@ -2,9 +2,9 @@ import Link from "next/link";
 
 /**
  * ShieldSync ENTERPRISE wordmark. Uses the REAL ShieldSync brand mark (the
- * navy tile + "S" reticle), tinted INDIGO for the enterprise property — the
+ * navy tile + "S" reticle), tinted AMBER for the enterprise property — the
  * same way the labs property tints it emerald ("LABS"). Wordmark = "Shield" +
- * "Sync" (Sync in the brand indigo, matching the marketing site) + an
+ * "Sync" (Sync in the brand amber (enterprise tint)) + an
  * "ENTERPRISE" tag pill. Renders as a link to `href` (default /).
  */
 export function Logo({
@@ -42,7 +42,7 @@ export function Logo({
   );
 }
 
-/** The base ShieldSync mark (indigo tile). Decorative. */
+/** The base ShieldSync mark (brand tile). Decorative. */
 export function ShieldMark({ size = 28, className = "" }: { size?: number; className?: string }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
