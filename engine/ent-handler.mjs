@@ -28,6 +28,7 @@ import {
   consentInvite,
   refundInvite,
   revokeInvite,
+  eraseCandidatePii,
   setOtp,
   verifyOtp,
   bookSlot,
@@ -276,6 +277,21 @@ export async function handler(event) {
         JSON.stringify({ audit: true, action: "org.delete", actor: actor ?? null, orgId, at: Date.now() })
       );
       return resp(200, { ok: true });
+    }
+
+    // Data-subject erasure (DPDP / GDPR right to be forgotten). The app enforces
+    // the ShieldSync-staff admin gate before calling this; the shared-secret gate
+    // protects the route itself. Redacts the candidate's PII in place (see
+    // eraseCandidatePii) and logs an attributable audit line.
+    if (method === "POST" && path === "/ent/invites/erase") {
+      const { inviteToken, actor } = parsed;
+      if (!inviteToken) return resp(400, { error: "INVITE_TOKEN_REQUIRED" });
+      const r = await eraseCandidatePii(inviteToken);
+      if (!r.ok) return resp(404, { error: "INVITE_NOT_FOUND" });
+      console.log(
+        JSON.stringify({ audit: true, action: "candidate.erase", actor: actor ?? null, inviteToken, at: Date.now() })
+      );
+      return resp(200, { ok: true, erasedAt: r.erasedAt });
     }
 
     // ── employer portal (called by the enterprise app server-side) ────────

@@ -365,6 +365,53 @@ export async function getInvite(inviteToken) {
   return itemToObject(r.Item);
 }
 
+/**
+ * eraseCandidatePii(): fulfil a data-subject erasure request (DPDP / GDPR right
+ * to be forgotten). REDACTS the candidate's direct identifiers in place rather
+ * than hard-deleting rows, so the anonymized assessment/score skeleton survives
+ * for the employer's legitimate record and the credit ledger stays intact.
+ * Blanks candidateName/candidateEmail and drops the OTP hash on the invite, and
+ * blanks the free-text reflection on the result (the only PII stored there).
+ * Idempotent. Returns { ok:false, notFound:true } if no invite matches.
+ */
+export async function eraseCandidatePii(inviteToken) {
+  const db = await ddb();
+  const invite = await getInvite(inviteToken);
+  if (!invite) return { ok: false, notFound: true };
+  const erasedAt = new Date(now() * 1000).toISOString();
+
+  await db.send(
+    new UpdateItemCommand({
+      TableName: INVITES_TABLE,
+      Key: { inviteToken: S(inviteToken) },
+      UpdateExpression:
+        "SET candidateName = :redacted, candidateEmail = :redacted, erasedAt = :ts REMOVE otpHash",
+      ExpressionAttributeValues: { ":redacted": S("[erased]"), ":ts": S(erasedAt) },
+    })
+  );
+
+  // Blank the reflection on the candidate's result, if they submitted one.
+  // Result rows are keyed (assessmentId, inviteToken); the condition keeps this
+  // a no-op when no result exists rather than creating a phantom row.
+  if (invite.assessmentId) {
+    try {
+      await db.send(
+        new UpdateItemCommand({
+          TableName: RESULTS_TABLE,
+          Key: { assessmentId: S(invite.assessmentId), inviteToken: S(inviteToken) },
+          UpdateExpression: "SET reflectionText = :redacted, erasedAt = :ts",
+          ExpressionAttributeValues: { ":redacted": S("[erased]"), ":ts": S(erasedAt) },
+          ConditionExpression: "attribute_exists(assessmentId)",
+        })
+      );
+    } catch {
+      // No result row for this invite -- nothing to redact there.
+    }
+  }
+
+  return { ok: true, erasedAt };
+}
+
 /** getInviteByCandidateReportToken(): resolve the candidate's own /r/c/<token>
  *  report link via candidateReportToken-index. First match or null. */
 export async function getInviteByCandidateReportToken(token) {

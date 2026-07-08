@@ -26,6 +26,9 @@ export default function AdminNav() {
           <Link href="/admin" className="text-sm text-ink-soft hover:text-brand-strong">
             Organizations
           </Link>
+          <Link href="/admin/erase" className="text-sm text-ink-soft hover:text-brand-strong">
+            Data requests
+          </Link>
         </div>
         <div className="flex items-center gap-4">
           <span className="text-xs text-muted">ShieldSync staff only</span>
