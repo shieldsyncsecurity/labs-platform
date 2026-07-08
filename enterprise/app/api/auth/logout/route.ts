@@ -15,5 +15,8 @@ async function handle(): Promise<NextResponse> {
   return NextResponse.redirect(dest);
 }
 
-export const GET = handle;
+// POST-only on purpose. Sign-out mutates session state (clears the cookies), so
+// a GET handler would be triggerable cross-site (e.g. <img src=.../api/auth/logout>)
+// to force-log-out a user. Matches admin/logout and portal/logout, which are
+// also POST-only.
 export const POST = handle;

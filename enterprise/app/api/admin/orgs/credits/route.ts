@@ -25,17 +25,30 @@ export async function POST(req: Request) {
   const orgId = body.orgId?.trim();
   const deltaNum = typeof body.delta === "string" ? Number(body.delta) : body.delta;
 
-  if (!orgId || typeof deltaNum !== "number" || !Number.isFinite(deltaNum) || deltaNum === 0) {
+  // Credits are whole units: require a non-zero INTEGER and clamp the
+  // magnitude so a typo/abuse can't swing a balance by an absurd amount.
+  const MAX_DELTA = 1_000_000;
+  if (
+    !orgId ||
+    typeof deltaNum !== "number" ||
+    !Number.isInteger(deltaNum) ||
+    deltaNum === 0 ||
+    Math.abs(deltaNum) > MAX_DELTA
+  ) {
     return NextResponse.json(
-      { error: "orgId and a non-zero numeric delta are required" },
+      { error: "orgId and a non-zero integer delta within +/-1000000 are required" },
       { status: 400 },
     );
   }
 
+  // getAdminSession() only returns a boolean (no identity), so the best-effort
+  // actor for the engine's audit trail is a constant marker.
+  const actor = "admin";
+
   try {
     const result = await entFetch("/ent/orgs/credits", {
       method: "POST",
-      body: { orgId, delta: deltaNum },
+      body: { orgId, delta: deltaNum, actor },
     });
     return NextResponse.json(result);
   } catch (err) {

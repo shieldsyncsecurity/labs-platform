@@ -7,7 +7,7 @@ type SlotsBody = {
 
 // Candidate-facing: fetch reserved-capacity counters so the app can decide
 // whether to render a slot picker at all. The actual time grid is generated
-// client-side (see candidate-flow.tsx) — this route just reports capacity;
+// client-side (see candidate-flow.tsx) -- this route just reports capacity;
 // /api/book is the atomic guard against overbooking a given slot.
 export async function POST(req: Request) {
   let body: SlotsBody;
@@ -30,8 +30,10 @@ export async function POST(req: Request) {
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof EntEngineError) {
-      return NextResponse.json({ error: "slots lookup failed", detail: err.body }, { status: err.status });
+      console.error("[api/slots] engine error", err.status, err.body);
+      return NextResponse.json({ error: "Could not load scheduling." }, { status: err.status });
     }
-    return NextResponse.json({ error: "slots lookup failed" }, { status: 502 });
+    console.error("[api/slots] unexpected error", err);
+    return NextResponse.json({ error: "Could not load scheduling." }, { status: 502 });
   }
 }

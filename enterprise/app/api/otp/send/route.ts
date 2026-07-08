@@ -5,7 +5,7 @@ type OtpSendBody = {
   inviteToken?: string;
 };
 
-// Candidate-facing: trigger an OTP send (email/SMS — engine's choice) for the
+// Candidate-facing: trigger an OTP send (email/SMS -- engine's choice) for the
 // invite's registered contact, as an identity check before the assessment starts.
 export async function POST(req: Request) {
   let body: OtpSendBody;
@@ -28,8 +28,10 @@ export async function POST(req: Request) {
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof EntEngineError) {
-      return NextResponse.json({ error: "otp send failed", detail: err.body }, { status: err.status });
+      console.error("[api/otp/send] engine error", err.status, err.body);
+      return NextResponse.json({ error: "Could not send a code." }, { status: err.status });
     }
-    return NextResponse.json({ error: "otp send failed" }, { status: 502 });
+    console.error("[api/otp/send] unexpected error", err);
+    return NextResponse.json({ error: "Could not send a code." }, { status: 502 });
   }
 }

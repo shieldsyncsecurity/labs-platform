@@ -29,8 +29,10 @@ export async function POST(req: Request) {
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof EntEngineError) {
-      return NextResponse.json({ error: "consent recording failed", detail: err.body }, { status: err.status });
+      console.error("[api/consent] engine error", err.status, err.body);
+      return NextResponse.json({ error: "Could not record your consent." }, { status: err.status });
     }
-    return NextResponse.json({ error: "consent recording failed" }, { status: 502 });
+    console.error("[api/consent] unexpected error", err);
+    return NextResponse.json({ error: "Could not record your consent." }, { status: 502 });
   }
 }

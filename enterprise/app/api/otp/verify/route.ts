@@ -30,8 +30,10 @@ export async function POST(req: Request) {
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof EntEngineError) {
-      return NextResponse.json({ error: "otp verify failed", detail: err.body }, { status: err.status });
+      console.error("[api/otp/verify] engine error", err.status, err.body);
+      return NextResponse.json({ error: "Could not verify the code." }, { status: err.status });
     }
-    return NextResponse.json({ error: "otp verify failed" }, { status: 502 });
+    console.error("[api/otp/verify] unexpected error", err);
+    return NextResponse.json({ error: "Could not verify the code." }, { status: 502 });
   }
 }

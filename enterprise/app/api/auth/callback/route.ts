@@ -59,10 +59,17 @@ export async function GET(req: Request) {
   let email = "";
   let sub: string | undefined;
   let orgId = "";
+  // Admin escalation must not trust an UNVERIFIED email claim. We reject only an
+  // explicit email_verified === false (so an owner whose IdP leaves the claim
+  // unmapped/undefined is not locked out), which closes the "confirmed account
+  // carrying an admin email but with email_verified=false" path.
+  let emailVerifiedOk = false;
   try {
     const payload = await verifyIdToken(idToken);
     email = typeof payload.email === "string" ? payload.email.toLowerCase() : "";
     sub = typeof payload.sub === "string" ? payload.sub : undefined;
+    const ev = payload["email_verified"];
+    emailVerifiedOk = ev !== false && ev !== "false";
     orgId =
       typeof payload["custom:orgId"] === "string"
         ? (payload["custom:orgId"] as string).trim()
@@ -75,7 +82,7 @@ export async function GET(req: Request) {
     return loginErr("verify");
   }
 
-  if (email && adminEmails().has(email)) {
+  if (email && emailVerifiedOk && adminEmails().has(email)) {
     await setAdminCookie({ sub, email });
     return NextResponse.redirect(`${base}/admin`);
   }

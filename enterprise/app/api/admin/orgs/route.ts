@@ -47,10 +47,14 @@ export async function POST(req: Request) {
   const billingAddress = body.billingAddress?.trim() || undefined;
   const agreementVersion = body.agreementVersion?.trim() || "v1";
 
+  // getAdminSession() only returns a boolean (no identity), so the best-effort
+  // actor for the engine's audit trail is a constant marker.
+  const actor = "admin";
+
   try {
     const result = await entFetch("/ent/orgs", {
       method: "POST",
-      body: { name, adminEmails, creditsTotal, gstin, billingAddress, agreementVersion },
+      body: { name, adminEmails, creditsTotal, gstin, billingAddress, agreementVersion, actor },
     });
     return NextResponse.json(result);
   } catch (err) {

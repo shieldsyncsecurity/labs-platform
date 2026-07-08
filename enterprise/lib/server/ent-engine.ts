@@ -27,6 +27,12 @@ type EntFetchOpts = {
   body?: unknown;
   /** Query-string params, appended to `path`. */
   query?: Record<string, string | number | boolean | undefined | null>;
+  /**
+   * Hard client-side timeout in ms (default 15s). A stalled or cold engine must
+   * degrade into a fast, typed error rather than pinning the Worker request open
+   * to the platform ceiling. Give slow grading endpoints (/ent/submit) more.
+   */
+  timeoutMs?: number;
 };
 
 function buildQuery(query?: EntFetchOpts["query"]): string {
@@ -56,12 +62,25 @@ export async function entFetch<T = unknown>(path: string, opts: EntFetchOpts = {
 
   const url = `${ENT_ENGINE_URL}${path}${buildQuery(opts.query)}`;
 
-  const res = await fetch(url, {
-    method: opts.method ?? "GET",
-    headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: opts.method ?? "GET",
+      headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      cache: "no-store",
+      // Fail fast on a hung/slow engine instead of holding the Worker open.
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 15000),
+    });
+  } catch (err) {
+    // Timeout/abort or a transport failure — surface as a typed 504 so callers
+    // that already handle EntEngineError degrade gracefully (they never see the
+    // raw cause, and the Worker request ends promptly).
+    throw new EntEngineError(504, {
+      error: "ENGINE_UNAVAILABLE",
+      cause: err instanceof Error ? err.name : "unknown",
+    });
+  }
 
   const text = await res.text();
   let parsed: unknown = undefined;

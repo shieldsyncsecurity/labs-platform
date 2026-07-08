@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 import { setOrgIdCookie } from "@/lib/server/portal-session";
+import { cognitoEnabled } from "@/lib/server/cognito";
 
 // DEV-ONLY sign-in. There is no real employer auth yet (see README + the
 // portal-session TODO) -- this route exists purely so the portal is
@@ -19,11 +20,13 @@ import { setOrgIdCookie } from "@/lib/server/portal-session";
 // the env var exists so it's a single flip to turn OFF once Cognito
 // lands, without having to touch this file again.
 export async function POST(req: Request) {
-  if (!process.env.PORTAL_DEV_LOGIN) {
-    return NextResponse.json(
-      { error: "Dev sign-in is disabled. Set PORTAL_DEV_LOGIN to enable it." },
-      { status: 404 },
-    );
+  // Hard gate. dev-login is a PASSWORDLESS break-glass: it mints a full employer
+  // session from an orgId alone. It must be physically unreachable anywhere real
+  // Cognito SSO is configured (i.e. production), so that a leaked/forwarded orgId
+  // can never be turned into a cross-tenant portal session. It survives ONLY in
+  // local dev, where Cognito env is absent AND PORTAL_DEV_LOGIN is set.
+  if (!process.env.PORTAL_DEV_LOGIN || cognitoEnabled()) {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
   let body: { orgId?: string };

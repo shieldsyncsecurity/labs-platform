@@ -64,10 +64,14 @@ export default async function BillingPage() {
   const creditsRemaining = Math.max(0, creditsTotal - creditsUsed);
 
   const subject = encodeURIComponent("Request more assessment credits");
+  // Do NOT embed the raw orgId here -- orgId is effectively a bearer secret for
+  // this org, and a mailto body ends up in mail clients / forwarded support
+  // threads. The authenticated requester's email + org name is enough for
+  // ShieldSync to identify the account.
   const body = encodeURIComponent(
     `Hi ShieldSync team,\n\nWe'd like to add more assessment credits to our account${
       org?.name ? ` (${org.name})` : ""
-    }.\n\nOrg ID: ${orgId}\n\nThanks!`,
+    }.\n\nThanks!`,
   );
   const mailtoHref = `mailto:${CONTACT_EMAIL}?subject=${subject}&body=${body}`;
 

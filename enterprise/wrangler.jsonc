@@ -8,6 +8,11 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  // Persisted Workers logs — centralized observability for debugging + audit.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
   "routes": [
     // Workers custom domain: wrangler creates the proxied DNS record + edge TLS cert
     // for enterprise.shieldsyncsecurity.com (the zone is in this Cloudflare account).
