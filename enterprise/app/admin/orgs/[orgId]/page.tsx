@@ -97,11 +97,13 @@ export default async function AdminOrgDetailPage({
           </p>
         </div>
 
-        {/* Paste-into-dev-login helper */}
+        {/* Employer access helper */}
         <div className="mt-4 rounded-lg border border-brand/20 bg-brand/5 px-3 py-2 text-xs text-ink-soft">
           <span className="font-semibold text-brand-strong">Org id:</span>{" "}
-          <span className="font-mono">{org.orgId ?? orgId}</span> — paste this into the employer
-          dev-login to sign in as this org.
+          <span className="font-mono">{org.orgId ?? orgId}</span> — to give this org portal access,
+          create a Cognito user whose <span className="font-mono">custom:orgId</span> is this value.
+          That employer then signs in at <span className="font-mono">/portal</span> and generates
+          candidate links there.
         </div>
 
         {/* Credits summary + adjustment */}
