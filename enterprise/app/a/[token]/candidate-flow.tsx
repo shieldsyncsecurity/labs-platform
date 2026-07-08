@@ -680,6 +680,27 @@ function ConsentCard({
           retain the results for 24 months, shared with {orgName}. Sub-processors: AWS, Google
           (Gemini), Amazon SES.
         </p>
+        <p className="mt-2">
+          See our{" "}
+          <a
+            href="/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-brand-strong underline underline-offset-2"
+          >
+            Privacy Policy
+          </a>{" "}
+          and{" "}
+          <a
+            href="/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-brand-strong underline underline-offset-2"
+          >
+            Terms
+          </a>{" "}
+          for how your data is handled and how to request deletion.
+        </p>
       </div>
 
       <label className="flex items-start gap-3 text-sm text-ink-soft">

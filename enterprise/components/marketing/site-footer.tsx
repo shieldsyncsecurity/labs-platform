@@ -29,8 +29,21 @@ export function SiteFooter() {
             </a>
           </nav>
         </div>
-        <div className="border-t border-line pt-6 text-xs text-muted">
-          &copy; {new Date().getFullYear()} ShieldSync Security Private Limited. All rights reserved.
+        <div className="flex flex-col gap-4 border-t border-line pt-6 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-xs text-muted">
+            &copy; {new Date().getFullYear()} ShieldSync Security Private Limited. All rights reserved.
+          </div>
+          <nav className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
+            <Link href="/privacy" className="font-medium text-muted hover:text-ink">
+              Privacy
+            </Link>
+            <Link href="/terms" className="font-medium text-muted hover:text-ink">
+              Terms
+            </Link>
+            <a href="/.well-known/security.txt" className="font-medium text-muted hover:text-ink">
+              Security
+            </a>
+          </nav>
         </div>
       </div>
     </footer>
