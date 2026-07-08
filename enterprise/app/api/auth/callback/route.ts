@@ -41,20 +41,38 @@ export async function GET(req: Request) {
   store.delete(STATE_COOKIE);
   if (!expectedState || expectedState !== state) return loginErr("state");
 
+  let idToken: string;
+  try {
+    const tok = await exchangeCode(code);
+    idToken = tok.id_token;
+  } catch (e) {
+    // Server-side only (never shown to the user). The token-endpoint status is
+    // the diagnosis: 400/401 almost always = wrong client secret or a
+    // redirect_uri mismatch, not a user error.
+    console.error(
+      "[auth/callback] token exchange failed:",
+      e instanceof Error ? e.message : String(e),
+    );
+    return loginErr("token");
+  }
+
   let email = "";
   let sub: string | undefined;
   let orgId = "";
   try {
-    const { id_token } = await exchangeCode(code);
-    const payload = await verifyIdToken(id_token);
+    const payload = await verifyIdToken(idToken);
     email = typeof payload.email === "string" ? payload.email.toLowerCase() : "";
     sub = typeof payload.sub === "string" ? payload.sub : undefined;
     orgId =
       typeof payload["custom:orgId"] === "string"
         ? (payload["custom:orgId"] as string).trim()
         : "";
-  } catch {
-    return loginErr("exchange");
+  } catch (e) {
+    console.error(
+      "[auth/callback] id_token verify failed:",
+      e instanceof Error ? e.message : String(e),
+    );
+    return loginErr("verify");
   }
 
   if (email && adminEmails().has(email)) {

@@ -12,6 +12,8 @@ const ERRORS: Record<string, string> = {
   sso: "Sign-in was cancelled or didn't complete. Please try again.",
   missing_code: "Sign-in didn't complete. Please try again.",
   state: "Your sign-in session expired. Please try again.",
+  token: "We couldn't complete your sign-in. Please try again.",
+  verify: "We couldn't verify your sign-in. Please try again.",
   exchange: "We couldn't verify your sign-in. Please try again.",
   no_access:
     "That account isn't linked to an organization yet. Contact your ShieldSync administrator.",
