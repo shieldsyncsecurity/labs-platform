@@ -138,13 +138,15 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # -- Step 5: environment (shared secret) --------------------------------------
-# The ent engine's HTTP auth FAILS CLOSED only when ENT_ENGINE_SECRET is set. An
-# unset secret means the guard is disabled (dev mode). MUST be set in prod. The
-# enterprise app must send this same value in the x-engine-token header.
+# The ent engine's HTTP auth FAILS CLOSED: in the Lambda runtime an empty
+# ENT_ENGINE_SECRET makes the engine refuse every non-health request. Deploying
+# without it would ship a dead (500-on-everything) engine, so a missing secret is a
+# HARD deploy failure here - never proceed. The enterprise app must send this same
+# value in the x-engine-token header.
 Write-Host "`n[5/6] Setting Lambda environment ..." -ForegroundColor Cyan
 if ([string]::IsNullOrWhiteSpace($env:ENT_ENGINE_SECRET)) {
-    Write-Host "  WARNING: ENT_ENGINE_SECRET not provided - the engine will run with its HTTP guard DISABLED." -ForegroundColor Yellow
-    Write-Host "  Set it and re-run, or set it later with aws lambda update-function-configuration." -ForegroundColor Yellow
+    Write-Error "ENT_ENGINE_SECRET is not set. Refusing to deploy the enterprise engine without its HTTP auth secret (it would fail closed and 500 every request). Set it and re-run:  `$env:ENT_ENGINE_SECRET=`"<value>`"; .\deploy\deploy-ent.ps1"
+    exit 1
 } else {
     # GEMINI_API_KEY is added later (reflection scoring) via the same command.
     $envArg = "Variables={ENT_ENGINE_SECRET=$($env:ENT_ENGINE_SECRET)}"

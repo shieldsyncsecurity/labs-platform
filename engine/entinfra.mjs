@@ -496,36 +496,100 @@ export async function revokeInvite(inviteToken) {
   return setInviteStatus(inviteToken, "revoked");
 }
 
+/**
+ * consentInvite(): record click-through consent and move the invite to "consented".
+ * GUARDED transition (unlike the generic setInviteStatus): only allowed from a
+ * PRE-lease state (created / consented / verified) so an invite that already holds
+ * a leased sandbox account (booked / started) or is terminal (revoked / submitted /
+ * refunded) cannot be reset back through the state machine to mint a second account
+ * or bypass a revoke. Idempotent for created->consented and consented->consented.
+ * Throws NOT_CONSENTABLE (the handler maps this to 409) when the condition fails.
+ */
+export async function consentInvite(inviteToken, consentVersion) {
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: INVITES_TABLE,
+        Key: { inviteToken: S(inviteToken) },
+        UpdateExpression: "SET #s = :consented, consentVersion = :cv, consentAt = :at",
+        ConditionExpression: "#s IN (:created, :consented, :verified)",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: {
+          ":consented": S("consented"),
+          ":created": S("created"),
+          ":verified": S("verified"),
+          ":cv": S(consentVersion ?? ""),
+          ":at": S(nowIso()),
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObject(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") {
+      const err = new Error("NOT_CONSENTABLE");
+      err.code = "NOT_CONSENTABLE";
+      throw err;
+    }
+    throw e;
+  }
+}
+
 // ── OTP (Fix H — brute-force resistant) ─────────────────────────────────────
 
 const OTP_TTL_SECONDS = 10 * 60;
 const OTP_MAX_ATTEMPTS = 5;
 
-/** setOtp(): store a fresh OTP hash for an invite, resetting attempt/lock state.
- *  Called each time a new code is sent (e.g. "resend code"). */
-export async function setOtp(inviteToken, code) {
+/** setOtp(): store a fresh OTP hash for an invite and reset the PER-CODE attempt
+ *  counter. Called each time a new code is sent (e.g. "resend code").
+ *
+ *  Deliberately does NOT touch otpLocked: once an invite is locked (OTP_MAX_ATTEMPTS
+ *  failed verify attempts) a resend must NOT unlock it. The lock is STICKY - a fresh
+ *  code may be issued but the invite stays unusable until admin/ops intervention.
+ *  `meta` carries the send-throttle bookkeeping (otpLastSentAt / otpSendWindowStart /
+ *  otpSendCount) which the CALLER computes and which setOtp only WRITES - it never
+ *  resets these, so the per-invite cooldown + daily cap survive a resend. */
+export async function setOtp(inviteToken, code, meta = {}) {
   const db = await ddb();
+  const sets = ["otpHash = :h", "otpExpiresAt = :exp", "otpAttempts = :zero"];
+  const values = {
+    ":h": S(hashOtp(code)),
+    ":exp": N(now() + OTP_TTL_SECONDS),
+    ":zero": N(0),
+  };
+  if (meta.lastSentAt !== undefined) {
+    sets.push("otpLastSentAt = :ls");
+    values[":ls"] = N(meta.lastSentAt);
+  }
+  if (meta.windowStart !== undefined) {
+    sets.push("otpSendWindowStart = :ws");
+    values[":ws"] = N(meta.windowStart);
+  }
+  if (meta.sendCount !== undefined) {
+    sets.push("otpSendCount = :sc");
+    values[":sc"] = N(meta.sendCount);
+  }
   await db.send(
     new UpdateItemCommand({
       TableName: INVITES_TABLE,
       Key: { inviteToken: S(inviteToken) },
-      UpdateExpression: "SET otpHash = :h, otpExpiresAt = :exp, otpAttempts = :zero, otpLocked = :false",
-      ExpressionAttributeValues: {
-        ":h": S(hashOtp(code)),
-        ":exp": N(now() + OTP_TTL_SECONDS),
-        ":zero": N(0),
-        ":false": BOOL(false),
-      },
+      UpdateExpression: "SET " + sets.join(", "),
+      ExpressionAttributeValues: values,
     })
   );
 }
 
 /**
  * verifyOtp(): check a candidate-submitted code against the stored hash.
+ *   - notFound    -> {ok:false, notFound:true}
+ *   - linkExpired -> {ok:false, linkExpired:true} (the 7-day invite link is dead)
  *   - locked      -> {ok:false, locked:true} (no further comparison attempted)
- *   - expired     -> {ok:false, expired:true}
+ *   - expired     -> {ok:false, expired:true} (this code's 10-min TTL passed)
  *   - mismatch    -> ADD otpAttempts :1; lock at OTP_MAX_ATTEMPTS; {ok:false, attemptsLeft}
- *   - match       -> clear OTP fields, setInviteStatus("verified"), {ok:true}
+ *   - not OTP-eligible -> {ok:false, notVerifiable:true, status} (correct code but the
+ *       invite is revoked/booked/started/submitted -> transition refused)
+ *   - match       -> ATOMIC conditional transition to "verified", {ok:true}
  * The comparison itself uses crypto.timingSafeEqual on equal-length hex-decoded
  * buffers (both sides are fixed-length SHA-256 hex digests, so lengths always
  * match) to avoid a timing side-channel on the stored hash.
@@ -533,6 +597,7 @@ export async function setOtp(inviteToken, code) {
 export async function verifyOtp(inviteToken, code) {
   const invite = await getInvite(inviteToken);
   if (!invite) return { ok: false, notFound: true };
+  if (invite.expiresAt && new Date(invite.expiresAt) < new Date()) return { ok: false, linkExpired: true };
   if (invite.otpLocked) return { ok: false, locked: true };
   if (!invite.otpExpiresAt || now() > invite.otpExpiresAt) return { ok: false, expired: true };
 
@@ -541,16 +606,38 @@ export async function verifyOtp(inviteToken, code) {
   const match = candidateHash.length === storedHash.length && timingSafeEqual(candidateHash, storedHash);
 
   if (match) {
+    // ATOMIC, CONDITIONAL transition to "verified" - a single UpdateItem guarded by
+    // a ConditionExpression, NOT a read-then-write. This is the one guard that:
+    //   (a) enforces server-side consent - a candidate who skipped /ent/consent is
+    //       still "created" (not "consented"), so the condition fails and they
+    //       cannot verify; and
+    //   (b) blocks a revoked / booked / started / submitted invite from being
+    //       flipped back to "verified" (revoke bypass, unlimited retakes, a second
+    //       leased sandbox account, or a result overwrite).
+    // Correct-code-but-wrong-state is a state-machine violation, NOT a brute-force
+    // attempt, so it does not burn an attempt.
     const db = await ddb();
-    await db.send(
-      new UpdateItemCommand({
-        TableName: INVITES_TABLE,
-        Key: { inviteToken: S(inviteToken) },
-        UpdateExpression: "REMOVE otpHash, otpExpiresAt SET otpAttempts = :zero, otpLocked = :false",
-        ExpressionAttributeValues: { ":zero": N(0), ":false": BOOL(false) },
-      })
-    );
-    await setInviteStatus(inviteToken, "verified");
+    try {
+      await db.send(
+        new UpdateItemCommand({
+          TableName: INVITES_TABLE,
+          Key: { inviteToken: S(inviteToken) },
+          UpdateExpression: "REMOVE otpHash, otpExpiresAt SET #s = :verified, otpAttempts = :zero",
+          ConditionExpression: "#s IN (:consented, :verified)",
+          ExpressionAttributeNames: { "#s": "status" },
+          ExpressionAttributeValues: {
+            ":verified": S("verified"),
+            ":consented": S("consented"),
+            ":zero": N(0),
+          },
+        })
+      );
+    } catch (e) {
+      if (e.name === "ConditionalCheckFailedException") {
+        return { ok: false, notVerifiable: true, status: invite.status };
+      }
+      throw e;
+    }
     return { ok: true };
   }
 

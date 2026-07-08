@@ -10,7 +10,6 @@
 // style as the B2C engine's handler.mjs (API Gateway v2 / Function URL event).
 
 import {
-  newToken,
   hashOtp,
   createOrg,
   getOrg,
@@ -25,6 +24,7 @@ import {
   getInviteByCandidateReportToken,
   listInvites,
   setInviteStatus,
+  consentInvite,
   refundInvite,
   revokeInvite,
   setOtp,
@@ -62,6 +62,14 @@ import { randomInt } from "node:crypto";
 const ENT_TIMEBOX_MIN = 60;
 const ENT_GRACE_MIN = 15;
 
+// OTP send throttling (per-invite). A cooldown between sends and a rolling 24h cap
+// resist SES-cost abuse and code-spam. These counters live on the invite and are
+// deliberately NOT reset by setOtp (see entinfra.setOtp), so a resend cannot wipe
+// them. Max candidate reflection length clamped before grade/persist (Batch E).
+const OTP_SEND_COOLDOWN_SEC = 45;
+const OTP_SEND_DAILY_CAP = 10;
+const REFLECTION_MAX_CHARS = 8000;
+
 const entLambda = new LambdaClient({ region: "us-east-1" });
 const ses = new SESClient({ region: "us-east-1" });
 
@@ -70,6 +78,11 @@ const ses = new SESClient({ region: "us-east-1" });
 // engine refuses non-health requests. Empty string in local dev = guard
 // disabled — mirrors handler.mjs's ENGINE_SHARED_SECRET exactly.
 const ENT_ENGINE_SECRET = process.env.ENT_ENGINE_SECRET || "";
+
+// True when running inside the Lambda runtime (internet-exposed via API Gateway).
+// Used to FAIL CLOSED on auth and to gate dev-only response fields - never trust a
+// blank secret in Lambda, and never leak dev conveniences (devCode) there.
+const IN_LAMBDA = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
 
 // Constant-time string compare so a missing header / wrong token can't be
 // length-distinguished from a correct one. Same helper as handler.mjs.
@@ -166,13 +179,29 @@ export async function handler(event) {
   ).toUpperCase();
   const path = event.rawPath ?? event.path ?? "/";
 
-  // Shared-secret check (skipped for /health and when no secret is configured,
-  // i.e. local dev). API GW header names arrive lower-cased on v2 events.
-  if (ENT_ENGINE_SECRET && !(method === "GET" && path === "/health")) {
-    const h = event.headers ?? {};
-    const supplied = h["x-engine-token"] ?? h["X-Engine-Token"] ?? "";
-    if (!timingSafeEqual(supplied, ENT_ENGINE_SECRET)) {
-      return resp(401, { error: "unauthorized" });
+  // Shared-secret check. /health is always open. API GW header names arrive
+  // lower-cased on v2 events.
+  //
+  // FAIL CLOSED in Lambda: the engine is internet-exposed via API Gateway, so a
+  // missing/blank ENT_ENGINE_SECRET must NEVER silently disable auth. If we are in
+  // the Lambda runtime with no secret configured, refuse every non-health request
+  // as misconfigured rather than serving it unauthenticated. Locally (no Lambda) a
+  // blank secret still means "guard disabled" for dev convenience only.
+  const isHealth = method === "GET" && path === "/health";
+  const secretSet = ENT_ENGINE_SECRET.trim().length > 0;
+  if (!isHealth) {
+    if (IN_LAMBDA && !secretSet) {
+      console.error(
+        "[ent-engine] ENT_ENGINE_SECRET is empty in the Lambda runtime; refusing all non-health requests (fail closed)"
+      );
+      return resp(500, { error: "server misconfigured" });
+    }
+    if (secretSet) {
+      const h = event.headers ?? {};
+      const supplied = h["x-engine-token"] ?? h["X-Engine-Token"] ?? "";
+      if (!timingSafeEqual(supplied, ENT_ENGINE_SECRET)) {
+        return resp(401, { error: "unauthorized" });
+      }
     }
   }
 
@@ -196,6 +225,12 @@ export async function handler(event) {
     // ── admin/org (called by ShieldSync admin UI) ─────────────────────────
     if (method === "POST" && path === "/ent/orgs") {
       const org = await createOrg(parsed);
+      // Attributable audit trail (Batch L) - greppable structured line to
+      // CloudWatch on this privileged mutation. `actor` is the authenticated admin
+      // email the app passes through; null if not supplied.
+      console.log(
+        JSON.stringify({ audit: true, action: "org.create", actor: parsed.actor ?? null, orgId: org?.orgId ?? null, at: Date.now() })
+      );
       return resp(200, org);
     }
 
@@ -212,8 +247,14 @@ export async function handler(event) {
     }
 
     if (method === "POST" && path === "/ent/orgs/credits") {
-      const { orgId, delta } = parsed;
+      const { orgId, delta, actor } = parsed;
       const org = await addCredits(orgId, delta);
+      // Attributable audit trail (Batch L) - every credit adjustment is logged with
+      // the acting admin so a balance change is never anonymous. Immutable in
+      // CloudWatch; no new table required.
+      console.log(
+        JSON.stringify({ audit: true, action: "credits.adjust", actor: actor ?? null, orgId, delta, at: Date.now() })
+      );
       return resp(200, org);
     }
 
@@ -237,7 +278,15 @@ export async function handler(event) {
 
     if (method === "POST" && path === "/ent/invites") {
       const { assessmentId, orgId, candidateName, candidateEmail } = parsed;
-      const inviteToken = parsed.inviteToken || newToken();
+      // inviteToken MUST be caller-supplied (the app mints it once via newToken()
+      // and reuses it on retry) so the credit-ledger charge is idempotent. Minting
+      // a fresh token here on a missing value would make a retried create a SECOND
+      // charge, so reject instead. (Contract: the enterprise app now always sends
+      // inviteToken on POST /ent/invites.)
+      const inviteToken = parsed.inviteToken;
+      if (!inviteToken || typeof inviteToken !== "string") {
+        return resp(400, { error: "INVITE_TOKEN_REQUIRED" });
+      }
       const result = await createInvite({ assessmentId, orgId, candidateName, candidateEmail, inviteToken });
       return resp(200, result);
     }
@@ -283,19 +332,55 @@ export async function handler(event) {
 
     if (method === "POST" && path === "/ent/consent") {
       const { inviteToken, consentVersion } = parsed;
-      const invite = await setInviteStatus(inviteToken, "consented", {
-        consentVersion,
-        consentAt: new Date().toISOString(),
-      });
-      return resp(200, invite);
+      const invite = await getInvite(inviteToken);
+      if (!invite) return resp(404, { error: "not found" });
+      if (new Date(invite.expiresAt) < new Date()) {
+        return resp(410, { error: "LINK_EXPIRED" });
+      }
+      try {
+        const updated = await consentInvite(inviteToken, consentVersion);
+        return resp(200, updated);
+      } catch (e) {
+        if (e.code === "NOT_CONSENTABLE") {
+          return resp(409, { error: "NOT_CONSENTABLE", status: invite.status });
+        }
+        throw e;
+      }
     }
 
     if (method === "POST" && path === "/ent/otp/send") {
       const { inviteToken } = parsed;
       const invite = await getInvite(inviteToken);
       if (!invite) return resp(404, { error: "not found" });
+      if (new Date(invite.expiresAt) < new Date()) {
+        return resp(410, { error: "LINK_EXPIRED" });
+      }
+      // Never send for a terminal invite - a revoked or already-submitted candidate
+      // has no reason to receive a code.
+      if (["revoked", "submitted"].includes(invite.status)) {
+        return resp(409, { error: "NOT_SENDABLE", status: invite.status });
+      }
+
+      // Per-invite send throttle: 45s cooldown + rolling-24h daily cap. Both read
+      // from counters on the invite that setOtp does NOT reset, so a resend loop
+      // cannot bypass them.
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (invite.otpLastSentAt && nowSec - invite.otpLastSentAt < OTP_SEND_COOLDOWN_SEC) {
+        return resp(429, { error: "OTP_COOLDOWN", retryAfter: OTP_SEND_COOLDOWN_SEC - (nowSec - invite.otpLastSentAt) });
+      }
+      const windowStart = invite.otpSendWindowStart ?? 0;
+      const inWindow = nowSec - windowStart < 24 * 3600;
+      const priorCount = inWindow ? invite.otpSendCount ?? 0 : 0;
+      if (priorCount >= OTP_SEND_DAILY_CAP) {
+        return resp(429, { error: "OTP_DAILY_CAP" });
+      }
+
       const code = String(randomInt(0, 1000000)).padStart(6, "0");
-      await setOtp(inviteToken, code);
+      await setOtp(inviteToken, code, {
+        lastSentAt: nowSec,
+        windowStart: inWindow ? windowStart : nowSec,
+        sendCount: priorCount + 1,
+      });
       // Deliver the code by email via SES (Fix H). ENT_OTP_FROM must be an
       // SES-verified sender identity (and in the SES sandbox, the recipient must
       // be verified too). Never blocks the flow on a send failure — we report
@@ -325,13 +410,21 @@ export async function handler(event) {
         }
       }
       const out = { ok: true, emailed };
-      if (!ENT_ENGINE_SECRET) out.devCode = code; // dev-only: no secret configured
+      // Return the plaintext code ONLY in local dev (never in the Lambda runtime,
+      // regardless of whether a secret is set) - leaking it in prod would let anyone
+      // who can reach the send endpoint read the OTP straight from the response.
+      if (!IN_LAMBDA) out.devCode = code;
       return resp(200, out);
     }
 
     if (method === "POST" && path === "/ent/otp/verify") {
       const { inviteToken, code } = parsed;
       const result = await verifyOtp(inviteToken, code);
+      // Expiry (#10) and state-machine (#4) guards surface as flags from verifyOtp;
+      // map them to proper status codes. The normal {ok:true} / wrong-code /
+      // locked / expired-code shapes still return 200 as before.
+      if (result.linkExpired) return resp(410, { error: "LINK_EXPIRED" });
+      if (result.notVerifiable) return resp(409, { error: "NOT_VERIFIABLE", status: result.status });
       return resp(200, result);
     }
 
@@ -376,6 +469,9 @@ export async function handler(event) {
       const { inviteToken } = parsed;
       const invite = await getInvite(inviteToken);
       if (!invite) return resp(404, { error: "not found" });
+      if (new Date(invite.expiresAt) < new Date()) {
+        return resp(410, { error: "LINK_EXPIRED" });
+      }
       const caps = await entReservedCounts();
       // capacity 0 => app shows "scheduling opens soon"; the app generates the
       // candidate-facing time grid client-side, /ent/book is the atomic guard.
@@ -392,6 +488,13 @@ export async function handler(event) {
       const bookable = ["verified", "consented", "booked"];
       if (!bookable.includes(invite.status)) {
         return resp(409, { error: "NOT_BOOKABLE" });
+      }
+
+      // Idempotent re-book of the SAME slot: the seat is already held for this
+      // invite, so short-circuit BEFORE bookSlot - re-incrementing the counter would
+      // let one invite consume multiple seats and exhaust the slot.
+      if (invite.status === "booked" && invite.slotKey === slotKey) {
+        return resp(200, { ok: true, slotKey });
       }
 
       const caps = await entReservedCounts();
@@ -528,58 +631,92 @@ export async function handler(event) {
         return resp(409, { error: "NO_ACTIVE_SESSION" });
       }
 
-      // GRADE FIRST — the account gets wiped by teardown right after this,
-      // so grading must happen while the account is still live.
-      let grade;
-      let gradeError;
+      // Timebox check (Batch E): flag a submit that lands after the 60-min scored
+      // window so a 70-minute attempt is never silently recorded as on-time. We
+      // still accept + grade the submit, but record that it was late.
+      const nowMs = Date.now();
+      const scoredExpMs = invite.scoredExpiresAt ? new Date(invite.scoredExpiresAt).getTime() : NaN;
+      const lateSubmit = Number.isFinite(scoredExpMs) && nowMs > scoredExpMs;
+      const secondsLate = lateSubmit ? Math.round((nowMs - scoredExpMs) / 1000) : 0;
+
+      // Clamp candidate-controlled reflection BEFORE grading/persisting so an
+      // oversized field can't blow the DynamoDB item-size limit and make putResult
+      // throw (which would otherwise strand the leased account until the reaper).
+      const reflectionText =
+        typeof reflection === "string" ? reflection.slice(0, REFLECTION_MAX_CHARS) : null;
+
       try {
-        grade = await gradeLab(labSlug, invite.execRoleArn, invite.accountId);
-      } catch (e) {
-        gradeError = String(e);
-        grade = { gradable: false, criteria: [], passed: false };
+        // GRADE FIRST - the account gets wiped by teardown right after this, so
+        // grading must happen while the account is still live.
+        let grade;
+        let gradeError;
+        try {
+          grade = await gradeLab(labSlug, invite.execRoleArn, invite.accountId);
+        } catch (e) {
+          // Log the FULL detail (embeds platform account id + role ARNs) to
+          // CloudWatch ONLY; persist a FIXED string into the candidate result the
+          // employer sees. Never let the raw error text reach the stored report.
+          console.error("[ent/submit] gradeLab failed:", e);
+          gradeError = "grading_incomplete";
+          grade = { gradable: false, criteria: [], passed: false };
+        }
+
+        // MVP scoring: correctness with partial credit via pass ratio. Other
+        // dimensions (quality/speed/process/reflection/integrity) are enriched
+        // by later async workers (see TODO below) and stay "pending" until then.
+        const crit = grade.criteria || [];
+        const total = crit.length;
+        const passed = crit.filter((c) => c.passed && !c.unknown).length;
+        const correctness = total ? Math.round(55 * (passed / total)) : 0;
+        const composite = correctness;
+
+        const report = {
+          composite,
+          correctness,
+          dims: { quality: "pending", speed: "pending", process: "pending", reflection: "pending" },
+          criteria: crit,
+          passedCount: passed,
+          totalCriteria: total,
+          reflectionText,
+          reflectionScore: null,
+          integrity: "pending",
+          lateSubmit,
+          secondsLate,
+          scoredExpiresAt: invite.scoredExpiresAt ?? null,
+          gradedAt: new Date().toISOString(),
+          ...(gradeError ? { gradeError } : {}),
+        };
+
+        await putResult(invite.assessmentId, inviteToken, report);
+        await setInviteStatus(inviteToken, "submitted", {
+          submittedAt: new Date().toISOString(),
+          lateSubmit,
+        });
+
+        // TODO: async workers for (a) CloudTrail work-timeline ~15min post-submit
+        // [Fix F], (b) Gemini reflection scoring [Fix I]. integrity + reflectionScore
+        // stay "pending" until then.
+
+        return resp(200, { ok: true, submitted: true, lateSubmit });
+      } finally {
+        // ALWAYS reclaim the leased AWS account, even if grading or putResult threw:
+        // otherwise the account leaks until the 75-min reaper. Teardown is async
+        // (~6min nuke) and best-effort; a dispatch failure is logged, never masks the
+        // real error, and never blocks the candidate's response.
+        await invokeEntWorker("teardown-ent", { sessionId: invite.sessionId }).catch((e) => {
+          console.error("[ent/submit] teardown dispatch failed:", e?.message);
+        });
       }
-
-      // MVP scoring: correctness with partial credit via pass ratio. Other
-      // dimensions (quality/speed/process/reflection/integrity) are enriched
-      // by later async workers (see TODO below) and stay "pending" until then.
-      const crit = grade.criteria || [];
-      const total = crit.length;
-      const passed = crit.filter((c) => c.passed && !c.unknown).length;
-      const correctness = total ? Math.round(55 * (passed / total)) : 0;
-      const composite = correctness;
-
-      const report = {
-        composite,
-        correctness,
-        dims: { quality: "pending", speed: "pending", process: "pending", reflection: "pending" },
-        criteria: crit,
-        passedCount: passed,
-        totalCriteria: total,
-        reflectionText: reflection ?? null,
-        reflectionScore: null,
-        integrity: "pending",
-        gradedAt: new Date().toISOString(),
-        ...(gradeError ? { gradeError } : {}),
-      };
-
-      await putResult(invite.assessmentId, inviteToken, report);
-      await setInviteStatus(inviteToken, "submitted", { submittedAt: new Date().toISOString() });
-
-      // Teardown is async (~6min nuke) — never block the candidate's response on it.
-      await invokeEntWorker("teardown-ent", { sessionId: invite.sessionId });
-
-      // TODO: async workers for (a) CloudTrail work-timeline ~15min post-submit
-      // [Fix F], (b) Gemini reflection scoring [Fix I]. integrity + reflectionScore
-      // stay "pending" until then.
-
-      return resp(200, { ok: true, submitted: true });
     }
 
     return resp(404, { error: "NOT_FOUND" });
   } catch (e) {
+    // Full detail (may embed AWS account id, ARNs, table names) goes to CloudWatch
+    // ONLY. The HTTP caller gets an opaque error - never String(e) / stack /
+    // e.message. The specific codes below are fixed, safe strings.
     console.error("ent-engine error:", e);
     if (e.code === "NO_CREDITS") return resp(402, { error: "NO_CREDITS" });
     if (e.code === "INVITE_NOT_FOUND") return resp(404, { error: "INVITE_NOT_FOUND" });
-    return resp(500, { error: e.code || e.message });
+    return resp(500, { error: "INTERNAL" });
   }
 }
