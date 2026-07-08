@@ -19,6 +19,7 @@ import {
   GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
+  DeleteItemCommand,
   QueryCommand,
   ScanCommand,
   TransactWriteItemsCommand,
@@ -164,6 +165,16 @@ export async function getOrg(orgId) {
   const db = await ddb();
   const r = await db.send(new GetItemCommand({ TableName: ORGS_TABLE, Key: { orgId: S(orgId) } }));
   return itemToObject(r.Item);
+}
+
+/**
+ * deleteOrg(): hard-delete an org row by id. The CALLER (handler) MUST have
+ * already confirmed the org has NO assessments, so this can never orphan
+ * candidate PII / results. Used for removing mistaken or test orgs.
+ */
+export async function deleteOrg(orgId) {
+  const db = await ddb();
+  await db.send(new DeleteItemCommand({ TableName: ORGS_TABLE, Key: { orgId: S(orgId) } }));
 }
 
 /**

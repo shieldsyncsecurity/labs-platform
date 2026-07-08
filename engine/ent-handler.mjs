@@ -13,6 +13,7 @@ import {
   hashOtp,
   createOrg,
   getOrg,
+  deleteOrg,
   addCredits,
   listAllOrgs,
   createAssessment,
@@ -256,6 +257,25 @@ export async function handler(event) {
         JSON.stringify({ audit: true, action: "credits.adjust", actor: actor ?? null, orgId, delta, at: Date.now() })
       );
       return resp(200, org);
+    }
+
+    if (method === "POST" && path === "/ent/orgs/delete") {
+      const { orgId, actor } = parsed;
+      const org = await getOrg(orgId);
+      if (!org) return resp(404, { error: "not found" });
+      // Refuse to delete an org that has assessments -- those carry candidate PII
+      // and results and must never be orphaned. Only empty orgs (mistaken/test)
+      // are deletable; anything with assessments must be handled via a proper
+      // data-retention/erasure flow instead.
+      const assessments = await listAssessments(orgId);
+      if (Array.isArray(assessments) && assessments.length > 0) {
+        return resp(409, { error: "ORG_NOT_EMPTY" });
+      }
+      await deleteOrg(orgId);
+      console.log(
+        JSON.stringify({ audit: true, action: "org.delete", actor: actor ?? null, orgId, at: Date.now() })
+      );
+      return resp(200, { ok: true });
     }
 
     // ── employer portal (called by the enterprise app server-side) ────────

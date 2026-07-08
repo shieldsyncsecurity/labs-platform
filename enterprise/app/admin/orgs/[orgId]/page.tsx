@@ -5,6 +5,7 @@ import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 import AdminNav from "../../_components/admin-nav";
 import CopyButton from "../../../portal/_components/copy-button";
 import AdjustCreditsForm from "./adjust-credits-form";
+import DeleteOrgButton from "./delete-org-button";
 import { Bar, formatDate } from "../../../r/_components/report-bits";
 
 export const metadata: Metadata = {
@@ -197,6 +198,21 @@ export default async function AdminOrgDetailPage({
               </table>
             </div>
           )}
+        </div>
+
+        {/* Danger zone */}
+        <div className="mt-8 rounded-xl border border-rose-200 bg-rose-50/40 p-5">
+          <h2 className="text-sm font-semibold text-rose-800">Danger zone</h2>
+          <p className="mt-1 text-xs text-muted">
+            Permanently delete this organization. This cannot be undone.
+          </p>
+          <div className="mt-3">
+            <DeleteOrgButton
+              orgId={org.orgId ?? orgId}
+              orgName={org.name ?? "this organization"}
+              canDelete={!assessmentsError && assessments.length === 0}
+            />
+          </div>
         </div>
       </div>
     </div>
