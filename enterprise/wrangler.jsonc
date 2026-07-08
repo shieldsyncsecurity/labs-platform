@@ -19,10 +19,19 @@
     // Public origin of THIS app.
     "APP_URL": "https://enterprise.shieldsyncsecurity.com",
     // Enables the temporary employer dev-login (paste-an-orgId). Turn OFF (remove)
-    // once the Cognito enterprise pool replaces it. orgIds are 128-bit unguessable.
-    "PORTAL_DEV_LOGIN": "1"
+    // once Cognito sign-in is verified live. orgIds are 128-bit unguessable.
+    "PORTAL_DEV_LOGIN": "1",
+    // Amazon Cognito enterprise user pool (Hosted-UI Authorization-Code flow).
+    // Non-secret identifiers only; COGNITO_CLIENT_SECRET is a Worker SECRET.
+    "COGNITO_REGION": "us-east-1",
+    "COGNITO_POOL_ID": "us-east-1_54vIGJe4R",
+    "COGNITO_CLIENT_ID": "4lri28sn4mn2u8bqpfjll1i8gc",
+    "COGNITO_DOMAIN": "shieldsync-enterprise.auth.us-east-1.amazoncognito.com",
+    // Comma-separated ShieldSync-staff emails routed to the admin console after
+    // Cognito sign-in (matched case-insensitively against the id_token `email`).
+    "ADMIN_EMAILS": "himanshujain0911@gmail.com"
   }
-  // NOTE: ENT_ENGINE_SECRET and SESSION_SECRET are set as Worker SECRETS
-  // (wrangler secret put ENT_ENGINE_SECRET / SESSION_SECRET), never as `vars`
-  // — vars are visible in `wrangler.jsonc` / the dashboard config, secrets are not.
+  // NOTE: ENT_ENGINE_SECRET, SESSION_SECRET and COGNITO_CLIENT_SECRET are set as
+  // Worker SECRETS (wrangler secret put ...), never as `vars` — vars are visible
+  // in `wrangler.jsonc` / the dashboard config, secrets are not.
 }

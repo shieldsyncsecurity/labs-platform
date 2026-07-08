@@ -6,23 +6,18 @@
 // employer's candidates and report links, so keep this module small and
 // boring.
 //
-// TODO: replace dev cookie with Cognito enterprise-pool session (email+password
-// +TOTP); orgId comes from the verified session's custom:orgId claim. When
-// that lands, getOrgId() should verify a real session token (JWT/Cognito
-// session) instead of trusting a plain cookie value, but every CALLER of
-// getOrgId() in this app stays the same -- that's the point of centralizing
-// it here.
+// The cookie now holds an HMAC-SIGNED session token (see auth-session.ts)
+// minted after a verified Cognito sign-in -- getOrgId() verifies the signature
+// and pulls the orgId from the trusted claims, so a tampered/forged cookie
+// value is rejected. Every CALLER of getOrgId() stays unchanged -- that's the
+// point of centralizing it here. (setOrgIdCookie is still called by the
+// temporary dev-login route; it too now issues a signed token.)
 
 import { cookies } from "next/headers";
+import { signOrgSession, verifyOrgSession } from "./auth-session";
 
 const COOKIE_NAME = "ss_ent_org";
 
-// Dev cookie is intentionally NOT signed/encrypted yet -- it is just an org
-// id string. It is httpOnly + sameSite=lax so it can't be read or forged by
-// simple client-side JS/cross-site form tricks, but it is NOT a substitute
-// for real auth. Do not ship this to a world where org ids are guessable
-// secrets; today org ids come from ShieldSync-controlled provisioning, not
-// from anything an attacker chooses.
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 /**
@@ -38,19 +33,27 @@ export async function getOrgId(): Promise<string | null> {
   const store = await cookies();
   const value = store.get(COOKIE_NAME)?.value;
   if (!value) return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  const session = await verifyOrgSession(value);
+  return session?.orgId ?? null;
 }
 
 /**
- * Dev-only "login": stamps the org id into the session cookie. Called from
- * app/api/portal/dev-login/route.ts after that route has confirmed (via the
- * engine) that the org actually exists. Never call this with an
+ * Stamps a signed employer session into the cookie. Called by the Cognito
+ * callback (app/api/auth/callback) with the orgId taken from the verified
+ * `custom:orgId` claim, and by the temporary dev-login route after it has
+ * confirmed (via the engine) that the org exists. Never call this with an
  * unvalidated/user-supplied orgId from anywhere else.
  */
-export async function setOrgIdCookie(orgId: string): Promise<void> {
+export async function setOrgIdCookie(
+  orgId: string,
+  extra?: { sub?: string; email?: string },
+): Promise<void> {
+  const token = await signOrgSession(
+    { orgId, sub: extra?.sub, email: extra?.email },
+    COOKIE_MAX_AGE_SECONDS,
+  );
   const store = await cookies();
-  store.set(COOKIE_NAME, orgId, {
+  store.set(COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

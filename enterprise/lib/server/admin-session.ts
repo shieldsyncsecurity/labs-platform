@@ -6,26 +6,20 @@
 // merged into one cookie/one check, or an employer session could accidentally
 // unlock admin actions (or vice versa).
 //
-// TODO: replace the shared-secret gate below with the Cognito ADMIN group /
-// ADMIN_USER_IDS pattern (see labs app/lib/auth/admin.ts, which checks a
-// verified Cognito session's `sub` against a comma-separated ADMIN_USER_IDS
-// allowlist). When that lands, getAdminSession() should verify a real
-// Cognito session and check group/id membership instead of trusting a plain
-// cookie value -- but every CALLER of getAdminSession() in this app stays
-// the same; that's the point of centralizing it here. Staff auth must stay
-// SEPARATE from the employer portal session even after that migration.
+// The cookie now holds an HMAC-SIGNED admin session token (see auth-session.ts)
+// carrying a DISTINCT audience from the employer token, so an employer session
+// can never verify here (and vice versa) even though both are signed with the
+// same key -- the "must never be merged" rule above still holds. Staff identity
+// is established two ways, both of which mint this cookie: the Cognito callback
+// (email in ADMIN_EMAILS) and the legacy shared-secret form
+// (app/api/admin/login, ADMIN_PANEL_SECRET). Every CALLER of getAdminSession()
+// stays unchanged; that's the point of centralizing it here.
 
 import { cookies } from "next/headers";
+import { signAdminSession, verifyAdminSession } from "./auth-session";
 
 const COOKIE_NAME = "ss_ent_admin";
 
-// Marker cookie only -- it carries no data, just presence/absence. It is
-// httpOnly + sameSite=lax so it can't be read or forged by client-side JS or
-// simple cross-site tricks, but (like the portal dev cookie) it is NOT a
-// substitute for real auth. It is only ever set by app/api/admin/login/route.ts,
-// and only after that route has verified the caller's secret against
-// ADMIN_PANEL_SECRET with a constant-time comparison.
-const COOKIE_VALUE = "1";
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 12; // 12 hours -- staff session, short-lived on purpose.
 
 /**
@@ -39,18 +33,24 @@ const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 12; // 12 hours -- staff session, short
  */
 export async function getAdminSession(): Promise<boolean> {
   const store = await cookies();
-  return store.get(COOKIE_NAME)?.value === COOKIE_VALUE;
+  const value = store.get(COOKIE_NAME)?.value;
+  if (!value) return false;
+  return (await verifyAdminSession(value)) !== null;
 }
 
 /**
- * Stamps the admin session cookie. Called ONLY from
- * app/api/admin/login/route.ts, and only after that route has confirmed the
- * submitted secret matches process.env.ADMIN_PANEL_SECRET via a
- * constant-time comparison. Never call this from anywhere else.
+ * Stamps a signed admin session cookie. Called by the Cognito callback
+ * (app/api/auth/callback, for an email in ADMIN_EMAILS) and by the legacy
+ * shared-secret route (app/api/admin/login, after a constant-time check
+ * against ADMIN_PANEL_SECRET). Never call this from anywhere else.
  */
-export async function setAdminCookie(): Promise<void> {
+export async function setAdminCookie(extra?: { sub?: string; email?: string }): Promise<void> {
+  const token = await signAdminSession(
+    { sub: extra?.sub, email: extra?.email },
+    COOKIE_MAX_AGE_SECONDS,
+  );
   const store = await cookies();
-  store.set(COOKIE_NAME, COOKIE_VALUE, {
+  store.set(COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

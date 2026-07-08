@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import AdminLoginForm from "./login-form";
+import { cognitoEnabled } from "@/lib/server/cognito";
 
 export const metadata: Metadata = {
   title: "Admin sign-in",
@@ -8,9 +9,11 @@ export const metadata: Metadata = {
 
 // ShieldSync staff sign-in for the internal admin console. NOT the employer
 // portal -- see lib/server/admin-session.ts for why the two are kept
-// completely separate. Gate is a single shared secret (ADMIN_PANEL_SECRET)
-// until Cognito ADMIN-group auth replaces it.
+// completely separate. Uses Cognito Hosted-UI SSO when configured (the callback
+// routes an ADMIN_EMAILS address here); falls back to the shared-secret form
+// only when Cognito env is absent.
 export default function AdminLoginPage() {
+  const sso = cognitoEnabled();
   return (
     <div className="mx-auto flex min-h-[calc(100vh-1px)] max-w-md flex-col justify-center px-6 py-16">
       <div className="rounded-2xl border border-line bg-surface p-8 shadow-sm">
@@ -22,9 +25,20 @@ export default function AdminLoginPage() {
           /portal instead.
         </div>
 
-        <div className="mt-6">
-          <AdminLoginForm />
-        </div>
+        {sso ? (
+          <div className="mt-6">
+            <a
+              href="/api/auth/login"
+              className="flex w-full items-center justify-center rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-strong"
+            >
+              Sign in with ShieldSync
+            </a>
+          </div>
+        ) : (
+          <div className="mt-6">
+            <AdminLoginForm />
+          </div>
+        )}
       </div>
     </div>
   );
