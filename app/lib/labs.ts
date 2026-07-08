@@ -3,21 +3,25 @@
 // from those by scripts/build-lab-content.mjs (run it after editing any lab.json).
 // `ready` = a CloudFormation template exists in labs-platform/labs/<slug>/.
 import { labCatalog } from "./lab-catalog";
+import { applyLabSettings } from "./lab-settings";
 
 export type LabLevel = "Beginner" | "Intermediate" | "Advanced";
 
 export type Lab = {
   slug: string;
+  track: "aws" | "azure"; // which cloud this lab runs on (drives launch dispatch)
   title: string;
   level: LabLevel;
   free: boolean;
-  ready: boolean; // CloudFormation template authored + lab live
+  ready: boolean; // IaC authored AND the engine can launch this track (false = shown but not launchable)
   summary: string;
   tags: string[];
   estimatedActiveMinutes: number;
 };
 
-export const LABS: Lab[] = labCatalog;
+// Catalog with per-lab settings overrides applied (tags/ready/free come from
+// app/lab-settings.json — the /admin/labs panel's data file).
+export const LABS: Lab[] = labCatalog.map(applyLabSettings);
 
 export function getLab(slug: string): Lab | undefined {
   return LABS.find((l) => l.slug === slug);

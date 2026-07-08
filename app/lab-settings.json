@@ -1,0 +1,9 @@
+{
+  "_readme": "Per-lab settings overrides. Edited by the /admin/labs panel (which commits BOTH copies via GitHub) or by hand. CANONICAL: labs-platform/app/lab-settings.json. MIRROR (must stay identical): shieldsync-website/lib/lab-settings.json — after hand-edits run `node scripts/sync-lab-settings.mjs` from labs-platform/ and commit both repos. Semantics: null / empty array = no override (level pricing + code defaults apply). priceINR is in RUPEES, priceUSD in DOLLARS (major units). keywords replaces the lab's tags everywhere when non-empty. live overrides the catalog ready flag; free overrides the free flag.",
+  "labs": {
+    "s3-misconfiguration-audit": { "priceINR": null, "priceUSD": null, "keywords": [], "live": null, "free": null },
+    "iam-privilege-escalation": { "priceINR": null, "priceUSD": null, "keywords": [], "live": null, "free": null },
+    "bedrock-prompt-injection": { "priceINR": null, "priceUSD": null, "keywords": [], "live": null, "free": null },
+    "storage-public-exposure-audit": { "priceINR": null, "priceUSD": null, "keywords": [], "live": null, "free": null }
+  }
+}

@@ -1,5 +1,6 @@
 import type { Currency, Plan } from "./types";
 import { getLab, type LabLevel } from "@/lib/labs";
+import { priceOverrideMinor } from "@/lib/lab-settings";
 
 // Single source of truth for prices (mirrors the marketing site). amountMinor is
 // in the currency's minor unit (paise / cents). Free labs never reach checkout
@@ -10,15 +11,12 @@ const PER_LAB_INR: Record<LabLevel, number> = { Beginner: 24900, Intermediate: 2
 const PER_LAB_USD: Record<LabLevel, number> = { Beginner: 400, Intermediate: 400, Advanced: 400 };
 const MONTHLY: Record<Currency, number> = { INR: 200000, USD: 2500 };
 
-// Optional per-lab price override (e.g. a launch promo). Empty = pure level
-// pricing. amountMinor (paise/cents). (Held the temporary IAM ₹99 during Paytm
-// review; reverted 2026-07-04.)
-const PER_LAB_OVERRIDE: Record<string, Record<Currency, number>> = {};
-
+// Per-lab price overrides now come from app/lab-settings.json (edited via the
+// /admin/labs panel or by hand — see lib/lab-settings.ts). null = flat pricing.
 export function priceFor(labSlug: string | null, plan: Plan, currency: Currency): number {
   if (plan === "monthly") return MONTHLY[currency];
-  const override = labSlug ? PER_LAB_OVERRIDE[labSlug] : undefined;
-  if (override) return override[currency];
+  const override = priceOverrideMinor(labSlug, currency);
+  if (override != null) return override;
   const level = (labSlug ? getLab(labSlug)?.level : undefined) ?? "Beginner";
   return currency === "INR" ? PER_LAB_INR[level] : PER_LAB_USD[level];
 }
