@@ -12,12 +12,11 @@ type CreateAssessmentBody = {
 // against. The employer UI (app/portal/assessments/new/new-assessment-form.tsx)
 // currently surfaces a subset of these; this set is the authoritative guard so
 // a hand-crafted request can't create an assessment against an arbitrary /
-// unknown slug. Keep in sync with the engine's recognized enterprise labs.
-const ALLOWED_LAB_SLUGS = new Set([
-  "s3-misconfiguration-audit",
-  "s3-misconfiguration-remediation",
-  "iam-least-privilege",
-]);
+// unknown slug. Only labs that are actually DEPLOYABLE + GRADEABLE for
+// enterprise belong here -- keep it in lockstep with the portal LAB_OPTIONS
+// (app/portal/assessments/new/new-assessment-form.tsx) and the labs/ templates.
+// Adding a slug the engine can't deploy would just burn a lease and grade to 0.
+const ALLOWED_LAB_SLUGS = new Set(["s3-misconfiguration-audit"]);
 
 const MAX_NAME_LEN = 200;
 

@@ -221,10 +221,14 @@ function CmpMark({ value, strong }: { value: "yes" | "no" | "partial"; strong?: 
 
 /* -------------------------------------------------------------- THE REPORT */
 
+// Honest with the real report: it ranks by verified correctness and shows
+// objectives passed -- it never emits a hire/no-hire VERDICT (that decision is
+// the employer's). So the preview mirrors that: correctness % + objectives, no
+// "Strong hire"/"No hire" labels the product doesn't actually produce.
 const REPORT_ROWS = [
-  { name: "Candidate A", score: 92, bar: 92, tag: "Strong hire" },
-  { name: "Candidate B", score: 78, bar: 78, tag: "Hire" },
-  { name: "Candidate C", score: 54, bar: 54, tag: "No hire" },
+  { name: "Candidate A", score: 83, bar: 83, tag: "5 / 6 objectives" },
+  { name: "Candidate B", score: 67, bar: 67, tag: "4 / 6 objectives" },
+  { name: "Candidate C", score: 50, bar: 50, tag: "3 / 6 objectives" },
 ];
 
 function TheReport() {
@@ -277,7 +281,7 @@ function TheReport() {
                   <span className="text-sm font-medium text-ink">{r.name}</span>
                   <span className="flex items-center gap-2">
                     <span className="font-mono text-sm font-semibold text-ink">
-                      {r.score}
+                      {r.score}%
                     </span>
                     <span className="rounded-full bg-brand/5 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-brand">
                       {r.tag}

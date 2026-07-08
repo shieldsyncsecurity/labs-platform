@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 // available for assessments, extend this list (and keep it in sync with
 // whatever labSlugs the engine actually recognizes for /ent/assessments).
 const LAB_OPTIONS = [
-  { slug: "s3-misconfiguration-audit", label: "AWS S3 Security Remediation" },
+  { slug: "s3-misconfiguration-audit", label: "S3 misconfiguration & data exposure" },
 ];
 
 export default function NewAssessmentForm() {
