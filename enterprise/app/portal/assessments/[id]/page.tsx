@@ -5,8 +5,8 @@ import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 import PortalNav from "../../_components/portal-nav";
 import CopyButton from "../../_components/copy-button";
 import AddCandidateForm from "./add-candidate-form";
-import InvitesTable, { type InviteRow } from "./invites-table";
-import { formatDate } from "../../../r/_components/report-bits";
+import InvitesTable, { type InviteRow, type ResultRow } from "./invites-table";
+import { formatDate, correctnessPct } from "../../../r/_components/report-bits";
 
 export const metadata: Metadata = {
   title: "Assessment",
@@ -26,6 +26,15 @@ type Assessment = {
 };
 
 const APP_URL = "https://enterprise.shieldsyncsecurity.com";
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-line bg-surface px-4 py-3 shadow-sm">
+      <div className="text-lg font-bold tabular-nums text-ink">{value}</div>
+      <div className="mt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted">{label}</div>
+    </div>
+  );
+}
 
 export default async function AssessmentDetailPage({
   params,
@@ -75,6 +84,38 @@ export default async function AssessmentDetailPage({
     invitesError = "Could not load candidates right now.";
   }
 
+  // Join each candidate's graded result (keyed by inviteToken) so scores show
+  // inline in the table below -- the employer no longer has to open the separate
+  // report link just to see who did well. Non-fatal if it fails: statuses still
+  // render, scores just won't show this load. Safe: the results come from this
+  // assessment's OWN reportToken, and the assessment is already ownership-checked
+  // above.
+  const resultsByToken: Record<string, ResultRow> = {};
+  if (assessment.reportToken) {
+    try {
+      const rep = await entFetch<{ results?: ResultRow[] }>("/ent/report", {
+        query: { reportToken: assessment.reportToken },
+      });
+      for (const r of rep?.results ?? []) {
+        if (r?.inviteToken) resultsByToken[r.inviteToken] = r;
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  const invited = invites.length;
+  const completedResults = Object.values(resultsByToken);
+  const completed = completedResults.length;
+  const avgPct = completed
+    ? Math.round(
+        completedResults.reduce(
+          (s, r) => s + correctnessPct(r.passedCount, r.totalCriteria),
+          0,
+        ) / completed,
+      )
+    : 0;
+
   const reportLink = assessment.reportToken ? `${APP_URL}/r/${assessment.reportToken}` : null;
 
   return (
@@ -94,12 +135,21 @@ export default async function AssessmentDetailPage({
           </p>
         </div>
 
+        {/* Results summary */}
+        {invited > 0 ? (
+          <div className="mt-6 grid grid-cols-3 gap-3 sm:max-w-md">
+            <StatCard label="Invited" value={String(invited)} />
+            <StatCard label="Completed" value={`${completed}/${invited}`} />
+            <StatCard label="Avg correctness" value={completed ? `${avgPct}%` : "—"} />
+          </div>
+        ) : null}
+
         {/* Report link */}
         <div className="mt-6 rounded-xl border border-line bg-surface p-5">
-          <h2 className="text-sm font-semibold text-ink-soft">Report link</h2>
+          <h2 className="text-sm font-semibold text-ink-soft">Full report link</h2>
           <p className="mt-1 text-xs text-muted">
-            Share this with your hiring team — it shows every candidate&apos;s results for this
-            assessment as they complete it.
+            Share this with your hiring team — the side-by-side comparison of every candidate for
+            this assessment, updated live as they submit.
           </p>
           {reportLink ? (
             <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -127,7 +177,7 @@ export default async function AssessmentDetailPage({
           {invitesError ? (
             <p className="text-sm text-rose-700">{invitesError}</p>
           ) : (
-            <InvitesTable assessmentId={id} invites={invites} />
+            <InvitesTable assessmentId={id} invites={invites} results={resultsByToken} />
           )}
         </div>
       </div>
