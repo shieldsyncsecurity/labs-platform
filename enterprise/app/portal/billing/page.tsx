@@ -32,6 +32,38 @@ type Order = {
 
 const CONTACT_EMAIL = "hello@shieldsyncsecurity.com";
 
+// Format an order amount as real currency (major units, e.g. 249 -> ₹249.00).
+function formatMoney(amount?: number, currency?: string): string {
+  if (typeof amount !== "number") return "—";
+  const cur = (currency ?? "INR").toUpperCase();
+  try {
+    return new Intl.NumberFormat("en-IN", { style: "currency", currency: cur }).format(amount);
+  } catch {
+    return `${cur} ${amount.toLocaleString()}`;
+  }
+}
+
+// Employer-facing order status -> a coloured pill (Paid/Pending/Failed).
+function OrderStatusBadge({ status }: { status?: string }) {
+  const s = (status ?? "").toLowerCase();
+  const style =
+    s === "paid"
+      ? "bg-emerald-100 text-emerald-800"
+      : s === "pending"
+        ? "bg-amber-100 text-amber-800"
+        : s === "failed" || s === "cancelled"
+          ? "bg-rose-100 text-rose-700"
+          : "bg-line text-ink-soft";
+  const label = s ? s.charAt(0).toUpperCase() + s.slice(1) : "—";
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${style}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 export default async function BillingPage() {
   const orgId = await getOrgId();
   if (!orgId) {
@@ -106,12 +138,20 @@ export default async function BillingPage() {
                   {creditsUsed} used · each candidate invite uses 1 credit
                 </p>
               </div>
-              <a
-                href={mailtoHref}
-                className="shrink-0 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong"
-              >
-                Request more credits
-              </a>
+              <div className="shrink-0 text-right">
+                <a
+                  href={mailtoHref}
+                  className="inline-block rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                >
+                  Request more credits
+                </a>
+                <p className="mt-1.5 text-xs text-muted">
+                  or email{" "}
+                  <a href={`mailto:${CONTACT_EMAIL}`} className="underline hover:text-brand-strong">
+                    {CONTACT_EMAIL}
+                  </a>
+                </p>
+              </div>
             </div>
           )}
         </div>
@@ -130,10 +170,10 @@ export default async function BillingPage() {
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-line bg-canvas text-xs uppercase tracking-wide text-muted">
-                    <th className="px-4 py-3 font-semibold">Date</th>
-                    <th className="px-4 py-3 font-semibold">Credits</th>
-                    <th className="px-4 py-3 font-semibold">Amount</th>
-                    <th className="px-4 py-3 font-semibold">Status</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Date</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Credits</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Amount</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -141,12 +181,10 @@ export default async function BillingPage() {
                     <tr key={o.orderId ?? i} className="border-b border-line last:border-b-0">
                       <td className="px-4 py-3 text-ink-soft">{formatDate(o.createdAt)}</td>
                       <td className="px-4 py-3 text-ink">{o.credits ?? "—"}</td>
-                      <td className="px-4 py-3 text-ink-soft">
-                        {typeof o.amount === "number"
-                          ? `${o.currency ?? ""} ${o.amount.toLocaleString()}`.trim()
-                          : "—"}
+                      <td className="px-4 py-3 text-ink-soft">{formatMoney(o.amount, o.currency)}</td>
+                      <td className="px-4 py-3">
+                        <OrderStatusBadge status={o.status} />
                       </td>
-                      <td className="px-4 py-3 text-ink-soft">{o.status ?? "—"}</td>
                     </tr>
                   ))}
                 </tbody>
