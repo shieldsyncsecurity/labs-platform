@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import CopyButton from "../../_components/copy-button";
 
@@ -13,13 +14,19 @@ export default function AddCandidateForm({ assessmentId }: { assessmentId: strin
   const [email, setEmail] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [newLink, setNewLink] = useState<string | null>(null);
   const [emailLink, setEmailLink] = useState(true);
   const [emailedTo, setEmailedTo] = useState<string | null>(null);
+  // Whether the employer ASKED us to email (captured at submit) -- so if the
+  // send silently failed (e.g. SES sandbox / unverified address) we can warn
+  // instead of showing a neutral "link ready" that looks like it emailed.
+  const [emailWanted, setEmailWanted] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setErrorCode(null);
     setNewLink(null);
     setEmailedTo(null);
 
@@ -31,6 +38,7 @@ export default function AddCandidateForm({ assessmentId }: { assessmentId: strin
     }
 
     setPending(true);
+    const wantEmail = emailLink;
     try {
       const res = await fetch("/api/portal/invites", {
         method: "POST",
@@ -39,12 +47,13 @@ export default function AddCandidateForm({ assessmentId }: { assessmentId: strin
           assessmentId,
           candidateName: trimmedName,
           candidateEmail: trimmedEmail,
-          sendLink: emailLink,
+          sendLink: wantEmail,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data?.error ?? "Could not create invite.");
+        setErrorCode(typeof data?.code === "string" ? data.code : null);
         setPending(false);
         return;
       }
@@ -55,6 +64,7 @@ export default function AddCandidateForm({ assessmentId }: { assessmentId: strin
         setNewLink(`${origin}/a/${inviteToken}`);
       }
       setEmailedTo(data?.emailed === true ? trimmedEmail : null);
+      setEmailWanted(wantEmail);
       setName("");
       setEmail("");
       setPending(false);
@@ -64,6 +74,10 @@ export default function AddCandidateForm({ assessmentId }: { assessmentId: strin
       setPending(false);
     }
   }
+
+  // Requested an auto-email but it didn't go out (sandbox / unverified / send
+  // error): the link is still valid, but the employer must send it themselves.
+  const emailFailed = Boolean(newLink) && emailWanted && !emailedTo;
 
   return (
     <div>
@@ -95,7 +109,7 @@ export default function AddCandidateForm({ assessmentId }: { assessmentId: strin
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
         >
           {pending ? "Adding…" : "Add candidate"}
         </button>
@@ -113,17 +127,48 @@ export default function AddCandidateForm({ assessmentId }: { assessmentId: strin
 
       <p className="mt-2 text-xs text-muted">Each invite uses 1 credit.</p>
 
-      {error ? <p className="mt-2 text-sm text-rose-700">{error}</p> : null}
+      {error ? (
+        <p className="mt-2 text-sm text-rose-700">
+          {error}
+          {errorCode === "NO_CREDITS" ? (
+            <>
+              {" "}
+              <Link
+                href="/portal/billing"
+                className="font-semibold underline underline-offset-2 hover:text-rose-900"
+              >
+                Go to Billing
+              </Link>
+            </>
+          ) : null}
+        </p>
+      ) : null}
 
       {newLink ? (
-        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+        <div
+          className={`mt-4 flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 ${
+            emailFailed ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"
+          }`}
+        >
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold text-emerald-800">
+            <p
+              className={`text-xs font-semibold ${
+                emailFailed ? "text-amber-800" : "text-emerald-800"
+              }`}
+            >
               {emailedTo
                 ? `Invitation emailed to ${emailedTo}`
-                : "Candidate link ready — send it to the candidate:"}
+                : emailFailed
+                  ? "We couldn't email them automatically — copy this link and send it to the candidate:"
+                  : "Candidate link ready — send it to the candidate:"}
             </p>
-            <p className="truncate font-mono text-xs text-emerald-900">{newLink}</p>
+            <p
+              className={`truncate font-mono text-xs ${
+                emailFailed ? "text-amber-900" : "text-emerald-900"
+              }`}
+            >
+              {newLink}
+            </p>
           </div>
           <CopyButton value={newLink} label="Copy link" />
         </div>

@@ -107,6 +107,19 @@ export async function POST(req: Request) {
   } catch (err) {
     if (err instanceof EntEngineError) {
       console.error("[portal/invites] create failed", err.status, err.body);
+      // Out of credits is an EXPECTED empty-wallet state, not a failure -- give
+      // the employer the real reason + the path to fix it, and a code the form
+      // can turn into a Billing link. The engine returns 402 {error:"NO_CREDITS"}.
+      const engineCode = (err.body as { error?: string } | undefined)?.error;
+      if (err.status === 402 || engineCode === "NO_CREDITS") {
+        return NextResponse.json(
+          {
+            error: "You're out of assessment credits. Request more on the Billing page to keep inviting.",
+            code: "NO_CREDITS",
+          },
+          { status: 402 },
+        );
+      }
       return NextResponse.json({ error: "Could not create invite." }, { status: err.status });
     }
     console.error("[portal/invites] unexpected error", err);
