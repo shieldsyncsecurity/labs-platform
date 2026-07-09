@@ -58,12 +58,19 @@ console.log(`Wrote ${OUT} from ${slugs.length} lab(s): ${slugs.join(", ")}`);
 const LABS_ROOT = join(__dirname, "..", "..", "labs");
 const catalog = slugs.map((slug) => {
   const lab = JSON.parse(readFileSync(join(CONTENT, slug, "lab.json"), "utf8"));
+  const track = lab.track ?? "aws";
+  // `ready` = the engine can actually launch it. AWS: a CloudFormation template exists.
+  // Azure: keep FALSE for now — the lab + IaC (main.bicep) exist and are live-tested, but
+  // the engine's Azure launch dispatch isn't wired yet, so it must not show a live Launch.
+  // Flip to (main.bicep exists) once handler.mjs dispatches track:"azure".
+  const ready = track === "aws" && existsSync(join(LABS_ROOT, slug, "template.yaml"));
   return {
     slug: lab.slug,
+    track,
     title: lab.title,
     level: lab.level,
     free: !!lab.free,
-    ready: existsSync(join(LABS_ROOT, slug, "template.yaml")),
+    ready,
     summary: lab.summary,
     tags: lab.tags ?? [],
     estimatedActiveMinutes: lab.estimatedActiveMinutes,

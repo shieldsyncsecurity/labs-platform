@@ -6,6 +6,7 @@ import type { Lab } from "./labs";
 export const labCatalog: Lab[] = [
   {
     "slug": "bedrock-prompt-injection",
+    "track": "aws",
     "title": "Secure the Bedrock assistant (prompt injection & Guardrails)",
     "level": "Beginner",
     "free": true,
@@ -21,6 +22,7 @@ export const labCatalog: Lab[] = [
   },
   {
     "slug": "iam-privilege-escalation",
+    "track": "aws",
     "title": "IAM privilege escalation",
     "level": "Intermediate",
     "free": false,
@@ -36,6 +38,7 @@ export const labCatalog: Lab[] = [
   },
   {
     "slug": "s3-misconfiguration-audit",
+    "track": "aws",
     "title": "S3 misconfiguration & data exposure",
     "level": "Beginner",
     "free": true,
@@ -51,6 +54,7 @@ export const labCatalog: Lab[] = [
   },
   {
     "slug": "storage-public-exposure-audit",
+    "track": "azure",
     "title": "Storage account public exposure & data leak",
     "level": "Beginner",
     "free": true,
