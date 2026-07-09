@@ -131,7 +131,21 @@ export default function DashboardPage() {
   const [filter, setFilter] = useState<Filter>("all");
 
   if (loading) {
-    return <div className="mx-auto max-w-[1536px] px-4 py-8 text-muted sm:px-6 sm:py-10 lg:px-10">Loading…</div>;
+    // useAuth() resolves the session client-side, so a bare "Loading…" text
+    // node was showing before the real dashboard shape appeared — mirror
+    // that shape (header row + hero card + grid) so there's no jump.
+    return (
+      <div className="mx-auto max-w-[1536px] animate-pulse px-4 py-8 sm:px-6 lg:px-10">
+        <div className="h-7 w-64 rounded bg-line/60" />
+        <div className="mt-5 h-40 rounded-2xl bg-line/30" />
+        <div className="mt-8 h-6 w-32 rounded bg-line/60" />
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="h-40 rounded-xl bg-line/30" />
+          ))}
+        </div>
+      </div>
+    );
   }
 
   if (!user) {

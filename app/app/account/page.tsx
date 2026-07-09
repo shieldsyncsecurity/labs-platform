@@ -8,7 +8,12 @@ export default function AccountPage() {
   const { user, loading, entitlements, signOut } = useAuth();
 
   if (loading) {
-    return <div className="mx-auto max-w-3xl px-5 py-8 text-muted sm:py-10">Loading…</div>;
+    return (
+      <div className="mx-auto max-w-3xl animate-pulse px-5 py-10">
+        <div className="h-7 w-40 rounded bg-line/60" />
+        <div className="mt-6 h-40 rounded-2xl bg-line/30" />
+      </div>
+    );
   }
 
   if (!user) {
