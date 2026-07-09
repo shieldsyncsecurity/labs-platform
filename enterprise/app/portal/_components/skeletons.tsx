@@ -10,13 +10,17 @@ export function SkeletonBar({ className = "" }: { className?: string }) {
 export function NavSkeleton() {
   return (
     <div className="border-b border-line bg-surface">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-        <div className="flex items-center gap-6">
-          <SkeletonBar className="h-4 w-36" />
-          <SkeletonBar className="hidden h-4 w-20 sm:block" />
-          <SkeletonBar className="hidden h-4 w-14 sm:block" />
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 py-4">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <SkeletonBar className="h-6 w-32" />
+          <SkeletonBar className="h-4 w-20" />
+          <SkeletonBar className="h-4 w-14" />
+          <SkeletonBar className="h-4 w-20" />
         </div>
-        <SkeletonBar className="h-4 w-24" />
+        <div className="flex items-center gap-4">
+          <SkeletonBar className="h-4 w-10" />
+          <SkeletonBar className="h-4 w-16" />
+        </div>
       </div>
     </div>
   );
