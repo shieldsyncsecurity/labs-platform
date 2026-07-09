@@ -24,7 +24,7 @@ import {
   ScanCommand,
   TransactWriteItemsCommand,
 } from "@aws-sdk/client-dynamodb";
-import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
+import { randomBytes, createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 const REGION = "us-east-1";
 const PLATFORM_ACCOUNT = "750294427884";
@@ -35,6 +35,7 @@ const INVITES_TABLE = "ShieldSyncEntInvites";
 const SLOTS_TABLE = "ShieldSyncEntSlots";
 const RESULTS_TABLE = "ShieldSyncEntResults";
 const ORDERS_TABLE = "ShieldSyncEntOrders";
+const AGREEMENTS_TABLE = "ShieldSyncEntAgreements";
 
 // Epoch-seconds helpers for ttl / rolling windows.
 const DAYS = 24 * 3600;
@@ -1145,4 +1146,322 @@ export async function markOrderPaid(orderId) {
     if (orderCasLost) return { paid: false }; // already paid -- retry is a harmless no-op
     throw e;
   }
+}
+
+// -- AGREEMENTS (W3-1 / W3-2: MSA + DPA lifecycle, permanent retention) --------
+//
+// One row per legal document (Enterprise Agreement "msa" or DPA "dpa") for an
+// org. bodyText is the FULL rendered snapshot -- template merged with params,
+// including any negotiated (hand-edited) terms -- and sha256 is its integrity
+// hash. The hash is recomputed on EVERY bodyText write (create/update) and once
+// more at issue time, so an accepted agreement's stored hash always matches the
+// exact text the org accepted.
+//
+// Status machine -- every transition is a ConditionExpression CAS on the row,
+// never a read-then-write (same discipline as consentInvite / markOrderPaid):
+//   draft  -> issued    (issueAgreement; text immutable from here on)
+//   issued -> accepted  (acceptAgreement; TERMINAL. The only way past accepted
+//                        is a NEW agreement carrying supersedes=<oldId>, which
+//                        on ISSUE best-effort marks the old row "superseded".)
+//   draft|issued -> void (voidAgreement; accepted can never be voided)
+//
+// NO TTL: agreements are permanent legal records, like Orders. The table also
+// has PITR enabled (see create-ent-agreements-table.mjs).
+
+/** sha256Hex(): integrity hash of an agreement bodyText snapshot. */
+function sha256Hex(text) {
+  return createHash("sha256").update(String(text), "utf8").digest("hex");
+}
+
+/**
+ * createAgreement(): mint a new DRAFT agreement row. bodyText arrives fully
+ * rendered from the app (template + params + any negotiated edits); the CALLER
+ * (handler) has already validated docType / length / params shape. sha256 is
+ * computed here so the hash can never drift from the stored text. `supersedes`
+ * (optional) names the previously-accepted agreement this one will replace once
+ * issued -- the actual mark happens at issue time, not here.
+ */
+export async function createAgreement({ orgId, docType, templateVersion, params, bodyText, customized, supersedes, actor }) {
+  const db = await ddb();
+  const agreementId = newToken();
+  const item = {
+    agreementId: S(agreementId),
+    orgId: S(orgId),
+    docType: S(docType),
+    templateVersion: S(templateVersion ?? ""),
+    params: marshalValue(params && typeof params === "object" ? params : {}),
+    bodyText: S(bodyText),
+    customized: BOOL(customized),
+    sha256: S(sha256Hex(bodyText)),
+    status: S("draft"),
+    createdAt: S(nowIso()),
+    createdBy: S(actor ?? ""),
+    ...(supersedes ? { supersedes: S(supersedes) } : {}),
+  };
+  await db.send(new PutItemCommand({ TableName: AGREEMENTS_TABLE, Item: item }));
+  return itemToObjectDeep(item);
+}
+
+/** getAgreement(): fetch one agreement by id (FULL row incl. bodyText), or null. */
+export async function getAgreement(agreementId) {
+  const db = await ddb();
+  const r = await db.send(new GetItemCommand({ TableName: AGREEMENTS_TABLE, Key: { agreementId: S(agreementId) } }));
+  return itemToObjectDeep(r.Item);
+}
+
+/**
+ * listAgreements(): every agreement for an org, via orgId-index. The list stays
+ * LIGHT (W3-2): bodyText (up to 200KB per row) is stripped -- callers fetch the
+ * full text one row at a time via getAgreement.
+ */
+export async function listAgreements(orgId) {
+  const db = await ddb();
+  const r = await db.send(
+    new QueryCommand({
+      TableName: AGREEMENTS_TABLE,
+      IndexName: "orgId-index",
+      KeyConditionExpression: "orgId = :o",
+      ExpressionAttributeValues: { ":o": S(orgId) },
+    })
+  );
+  return (r.Items ?? []).map((it) => {
+    const o = itemToObjectDeep(it);
+    delete o.bodyText;
+    return o;
+  });
+}
+
+/**
+ * updateAgreementDraft(): patch a DRAFT agreement (bodyText / params /
+ * templateVersion / customized). Guarded by ConditionExpression status=draft so
+ * an issued/accepted/void row can NEVER be edited -- issued text is immutable.
+ * A bodyText patch recomputes sha256 in the SAME update, atomically. Returns
+ * the updated row; null if no such agreement; throws NOT_DRAFT (handler -> 409)
+ * when the row exists but is past draft.
+ */
+export async function updateAgreementDraft(agreementId, patch = {}) {
+  const db = await ddb();
+  const names = { "#s": "status" };
+  const values = { ":draft": S("draft"), ":at": S(nowIso()) };
+  const sets = ["updatedAt = :at"];
+  let i = 0;
+  const put = (field, av) => {
+    names[`#f${i}`] = field;
+    values[`:v${i}`] = av;
+    sets.push(`#f${i} = :v${i}`);
+    i++;
+  };
+  if (patch.bodyText !== undefined) {
+    put("bodyText", S(patch.bodyText));
+    put("sha256", S(sha256Hex(patch.bodyText)));
+  }
+  if (patch.params !== undefined) put("params", marshalValue(patch.params));
+  if (patch.templateVersion !== undefined) put("templateVersion", S(patch.templateVersion));
+  if (patch.customized !== undefined) put("customized", BOOL(patch.customized));
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: AGREEMENTS_TABLE,
+        Key: { agreementId: S(agreementId) },
+        UpdateExpression: "SET " + sets.join(", "),
+        ConditionExpression: "#s = :draft",
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObjectDeep(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") {
+      const existing = await getAgreement(agreementId);
+      if (!existing) return null;
+      const err = new Error("NOT_DRAFT");
+      err.code = "NOT_DRAFT";
+      err.status = existing.status;
+      throw err;
+    }
+    throw e;
+  }
+}
+
+/**
+ * issueAgreement(): CAS draft->issued. Recomputes + stores sha256 from the
+ * current bodyText in the SAME conditional update that flips the status, and
+ * stamps issuedAt/issuedBy. After this the text is immutable (updateAgreementDraft
+ * refuses non-draft rows). Returns the updated row; null if no such agreement;
+ * throws NOT_ISSUABLE (handler -> 409) if the row is not in draft.
+ * NOTE: the supersedes cascade (marking the OLD agreement superseded) is the
+ * HANDLER's best-effort follow-up via markAgreementSuperseded -- deliberately
+ * not part of this write, so a cascade failure can never lose the issue itself.
+ */
+export async function issueAgreement(agreementId, actor) {
+  const db = await ddb();
+  const current = await getAgreement(agreementId);
+  if (!current) return null;
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: AGREEMENTS_TABLE,
+        Key: { agreementId: S(agreementId) },
+        UpdateExpression: "SET #s = :issued, issuedAt = :at, issuedBy = :by, sha256 = :h",
+        ConditionExpression: "#s = :draft",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: {
+          ":issued": S("issued"),
+          ":draft": S("draft"),
+          ":at": S(nowIso()),
+          ":by": S(actor ?? ""),
+          ":h": S(sha256Hex(current.bodyText ?? "")),
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObjectDeep(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") {
+      const err = new Error("NOT_ISSUABLE");
+      err.code = "NOT_ISSUABLE";
+      err.status = current.status;
+      throw err;
+    }
+    throw e;
+  }
+}
+
+/**
+ * markAgreementSuperseded(): best-effort second write after issuing a
+ * replacement agreement -- flips the OLD row (accepted or issued) to
+ * "superseded" and records which agreement replaced it. Conditional on the old
+ * status still being accepted/issued so a draft/void/already-superseded row is
+ * left alone. Returns the updated row, or null when the condition fails or the
+ * row is missing (callers log and move on; never fatal).
+ */
+export async function markAgreementSuperseded(agreementId, supersededById) {
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: AGREEMENTS_TABLE,
+        Key: { agreementId: S(agreementId) },
+        UpdateExpression: "SET #s = :superseded, supersededAt = :at, supersededBy = :by",
+        ConditionExpression: "#s IN (:accepted, :issued)",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: {
+          ":superseded": S("superseded"),
+          ":accepted": S("accepted"),
+          ":issued": S("issued"),
+          ":at": S(nowIso()),
+          ":by": S(supersededById ?? ""),
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObjectDeep(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return null;
+    throw e;
+  }
+}
+
+/**
+ * acceptAgreement(): CAS issued->accepted, stamping acceptedAt + acceptedBy
+ * (the portal user's email, sanitized by the handler). IDEMPOTENT: a repeat
+ * call on an already-accepted row returns { agreement, already: true } instead
+ * of failing, so a double-click / retried POST never errors the portal. Any
+ * other state (draft / void / superseded) throws NOT_ACCEPTABLE (handler ->
+ * 409). Returns null if no such agreement.
+ */
+export async function acceptAgreement(agreementId, acceptedBy) {
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: AGREEMENTS_TABLE,
+        Key: { agreementId: S(agreementId) },
+        UpdateExpression: "SET #s = :accepted, acceptedAt = :at, acceptedBy = :by",
+        ConditionExpression: "#s = :issued",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: {
+          ":accepted": S("accepted"),
+          ":issued": S("issued"),
+          ":at": S(nowIso()),
+          ":by": S(acceptedBy),
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return { agreement: itemToObjectDeep(r.Attributes), already: false };
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") {
+      const existing = await getAgreement(agreementId);
+      if (!existing) return null;
+      if (existing.status === "accepted") return { agreement: existing, already: true };
+      const err = new Error("NOT_ACCEPTABLE");
+      err.code = "NOT_ACCEPTABLE";
+      err.status = existing.status;
+      throw err;
+    }
+    throw e;
+  }
+}
+
+/**
+ * voidAgreement(): CAS draft|issued -> void. An ACCEPTED agreement can never be
+ * voided (it is a signed record; replace it via supersedes instead). Returns the
+ * updated row; null if no such agreement; throws NOT_VOIDABLE (handler -> 409)
+ * when the row is accepted/superseded/already void.
+ */
+export async function voidAgreement(agreementId, actor) {
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: AGREEMENTS_TABLE,
+        Key: { agreementId: S(agreementId) },
+        UpdateExpression: "SET #s = :void, voidedAt = :at, voidedBy = :by",
+        ConditionExpression: "#s IN (:draft, :issued)",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: {
+          ":void": S("void"),
+          ":draft": S("draft"),
+          ":issued": S("issued"),
+          ":at": S(nowIso()),
+          ":by": S(actor ?? ""),
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObjectDeep(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") {
+      const existing = await getAgreement(agreementId);
+      if (!existing) return null;
+      const err = new Error("NOT_VOIDABLE");
+      err.code = "NOT_VOIDABLE";
+      err.status = existing.status;
+      throw err;
+    }
+    throw e;
+  }
+}
+
+/**
+ * setOrgAcceptedAgreement(): mirror the just-accepted agreement's version onto
+ * the org row (W3-2 accept side-effect). BEST-EFFORT by contract -- the handler
+ * catches and logs a failure without failing the accept (the agreement row
+ * itself is the source of truth; this mirror only feeds the portal's quick
+ * "current version" display). Conditional on the org existing so a race with an
+ * org delete can't mint a phantom org row.
+ */
+export async function setOrgAcceptedAgreement(orgId, version) {
+  const db = await ddb();
+  await db.send(
+    new UpdateItemCommand({
+      TableName: ORGS_TABLE,
+      Key: { orgId: S(orgId) },
+      UpdateExpression: "SET acceptedAgreementVersion = :v, acceptedAt = :at",
+      ConditionExpression: "attribute_exists(orgId)",
+      ExpressionAttributeValues: { ":v": S(version ?? ""), ":at": S(nowIso()) },
+    })
+  );
 }

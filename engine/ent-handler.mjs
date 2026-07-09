@@ -46,6 +46,15 @@ import {
   getOrder,
   listOrders,
   markOrderPaid,
+  createAgreement,
+  getAgreement,
+  listAgreements,
+  updateAgreementDraft,
+  issueAgreement,
+  markAgreementSuperseded,
+  acceptAgreement,
+  voidAgreement,
+  setOrgAcceptedAgreement,
 } from "./entinfra.mjs";
 import {
   leaseEnt,
@@ -143,6 +152,41 @@ async function sendOpsEmail(subject, text) {
 // existing callers that don't send it keep working.
 function cleanActor(v, fallback = "admin") {
   return typeof v === "string" && v.trim() ? v.trim().slice(0, 120) : fallback;
+}
+
+// -- Agreements (W3-2) input hygiene ------------------------------------------
+//
+// bodyText is the full rendered legal snapshot; 200_000 chars is the hard
+// server-side cap (well under the 400KB DynamoDB item limit for the ASCII text
+// the templates produce). Params are allowlisted to the W3-1 schema keys and
+// clamped, so an arbitrary caller payload can never balloon the stored row.
+const AGREEMENT_BODY_MAX = 200000;
+const AGREEMENT_PARAM_KEYS = [
+  "companyLegalName",
+  "registeredAddress",
+  "gstin",
+  "signatoryName",
+  "signatoryTitle",
+  "effectiveDate",
+  "governingLaw",
+];
+
+// cleanAgreementParams(): keep only the known param keys, as trimmed strings
+// clamped to a sane length. Unknown keys and non-string values are dropped.
+function cleanAgreementParams(v) {
+  const out = {};
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    for (const k of AGREEMENT_PARAM_KEYS) {
+      if (typeof v[k] === "string" && v[k].trim()) out[k] = v[k].trim().slice(0, 500);
+    }
+  }
+  return out;
+}
+
+// cleanEmail(): sanitize a caller-supplied email for acceptedBy -- trimmed,
+// clamped to RFC 5321's 254-char address ceiling. Empty string when unusable.
+function cleanEmail(v) {
+  return typeof v === "string" ? v.trim().slice(0, 254) : "";
 }
 
 // reportDead(): report-token lifecycle check (E1). Revocation always wins; a
@@ -771,6 +815,181 @@ export async function handler(event) {
         JSON.stringify({ audit: true, action: "order.paid", actor, orderId, paid: paid.paid, creditsGranted: paid.creditsGranted ?? 0, at: Date.now() })
       );
       return resp(200, { paid });
+    }
+
+    // -- agreements (W3-2): MSA/DPA lifecycle. ShieldSync admin drafts/issues/
+    // voids; the employer portal accepts. The app enforces its staff gate
+    // (admin routes) and org-match (portal accept/view) BEFORE calling these --
+    // the engine's shared-secret gate protects the routes themselves. Every
+    // status transition happens inside entinfra via a ConditionExpression CAS.
+    if (method === "POST" && path === "/ent/agreements") {
+      const { orgId, docType } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (!orgId || typeof orgId !== "string") return resp(400, { error: "ORG_ID_REQUIRED" });
+      if (docType !== "msa" && docType !== "dpa") return resp(400, { error: "DOC_TYPE_INVALID" });
+      const bodyText = typeof parsed.bodyText === "string" ? parsed.bodyText : "";
+      if (!bodyText.trim()) return resp(400, { error: "BODY_REQUIRED" });
+      if (bodyText.length > AGREEMENT_BODY_MAX) {
+        return resp(400, { error: "BODY_TOO_LARGE", max: AGREEMENT_BODY_MAX });
+      }
+      // Draft must belong to a real org -- a typo'd orgId caught here is a clean
+      // 404 instead of an orphan row the portal can never surface.
+      const org = await getOrg(orgId);
+      if (!org) return resp(404, { error: "ORG_NOT_FOUND" });
+      const supersedes =
+        typeof parsed.supersedes === "string" && parsed.supersedes.trim()
+          ? parsed.supersedes.trim().slice(0, 64)
+          : undefined;
+      const agreement = await createAgreement({
+        orgId,
+        docType,
+        templateVersion:
+          typeof parsed.templateVersion === "string" ? parsed.templateVersion.trim().slice(0, 64) : "",
+        params: cleanAgreementParams(parsed.params),
+        bodyText,
+        customized: parsed.customized === true,
+        supersedes,
+        actor,
+      });
+      console.log(
+        JSON.stringify({ audit: true, action: "agreement.create", actor, agreementId: agreement.agreementId, orgId, docType, customized: agreement.customized, supersedes: supersedes ?? null, at: Date.now() })
+      );
+      return resp(200, agreement);
+    }
+
+    if (method === "POST" && path === "/ent/agreements/update") {
+      const { agreementId } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (!agreementId) return resp(400, { error: "AGREEMENT_ID_REQUIRED" });
+      const patch = {};
+      if (parsed.bodyText !== undefined) {
+        if (typeof parsed.bodyText !== "string" || !parsed.bodyText.trim()) {
+          return resp(400, { error: "BODY_REQUIRED" });
+        }
+        if (parsed.bodyText.length > AGREEMENT_BODY_MAX) {
+          return resp(400, { error: "BODY_TOO_LARGE", max: AGREEMENT_BODY_MAX });
+        }
+        patch.bodyText = parsed.bodyText;
+      }
+      if (parsed.params !== undefined) patch.params = cleanAgreementParams(parsed.params);
+      if (parsed.templateVersion !== undefined) {
+        patch.templateVersion = String(parsed.templateVersion).trim().slice(0, 64);
+      }
+      if (parsed.customized !== undefined) patch.customized = parsed.customized === true;
+      if (Object.keys(patch).length === 0) return resp(400, { error: "NOTHING_TO_UPDATE" });
+      try {
+        const agreement = await updateAgreementDraft(agreementId, patch);
+        if (!agreement) return resp(404, { error: "not found" });
+        console.log(
+          JSON.stringify({ audit: true, action: "agreement.update", actor, agreementId, fields: Object.keys(patch), at: Date.now() })
+        );
+        return resp(200, agreement);
+      } catch (e) {
+        // Draft-only edits: an issued/accepted/void agreement is immutable.
+        if (e.code === "NOT_DRAFT") return resp(409, { error: "NOT_DRAFT", status: e.status });
+        throw e;
+      }
+    }
+
+    if (method === "POST" && path === "/ent/agreements/issue") {
+      const { agreementId } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (!agreementId) return resp(400, { error: "AGREEMENT_ID_REQUIRED" });
+      try {
+        const agreement = await issueAgreement(agreementId, actor);
+        if (!agreement) return resp(404, { error: "not found" });
+        console.log(
+          JSON.stringify({ audit: true, action: "agreement.issue", actor, agreementId, orgId: agreement.orgId, docType: agreement.docType, sha256: agreement.sha256, at: Date.now() })
+        );
+        // Supersede cascade (W3-1): this new agreement replaces an older one.
+        // BEST-EFFORT second update by contract -- the issue above already
+        // committed, and a cascade failure is logged for ops, never surfaced as
+        // an issue failure (the old row can be re-marked manually).
+        if (agreement.supersedes) {
+          try {
+            const marked = await markAgreementSuperseded(agreement.supersedes, agreement.agreementId);
+            if (marked) {
+              console.log(
+                JSON.stringify({ audit: true, action: "agreement.superseded", actor, agreementId: agreement.supersedes, supersededBy: agreement.agreementId, at: Date.now() })
+              );
+            } else {
+              console.error("[ent/agreements/issue] supersede target not markable (missing or wrong state):", agreement.supersedes);
+            }
+          } catch (e) {
+            console.error("[ent/agreements/issue] supersede mark failed (non-fatal):", e.message);
+          }
+        }
+        return resp(200, agreement);
+      } catch (e) {
+        if (e.code === "NOT_ISSUABLE") return resp(409, { error: "NOT_ISSUABLE", status: e.status });
+        throw e;
+      }
+    }
+
+    if (method === "POST" && path === "/ent/agreements/accept") {
+      const { agreementId } = parsed;
+      // acceptedBy = the portal user's email (the app injects it from the
+      // session server-side). Sanitized + clamped to 254 chars.
+      const acceptedBy = cleanEmail(parsed.acceptedBy);
+      const actor = cleanActor(parsed.actor, acceptedBy || "portal");
+      if (!agreementId) return resp(400, { error: "AGREEMENT_ID_REQUIRED" });
+      if (!acceptedBy) return resp(400, { error: "ACCEPTED_BY_REQUIRED" });
+      try {
+        const r = await acceptAgreement(agreementId, acceptedBy);
+        if (!r) return resp(404, { error: "not found" });
+        const agreement = r.agreement;
+        if (!r.already) {
+          // Mirror the accepted version onto the org row (W3-2). Best-effort +
+          // non-fatal by contract: the agreement row is the source of truth,
+          // and the accept must never fail because the mirror write did.
+          try {
+            await setOrgAcceptedAgreement(agreement.orgId, agreement.templateVersion);
+          } catch (e) {
+            console.error("[ent/agreements/accept] org mirror failed (non-fatal):", e.message);
+          }
+          console.log(
+            JSON.stringify({ audit: true, action: "agreement.accept", actor, agreementId, orgId: agreement.orgId, docType: agreement.docType, acceptedBy, sha256: agreement.sha256, at: Date.now() })
+          );
+        }
+        return resp(200, { ok: true, already: r.already, agreement });
+      } catch (e) {
+        if (e.code === "NOT_ACCEPTABLE") return resp(409, { error: "NOT_ACCEPTABLE", status: e.status });
+        throw e;
+      }
+    }
+
+    if (method === "POST" && path === "/ent/agreements/void") {
+      const { agreementId } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (!agreementId) return resp(400, { error: "AGREEMENT_ID_REQUIRED" });
+      try {
+        const agreement = await voidAgreement(agreementId, actor);
+        if (!agreement) return resp(404, { error: "not found" });
+        console.log(
+          JSON.stringify({ audit: true, action: "agreement.void", actor, agreementId, orgId: agreement.orgId, at: Date.now() })
+        );
+        return resp(200, { ok: true, agreement });
+      } catch (e) {
+        if (e.code === "NOT_VOIDABLE") return resp(409, { error: "NOT_VOIDABLE", status: e.status });
+        throw e;
+      }
+    }
+
+    // List stays LIGHT: no bodyText (up to 200KB/row) -- the full text comes
+    // from GET /ent/agreement one row at a time.
+    if (method === "GET" && path === "/ent/agreements") {
+      if (!qs.orgId) return resp(400, { error: "ORG_ID_REQUIRED" });
+      const agreements = await listAgreements(qs.orgId);
+      return resp(200, { agreements });
+    }
+
+    // Full row incl. bodyText + sha256. Portal callers MUST verify the
+    // agreement's orgId matches the session org app-side (W3-2 contract).
+    if (method === "GET" && path === "/ent/agreement") {
+      if (!qs.agreementId) return resp(400, { error: "AGREEMENT_ID_REQUIRED" });
+      const agreement = await getAgreement(qs.agreementId);
+      if (!agreement) return resp(404, { error: "not found" });
+      return resp(200, agreement);
     }
 
     // ── lab-leasing: reserved-capacity slot booking + timed assessment run ──
