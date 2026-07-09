@@ -42,3 +42,4 @@ app/.claude/
 .open-next/
 app/.open-next/
 engine/deploy/ent-engine.zip
+infra/backup/backup-exporter.zip
