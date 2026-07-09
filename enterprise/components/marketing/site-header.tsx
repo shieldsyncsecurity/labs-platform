@@ -4,10 +4,12 @@ const CONTACT_MAILTO =
   "mailto:info@shieldsyncsecurity.com?subject=" +
   encodeURIComponent("ShieldSync Enterprise - book a walkthrough");
 
+// Root-relative (/#how, not #how) so the nav still works from /privacy,
+// /terms and any other page that renders this header.
 const NAV = [
-  { label: "How it works", href: "#how" },
-  { label: "Why it's real", href: "#why-real" },
-  { label: "The report", href: "#report" },
+  { label: "How it works", href: "/#how" },
+  { label: "Why it's real", href: "/#why-real" },
+  { label: "The report", href: "/#report" },
 ];
 
 /** Marketing header for the enterprise homepage: sticky, translucent, logo + anchor

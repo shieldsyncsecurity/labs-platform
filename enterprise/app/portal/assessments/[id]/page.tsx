@@ -3,9 +3,9 @@ import { notFound, redirect } from "next/navigation";
 import { getOrgId } from "@/lib/server/portal-session";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 import PortalNav from "../../_components/portal-nav";
-import CopyButton from "../../_components/copy-button";
 import AddCandidateForm from "./add-candidate-form";
 import InvitesTable, { type InviteRow, type ResultRow } from "./invites-table";
+import ReportLinkControls from "./report-link-controls";
 import { formatDate, correctnessPct } from "../../../r/_components/report-bits";
 
 export const metadata: Metadata = {
@@ -23,6 +23,8 @@ type Assessment = {
   hintsOn?: boolean;
   createdAt?: string;
   reportToken?: string;
+  reportRevokedAt?: string;
+  reportExpiresAt?: string;
 };
 
 const APP_URL = "https://enterprise.shieldsyncsecurity.com";
@@ -87,21 +89,22 @@ export default async function AssessmentDetailPage({
   // Join each candidate's graded result (keyed by inviteToken) so scores show
   // inline in the table below -- the employer no longer has to open the separate
   // report link just to see who did well. Non-fatal if it fails: statuses still
-  // render, scores just won't show this load. Safe: the results come from this
-  // assessment's OWN reportToken, and the assessment is already ownership-checked
-  // above.
+  // render, scores just won't show this load.
+  //
+  // IMPORTANT: query by assessmentId (the engine's INTERNAL access path), never
+  // by reportToken -- the share link is lifecycle-enforced, so a revoked or
+  // expired link would 404 and silently blank the org's OWN scores here. Safe:
+  // the assessment is already ownership-checked above.
   const resultsByToken: Record<string, ResultRow> = {};
-  if (assessment.reportToken) {
-    try {
-      const rep = await entFetch<{ results?: ResultRow[] }>("/ent/report", {
-        query: { reportToken: assessment.reportToken },
-      });
-      for (const r of rep?.results ?? []) {
-        if (r?.inviteToken) resultsByToken[r.inviteToken] = r;
-      }
-    } catch {
-      /* non-fatal */
+  try {
+    const rep = await entFetch<{ results?: ResultRow[] }>("/ent/report", {
+      query: { assessmentId: id },
+    });
+    for (const r of rep?.results ?? []) {
+      if (r?.inviteToken) resultsByToken[r.inviteToken] = r;
     }
+  } catch {
+    /* non-fatal */
   }
 
   const invited = invites.length;
@@ -127,10 +130,10 @@ export default async function AssessmentDetailPage({
           <h1 className="text-2xl font-bold text-ink">{assessment.name ?? "Untitled assessment"}</h1>
           <p className="mt-1 text-sm text-muted">
             {assessment.labSlug ? <span className="font-mono">{assessment.labSlug}</span> : null}
-            {assessment.labSlug && assessment.createdAt ? " · " : null}
+            {assessment.labSlug && assessment.createdAt ? " \u00b7 " : null}
             {assessment.createdAt ? <span>Created {formatDate(assessment.createdAt)}</span> : null}
             {assessment.hintsOn !== undefined ? (
-              <span> · Hints {assessment.hintsOn ? "on" : "off"}</span>
+              <span>{" \u00b7 "}Hints {assessment.hintsOn ? "on" : "off"}</span>
             ) : null}
           </p>
         </div>
@@ -140,28 +143,24 @@ export default async function AssessmentDetailPage({
           <div className="mt-6 grid grid-cols-3 gap-3 sm:max-w-md">
             <StatCard label="Invited" value={String(invited)} />
             <StatCard label="Completed" value={`${completed}/${invited}`} />
-            <StatCard label="Avg correctness" value={completed ? `${avgPct}%` : "—"} />
+            <StatCard label="Avg correctness" value={completed ? `${avgPct}%` : "\u2014"} />
           </div>
         ) : null}
 
-        {/* Report link */}
-        <div className="mt-6 rounded-xl border border-line bg-surface p-5">
-          <h2 className="text-sm font-semibold text-ink-soft">Full report link</h2>
-          <p className="mt-1 text-xs text-muted">
-            Share this with your hiring team — the side-by-side comparison of every candidate for
-            this assessment, updated live as they submit.
-          </p>
-          {reportLink ? (
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <span className="min-w-0 flex-1 truncate rounded-lg border border-line bg-canvas px-3 py-2 font-mono text-xs text-ink-soft">
-                {reportLink}
-              </span>
-              <CopyButton value={reportLink} label="Copy link" />
-            </div>
-          ) : (
+        {/* Report link + lifecycle (revoke / renew) */}
+        {reportLink ? (
+          <ReportLinkControls
+            assessmentId={id}
+            reportLink={reportLink}
+            revokedAt={assessment.reportRevokedAt ?? null}
+            expiresAt={assessment.reportExpiresAt ?? null}
+          />
+        ) : (
+          <div className="mt-6 rounded-xl border border-line bg-surface p-5">
+            <h2 className="text-sm font-semibold text-ink-soft">Full report link</h2>
             <p className="mt-3 text-xs text-muted">No report link available yet.</p>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Add candidate */}
         <div className="mt-8 rounded-xl border border-line bg-surface p-5">

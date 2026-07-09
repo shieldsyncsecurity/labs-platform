@@ -26,8 +26,28 @@ export const metadata: Metadata = {
   },
   description:
     "Real-world cloud security assessments for hiring. Evaluate candidates in live, isolated AWS environments instead of whiteboard trivia.",
-  // Employer + candidate flows are invite/token-gated; keep this out of the
-  // public index until there is real marketing copy here (TODO before launch).
+  openGraph: {
+    siteName: "ShieldSync Enterprise",
+    type: "website",
+    locale: "en",
+    url: "/",
+    images: [
+      {
+        url: "/og/enterprise-og.png",
+        width: 1200,
+        height: 630,
+        alt: "ShieldSync Enterprise - cloud security hiring assessments in real AWS",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    images: ["/og/enterprise-og.png"],
+  },
+  // Global default = noindex: employer + candidate flows are invite/token-gated
+  // and must never be indexed. Public marketing pages (/, /demo/report, /privacy,
+  // /terms) opt back in with an explicit per-page `robots` override -- keep that
+  // pattern for any new public page.
   robots: {
     index: false,
     follow: false,

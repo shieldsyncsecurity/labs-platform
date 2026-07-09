@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 import {
   Bar,
@@ -11,7 +12,7 @@ import {
   formatDate,
 } from "../_components/report-bits";
 
-// Employer-facing comparison report — never indexed, never cached (each view
+// Employer-facing comparison report -- never indexed, never cached (each view
 // reflects live grading state as candidates submit).
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
@@ -20,7 +21,7 @@ export const metadata: Metadata = {
 // Force dynamic rendering so this route is always re-fetched from the engine
 // on every request (no static optimization / ISR). Combined with entFetch's
 // own `cache: "no-store"`, the response should also be served with
-// `Cache-Control: no-store` — Next sets this automatically for
+// `Cache-Control: no-store` -- Next sets this automatically for
 // force-dynamic routes that read no cacheable data, but if a CDN in front of
 // this Worker ever caches by default, add the header explicitly here.
 export const dynamic = "force-dynamic";
@@ -42,9 +43,48 @@ type ResultRow = {
   gradeError?: string;
 };
 
+// One row per non-revoked invite (engine E3). `id` is an 8-char display
+// prefix -- NEVER a live token; `candidateReportToken` rides only on
+// submitted rows and is the only token-shaped value we may render (as a
+// link href, never as text).
+type RosterRow = {
+  id?: string;
+  candidateName?: string | null;
+  status?: string; // Invited | Scheduled | In progress | Submitted | Expired
+  createdAt?: string;
+  slotKey?: string;
+  submittedAt?: string;
+  candidateReportToken?: string;
+};
+
 type ReportData = {
   assessment?: { name?: string; labSlug?: string; createdAt?: string };
   results?: ResultRow[];
+  roster?: RosterRow[];
+};
+
+// Unified table row: scored (submitted + graded) rows carry rank/bar data;
+// pending roster rows carry only a status chip.
+type DisplayRow = {
+  key: string;
+  name: string;
+  status: string;
+  rank?: number;
+  pct?: number;
+  passed?: number;
+  totalCriteria?: number;
+  hasReflection?: boolean;
+  breakdownToken?: string;
+};
+
+// Ranked ordering after the scored rows: submitted-awaiting-grade first,
+// then in-progress / scheduled / invited, expired last.
+const STATUS_ORDER: Record<string, number> = {
+  Submitted: 0,
+  "In progress": 1,
+  Scheduled: 2,
+  Invited: 3,
+  Expired: 4,
 };
 
 export default async function AssessmentReportPage({
@@ -61,23 +101,79 @@ export default async function AssessmentReportPage({
     if (err instanceof EntEngineError && err.status === 404) {
       return <ReportNotFound context="assessment" />;
     }
-    // Any other engine failure (5xx, network) — fail closed with the same
+    // Any other engine failure (5xx, network) -- fail closed with the same
     // not-found-style page rather than leaking a stack trace to an employer.
     return <ReportNotFound context="assessment" />;
   }
 
   const assessment = data?.assessment;
   const results = Array.isArray(data?.results) ? data!.results! : [];
+  // null = engine response without roster (stale cache / older engine):
+  // fall back to the legacy submitted-only table gracefully.
+  const roster = Array.isArray(data?.roster) ? data!.roster! : null;
 
-  const rows = results
+  const scored = results
     .map((r) => ({ row: r, pct: correctnessPct(r?.passedCount, r?.totalCriteria) }))
     .sort((a, b) => b.pct - a.pct);
 
-  const total = rows.length;
-  const withReflection = rows.filter(
-    ({ row }) => Boolean(row?.reflectionText && row.reflectionText.trim().length > 0)
-  ).length;
-  const avgPct = total ? Math.round(rows.reduce((s, { pct }) => s + pct, 0) / total) : 0;
+  // Join each graded result to its roster row via the 8-char invite prefix
+  // (roster.id is exactly inviteToken.slice(0, 8) on the engine side).
+  const rosterById = new Map<string, RosterRow>();
+  if (roster) {
+    for (const r of roster) {
+      if (r?.id) rosterById.set(r.id, r);
+    }
+  }
+
+  const matchedIds = new Set<string>();
+  const displayRows: DisplayRow[] = scored.map(({ row, pct }, i) => {
+    const prefix = row?.inviteToken ? row.inviteToken.slice(0, 8) : "";
+    const rosterRow = prefix ? rosterById.get(prefix) : undefined;
+    if (rosterRow?.id) matchedIds.add(rosterRow.id);
+    const name =
+      (row?.candidateName && row.candidateName.trim()) ||
+      (rosterRow?.candidateName && rosterRow.candidateName.trim()) ||
+      (prefix ? `${prefix}\u2026` : `candidate-${i + 1}`);
+    return {
+      key: rosterRow?.id ?? (prefix || `result-${i + 1}`),
+      name,
+      status: "Submitted",
+      rank: i + 1,
+      pct,
+      passed: row?.passedCount ?? 0,
+      totalCriteria: row?.totalCriteria ?? 0,
+      hasReflection: Boolean(row?.reflectionText && row.reflectionText.trim().length > 0),
+      breakdownToken: rosterRow?.candidateReportToken,
+    };
+  });
+
+  // Roster rows without a graded result: submitted-awaiting-grade, then
+  // in progress / scheduled / invited, then expired. Stable sort keeps the
+  // engine's order within each status group.
+  if (roster) {
+    const pending = roster
+      .filter((r): r is RosterRow & { id: string } => Boolean(r?.id) && !matchedIds.has(r!.id!))
+      .sort(
+        (a, b) => (STATUS_ORDER[a.status ?? ""] ?? 3) - (STATUS_ORDER[b.status ?? ""] ?? 3)
+      );
+    for (const r of pending) {
+      displayRows.push({
+        key: r.id,
+        name: (r.candidateName && r.candidateName.trim()) || `${r.id}\u2026`,
+        status: r.status && STATUS_ORDER[r.status] !== undefined ? r.status : "Invited",
+      });
+    }
+  }
+
+  const scoredCount = scored.length;
+  const withReflection = displayRows.filter((r) => r.hasReflection).length;
+  const avgPct = scoredCount
+    ? Math.round(scored.reduce((s, { pct }) => s + pct, 0) / scoredCount)
+    : 0;
+  const submittedCount = roster
+    ? roster.filter((r) => r?.status === "Submitted").length
+    : scoredCount;
+  const rosterTotal = roster ? roster.length : scoredCount;
 
   return (
     <ReportShell>
@@ -96,11 +192,17 @@ export default async function AssessmentReportPage({
         }
       />
 
-      {total > 0 ? (
+      {displayRows.length > 0 ? (
         <div className="mb-6 grid grid-cols-3 gap-3 sm:max-w-md">
-          <StatCard label="Candidates" value={String(total)} />
-          <StatCard label="Avg correctness" value={`${avgPct}%`} />
-          <StatCard label="With reflection" value={`${withReflection}/${total}`} />
+          <StatCard
+            label="Submitted"
+            value={roster ? `${submittedCount} of ${rosterTotal}` : String(scoredCount)}
+          />
+          <StatCard label="Avg correctness" value={scoredCount ? `${avgPct}%` : "\u2014"} />
+          <StatCard
+            label="With reflection"
+            value={`${withReflection}/${Math.max(submittedCount, scoredCount)}`}
+          />
         </div>
       ) : null}
 
@@ -108,7 +210,7 @@ export default async function AssessmentReportPage({
         <PreliminaryBanner />
       </div>
 
-      {rows.length === 0 ? (
+      {displayRows.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-line-strong bg-surface px-6 py-16 text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand/5 text-brand ring-1 ring-inset ring-brand/15">
             <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" aria-hidden="true">
@@ -124,7 +226,7 @@ export default async function AssessmentReportPage({
       ) : (
         <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+            <table className="w-full min-w-[720px] border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-line bg-canvas/70 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
                   <th className="px-5 py-3.5">Rank</th>
@@ -133,50 +235,54 @@ export default async function AssessmentReportPage({
                   <th className="px-5 py-3.5">Correctness</th>
                   <th className="px-5 py-3.5">Status</th>
                   <th className="px-5 py-3.5 text-center">Reflection</th>
+                  <th className="px-5 py-3.5">Report</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map(({ row, pct }, i) => {
-                  const rank = i + 1;
-                  const label =
-                    row?.candidateName && row.candidateName.trim()
-                      ? row.candidateName.trim()
-                      : row?.inviteToken
-                        ? `${row.inviteToken.slice(0, 8)}…`
-                        : `candidate-${rank}`;
-                  const passed = row?.passedCount ?? 0;
-                  const totalCriteria = row?.totalCriteria ?? 0;
-                  const hasReflection = Boolean(
-                    row?.reflectionText && row.reflectionText.trim().length > 0
-                  );
+                {displayRows.map((r) => {
+                  const isScored = typeof r.rank === "number";
                   return (
                     <tr
-                      key={row?.inviteToken ?? i}
+                      key={r.key}
                       className="border-b border-line/70 transition-colors last:border-b-0 hover:bg-canvas/60"
                     >
                       <td className="px-5 py-4">
-                        <RankBadge rank={rank} />
+                        {isScored ? (
+                          <RankBadge rank={r.rank!} />
+                        ) : (
+                          <span
+                            className="inline-flex h-7 w-7 flex-none items-center justify-center text-muted"
+                            aria-hidden="true"
+                          >
+                            &mdash;
+                          </span>
+                        )}
                       </td>
-                      <td className="px-5 py-4 text-sm font-medium text-ink">{label}</td>
+                      <td className="px-5 py-4 text-sm font-medium text-ink">{r.name}</td>
                       <td className="px-5 py-4 tabular-nums text-ink-soft">
-                        {totalCriteria ? `${passed} / ${totalCriteria}` : "—"}
+                        {isScored && r.totalCriteria
+                          ? `${r.passed} / ${r.totalCriteria}`
+                          : "\u2014"}
                       </td>
                       <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-28">
-                            <Bar pct={pct} />
+                        {isScored ? (
+                          <div className="flex items-center gap-3">
+                            <div className="w-28">
+                              <Bar pct={r.pct ?? 0} />
+                            </div>
+                            <span className="w-10 tabular-nums font-semibold text-ink">
+                              {r.pct}%
+                            </span>
                           </div>
-                          <span className="w-10 tabular-nums font-semibold text-ink">{pct}%</span>
-                        </div>
+                        ) : (
+                          <span className="text-muted">&mdash;</span>
+                        )}
                       </td>
                       <td className="px-5 py-4">
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
-                          Submitted
-                        </span>
+                        <StatusChip status={r.status} />
                       </td>
                       <td className="px-5 py-4 text-center">
-                        {hasReflection ? (
+                        {r.hasReflection ? (
                           <span
                             className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-200"
                             title="Written reflection submitted"
@@ -187,7 +293,19 @@ export default async function AssessmentReportPage({
                             <span className="sr-only">Reflection submitted</span>
                           </span>
                         ) : (
-                          <span className="text-muted" aria-label="No reflection">—</span>
+                          <span className="text-muted" aria-label="No reflection">&mdash;</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4">
+                        {r.breakdownToken ? (
+                          <Link
+                            href={`/r/c/${encodeURIComponent(r.breakdownToken)}`}
+                            className="whitespace-nowrap text-xs font-semibold text-brand transition-colors hover:text-brand-strong"
+                          >
+                            Full breakdown &rarr;
+                          </Link>
+                        ) : (
+                          <span className="text-muted">&mdash;</span>
                         )}
                       </td>
                     </tr>
@@ -205,6 +323,43 @@ export default async function AssessmentReportPage({
         report link.
       </p>
     </ReportShell>
+  );
+}
+
+// Muted, restrained status chips: only "Submitted" reads as done (emerald);
+// everything pending stays quiet, matching the report's chip pattern.
+const CHIP_STYLES: Record<string, { chip: string; dot: string }> = {
+  Submitted: {
+    chip: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+    dot: "bg-emerald-500",
+  },
+  "In progress": {
+    chip: "bg-amber-50 text-amber-800 ring-amber-200",
+    dot: "bg-amber-500",
+  },
+  Scheduled: {
+    chip: "bg-sky-50 text-sky-700 ring-sky-200",
+    dot: "bg-sky-500",
+  },
+  Invited: {
+    chip: "bg-canvas text-muted ring-line-strong/60",
+    dot: "bg-line-strong",
+  },
+  Expired: {
+    chip: "bg-rose-50 text-rose-600 ring-rose-200",
+    dot: "bg-rose-400",
+  },
+};
+
+function StatusChip({ status }: { status: string }) {
+  const style = CHIP_STYLES[status] ?? CHIP_STYLES.Invited;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${style.chip}`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} aria-hidden="true" />
+      {status}
+    </span>
   );
 }
 

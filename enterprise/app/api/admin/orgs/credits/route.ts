@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
-import { getAdminSession } from "@/lib/server/admin-session";
+import { getAdminActor } from "@/lib/server/admin-session";
 
 type AdjustCreditsBody = {
   orgId?: string;
   delta?: number | string;
+  reason?: string;
 };
 
 // Staff-only: adjust an org's credit balance (delta can be negative). EVERY
-// route under app/api/admin/* must call getAdminSession() first.
+// route under app/api/admin/* must verify the admin session FIRST;
+// getAdminActor() doubles as that fail-closed gate (null = no valid session)
+// AND the E9 audit identity (staff email, or "secret-admin" for the legacy
+// shared-secret login) forwarded to the engine's audit line.
 export async function POST(req: Request) {
-  const isAdmin = await getAdminSession();
-  if (!isAdmin) {
+  const actor = await getAdminActor();
+  if (!actor) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   }
 
@@ -41,14 +45,14 @@ export async function POST(req: Request) {
     );
   }
 
-  // getAdminSession() only returns a boolean (no identity), so the best-effort
-  // actor for the engine's audit trail is a constant marker.
-  const actor = "admin";
+  // Optional free-text reason for the engine's audit line (E9); the engine
+  // clamps to 300 chars, mirror that here.
+  const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 300) : "";
 
   try {
     const result = await entFetch("/ent/orgs/credits", {
       method: "POST",
-      body: { orgId, delta: deltaNum, actor },
+      body: { orgId, delta: deltaNum, actor, ...(reason ? { reason } : {}) },
     });
     return NextResponse.json(result);
   } catch (err) {

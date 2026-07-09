@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
-import { getAdminSession } from "@/lib/server/admin-session";
+import { getAdminActor } from "@/lib/server/admin-session";
 
 // ShieldSync-STAFF only: fulfil a candidate data-erasure request (DPDP / GDPR).
-// Gated on getAdminSession() FIRST (this is a destructive, PII-affecting action);
-// the engine redacts the candidate's identifiers + reflection in place. Never
-// exposed to employers or candidates.
+// Gated on the admin session FIRST (this is a destructive, PII-affecting
+// action; getAdminActor() is null without a valid session -- same fail-closed
+// gate as getAdminSession, plus the E9 audit identity); the engine redacts the
+// candidate's identifiers + reflection in place. Never exposed to employers or
+// candidates.
 export async function POST(req: Request) {
-  if (!(await getAdminSession())) {
+  const actor = await getAdminActor();
+  if (!actor) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
@@ -26,7 +29,7 @@ export async function POST(req: Request) {
   try {
     const r = await entFetch<{ ok?: boolean; erasedAt?: string }>("/ent/invites/erase", {
       method: "POST",
-      body: { inviteToken, actor: "admin" },
+      body: { inviteToken, actor },
     });
     return NextResponse.json(r);
   } catch (err) {

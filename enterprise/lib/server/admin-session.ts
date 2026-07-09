@@ -39,6 +39,25 @@ export async function getAdminSession(): Promise<boolean> {
 }
 
 /**
+ * Audit identity for admin MUTATIONS (E9): the staff email carried in the
+ * signed session (Cognito path), or the fixed marker "secret-admin" for a
+ * session minted by the legacy ADMIN_PANEL_SECRET form (which has no email).
+ * Returns null when there is NO valid admin session -- callers may use this
+ * as their fail-closed gate (`if (!actor) return 401`), which is exactly
+ * equivalent to getAdminSession() returning false. getAdminSession() keeps
+ * its boolean contract for every existing caller; this is additive only.
+ */
+export async function getAdminActor(): Promise<string | null> {
+  const store = await cookies();
+  const value = store.get(COOKIE_NAME)?.value;
+  if (!value) return null;
+  const session = await verifyAdminSession(value);
+  if (!session) return null;
+  const email = session.email?.trim();
+  return email && email.length > 0 ? email : "secret-admin";
+}
+
+/**
  * Stamps a signed admin session cookie. Called by the Cognito callback
  * (app/api/auth/callback, for an email in ADMIN_EMAILS) and by the legacy
  * shared-secret route (app/api/admin/login, after a constant-time check

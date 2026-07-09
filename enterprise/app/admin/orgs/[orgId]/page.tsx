@@ -6,6 +6,7 @@ import AdminNav from "../../_components/admin-nav";
 import CopyButton from "../../../portal/_components/copy-button";
 import AdjustCreditsForm from "./adjust-credits-form";
 import DeleteOrgButton from "./delete-org-button";
+import OrdersSection, { type OrderRow } from "./orders-section";
 import { Bar, formatDate } from "../../../r/_components/report-bits";
 
 export const metadata: Metadata = {
@@ -80,6 +81,20 @@ export default async function AdminOrgDetailPage({
     assessmentsError = "Could not load assessments right now.";
   }
 
+  // Billing history (E4 money loop): recorded orders + their paid state. The
+  // section still renders on a fetch failure so staff can see the error and
+  // the rest of the page keeps working.
+  let orders: OrderRow[] = [];
+  let ordersError: string | null = null;
+  try {
+    const data = await entFetch<{ orders?: OrderRow[] }>("/ent/orders", { query: { orgId } });
+    orders = Array.isArray(data?.orders) ? data.orders : [];
+    // Newest first -- listOrders returns index order, not a UI order.
+    orders.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+  } catch {
+    ordersError = "Could not load orders right now.";
+  }
+
   const creditsTotal = org.creditsTotal ?? 0;
   const creditsUsed = org.creditsUsed ?? 0;
   const usedPct = creditsTotal > 0 ? Math.min(100, (creditsUsed / creditsTotal) * 100) : 0;
@@ -144,6 +159,18 @@ export default async function AdminOrgDetailPage({
               <dd className="mt-1 font-mono text-sm text-ink-soft">{org.gstin || "—"}</dd>
             </div>
           </dl>
+        </div>
+
+        {/* Orders / invoices */}
+        <div className="mt-6">
+          {ordersError ? (
+            <div className="rounded-xl border border-line bg-surface p-5">
+              <h2 className="text-sm font-semibold text-ink-soft">Orders / invoices</h2>
+              <p className="mt-2 text-sm text-rose-700">{ordersError}</p>
+            </div>
+          ) : (
+            <OrdersSection orgId={org.orgId ?? orgId} orders={orders} />
+          )}
         </div>
 
         {/* Assessments */}

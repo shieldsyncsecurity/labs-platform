@@ -25,8 +25,9 @@ export default function Home() {
     <div className="flex min-h-screen flex-col bg-canvas">
       <SiteHeader />
       {/* overflow-x-clip contains the 3D hero scene's bleed without creating a
-          scroll container (so the sticky header, a sibling, keeps working). */}
-      <main className="flex-1 overflow-x-clip">
+          scroll container (so the sticky header, a sibling, keeps working).
+          A div, not <main> -- the root layout already wraps every page in <main>. */}
+      <div className="flex-1 overflow-x-clip">
         <Hero />
         <HowItWorksTour />
         <WhyReal />
@@ -34,7 +35,7 @@ export default function Home() {
         <WhoItsFor />
         <Faq />
         <FinalCta />
-      </main>
+      </div>
       <SiteFooter />
     </div>
   );

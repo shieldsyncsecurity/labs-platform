@@ -1,0 +1,16 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- ShieldSync Enterprise app icon: standalone square "Cipher S" mark (amber
+       ENTERPRISE variant). Adapted from public/logo/shieldsync-enterprise-mark.svg
+       with the glow filter dropped and a heavier stroke so it stays crisp at 16px. -->
+  <defs>
+    <linearGradient id="ent-amber" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="55%" stop-color="#d97706" />
+      <stop offset="100%" stop-color="#b45309" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#0a1020" />
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="13.25" fill="none" stroke="#1e2a44" stroke-width="1.5" />
+  <path d="M 44 15 L 20 15 L 20 32 L 44 32 L 44 49 L 20 49" stroke="url(#ent-amber)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <path d="M 44 15 L 20 15 L 20 32 L 44 32 L 44 49 L 20 49" stroke="#fbbf24" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.6" />
+</svg>

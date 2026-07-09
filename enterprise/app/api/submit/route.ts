@@ -4,6 +4,7 @@ import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 type SubmitBody = {
   inviteToken?: string;
   reflection?: string;
+  auto?: boolean;
 };
 
 // Candidate-facing: submit the assessment (ends the timed attempt, triggers
@@ -33,10 +34,14 @@ export async function POST(req: Request) {
   const reflection =
     typeof body.reflection === "string" ? body.reflection.slice(0, MAX_REFLECTION_LEN) : "";
 
+  // Timer-expiry auto-submits (grace-countdown zero or tab-close sendBeacon)
+  // send auto:true; the engine stores it as `autoSubmitted` on the result.
+  const auto = body.auto === true;
+
   try {
     const engineResp = (await entFetch("/ent/submit", {
       method: "POST",
-      body: { inviteToken, reflection },
+      body: { inviteToken, reflection, auto },
     })) as { ok?: boolean; submitted?: boolean };
     // Return ONLY the safe acknowledgement -- the engine's idempotent re-submit
     // path includes the scored `result` object, which must NEVER reach the

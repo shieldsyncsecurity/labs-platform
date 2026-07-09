@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
-import { getAdminSession } from "@/lib/server/admin-session";
+import { getAdminActor } from "@/lib/server/admin-session";
 
 type CreateOrgBody = {
   name?: string;
@@ -16,8 +16,11 @@ type CreateOrgBody = {
 // the ShieldSync-staff gate, completely separate from the employer portal
 // session (see lib/server/admin-session.ts).
 export async function POST(req: Request) {
-  const isAdmin = await getAdminSession();
-  if (!isAdmin) {
+  // getAdminActor() doubles as the fail-closed gate (null = no valid admin
+  // session) AND the E9 audit identity (staff email, or "secret-admin" for
+  // the legacy shared-secret login).
+  const actor = await getAdminActor();
+  if (!actor) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   }
 
@@ -46,10 +49,6 @@ export async function POST(req: Request) {
   const gstin = body.gstin?.trim() || undefined;
   const billingAddress = body.billingAddress?.trim() || undefined;
   const agreementVersion = body.agreementVersion?.trim() || "v1";
-
-  // getAdminSession() only returns a boolean (no identity), so the best-effort
-  // actor for the engine's audit trail is a constant marker.
-  const actor = "admin";
 
   try {
     const result = await entFetch("/ent/orgs", {

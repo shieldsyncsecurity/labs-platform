@@ -25,6 +25,7 @@ type Invite = {
   labSlug?: string;
   hintsOn?: boolean;
   orgName?: string;
+  slotKey?: string;
 };
 
 type StartResponse = {
@@ -49,10 +50,15 @@ type Phase =
   | "ready"
   | "starting"
   | "room"
+  | "resumeFailed"
   | "reflection"
   | "done";
 
 const CONSENT_VERSION = "v1";
+
+// Hard grace period after the room timer expires: the candidate gets this long
+// on the reflection card before we auto-submit for them.
+const GRACE_MS = 5 * 60 * 1000;
 
 function isPast(iso?: string): boolean {
   if (!iso) return false;
@@ -132,6 +138,20 @@ export default function CandidateFlow({ token }: { token: string }) {
   const [reflection, setReflection] = useState("");
   const [submitBusy, setSubmitBusy] = useState(false);
 
+  // post-expiry grace: set when the room timer hits 0. While active, the
+  // reflection card shows a hard countdown and we auto-submit at 0 (or on
+  // tab close via sendBeacon) so an expired session is never stranded.
+  const [graceDeadline, setGraceDeadline] = useState<number | null>(null);
+  const [graceLeftMs, setGraceLeftMs] = useState<number | null>(null);
+  const reflectionRef = useRef("");
+  const autoFiredRef = useRef(false);
+  const submitInFlightRef = useRef(false);
+  const beaconSentRef = useRef(false);
+
+  useEffect(() => {
+    reflectionRef.current = reflection;
+  }, [reflection]);
+
   // ── Load invite on mount ────────────────────────────────────────────
   const loadInvite = useCallback(async () => {
     setPhase("loading");
@@ -194,7 +214,9 @@ export default function CandidateFlow({ token }: { token: string }) {
       // and let it re-poll /api/start to fetch a fresh console URL.
       setPhase("room");
     } else if (status === "submitted") {
-      setPhase("reflection");
+      // Already submitted (including a prior auto-submit) -- show the Done
+      // card, never the reflection form.
+      setPhase("done");
     } else {
       setErrorMsg("This assessment link is no longer active.");
       setPhase("invalid");
@@ -501,8 +523,16 @@ export default function CandidateFlow({ token }: { token: string }) {
       (async () => {
         const result = await callStart();
         if (!result || "error" in result) {
-          setErrorMsg("Could not resume your assessment session. Please try again.");
-          setPhase("invalid");
+          const code = result && "error" in result ? result.error : "START_FAILED";
+          if (code === "LINK_EXPIRED") {
+            setErrorMsg("This link has expired.");
+            setPhase("invalid");
+            return;
+          }
+          // Transient failure (network blip, engine hiccup) mid-assessment:
+          // offer a Retry instead of dead-ending on the invalid card.
+          setErrorMsg("Could not resume your assessment session.");
+          setPhase("resumeFailed");
           return;
         }
         setSession(result);
@@ -530,6 +560,9 @@ export default function CandidateFlow({ token }: { token: string }) {
       const left = target - Date.now();
       setRemainingMs(Math.max(0, left));
       if (left <= 0) {
+        // Time is up: move to the reflection card with a hard grace window,
+        // after which we auto-submit. Only arm the deadline once.
+        setGraceDeadline((prev) => prev ?? Date.now() + GRACE_MS);
         setPhase("reflection");
       }
     };
@@ -539,17 +572,22 @@ export default function CandidateFlow({ token }: { token: string }) {
   }, [phase, session?.scoredExpiresAt]);
 
   // ── Phase 7: reflection / submit ─────────────────────────────────────
-  const handleSubmit = async () => {
-    if (submitBusy) return;
+  const handleSubmit = async (auto = false) => {
+    // Ref guard alongside state: the grace-countdown effect calls a captured
+    // (stale) closure of this function, so `submitBusy` alone can read false
+    // while a manual submit is in flight -- the ref is stable across closures
+    // and closes the double-fire race.
+    if (submitBusy || submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
     setSubmitBusy(true);
     setErrorMsg(null);
     try {
       const res = await fetch("/api/submit", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ inviteToken: token, reflection }),
+        body: JSON.stringify({ inviteToken: token, reflection: reflectionRef.current, auto }),
       });
-      const data = await readJson(res);
+      await readJson(res);
       if (!res.ok) {
         setErrorMsg("Could not submit. Please try again.");
         setSubmitBusy(false);
@@ -560,9 +598,66 @@ export default function CandidateFlow({ token }: { token: string }) {
     } catch {
       setErrorMsg("Could not submit. Please try again.");
     } finally {
+      submitInFlightRef.current = false;
       setSubmitBusy(false);
     }
   };
+
+  // Grace countdown after timer expiry: tick every second; at 0, auto-submit
+  // exactly once with auto:true. A manual submit during grace still works and
+  // simply wins the race (the engine's submit is idempotent).
+  useEffect(() => {
+    if (phase !== "reflection" || graceDeadline === null) return;
+    const tick = () => {
+      const left = graceDeadline - Date.now();
+      setGraceLeftMs(Math.max(0, left));
+      if (left <= 0 && !autoFiredRef.current) {
+        autoFiredRef.current = true;
+        handleSubmit(true);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, graceDeadline]);
+
+  // While in reflection-after-expiry, closing or hiding the tab must not
+  // strand the session: fire a best-effort auto-submit via sendBeacon (or a
+  // keepalive fetch fallback). The engine's idempotent submit makes any
+  // duplicate delivery harmless.
+  useEffect(() => {
+    if (phase !== "reflection" || graceDeadline === null) return;
+    const sendAutoSubmit = () => {
+      if (beaconSentRef.current) return;
+      beaconSentRef.current = true;
+      const payload = JSON.stringify({
+        inviteToken: token,
+        reflection: reflectionRef.current,
+        auto: true,
+      });
+      if (typeof navigator.sendBeacon === "function") {
+        navigator.sendBeacon("/api/submit", new Blob([payload], { type: "application/json" }));
+      } else {
+        fetch("/api/submit", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: payload,
+          keepalive: true,
+        }).catch(() => {});
+      }
+    };
+    const onPageHide = () => sendAutoSubmit();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") sendAutoSubmit();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [phase, graceDeadline, token]);
 
   // ── Derived display helpers ─────────────────────────────────────────
   const orgName = invite?.orgName || "the hiring team";
@@ -622,7 +717,12 @@ export default function CandidateFlow({ token }: { token: string }) {
           />
         )}
         {phase === "ready" && (
-          <ReadyCard bookedSlot={bookedSlot} onStart={handleStart} error={errorMsg} busy={starting} />
+          <ReadyCard
+            bookedSlot={bookedSlot ?? invite?.slotKey ?? null}
+            onStart={handleStart}
+            error={errorMsg}
+            busy={starting}
+          />
         )}
         {phase === "starting" && <StartingCard />}
         {phase === "room" && (
@@ -635,13 +735,23 @@ export default function CandidateFlow({ token }: { token: string }) {
             onSubmit={() => setPhase("reflection")}
           />
         )}
+        {phase === "resumeFailed" && (
+          <ResumeErrorCard
+            message={errorMsg ?? "Could not resume your assessment session."}
+            onRetry={() => {
+              setErrorMsg(null);
+              setPhase("room");
+            }}
+          />
+        )}
         {phase === "reflection" && (
           <ReflectionCard
             reflection={reflection}
             onChange={setReflection}
-            onSubmit={handleSubmit}
+            onSubmit={() => handleSubmit()}
             busy={submitBusy}
             error={errorMsg}
+            graceCountdown={graceDeadline !== null ? formatCountdown(graceLeftMs ?? GRACE_MS) : null}
           />
         )}
         {phase === "done" && <DoneCard orgName={orgName} />}
@@ -668,6 +778,27 @@ function InvalidCard({ message }: { message: string }) {
       <p className="text-sm text-muted">
         If you believe this is a mistake, please contact the organization that invited you.
       </p>
+    </div>
+  );
+}
+
+function ResumeErrorCard({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-4 py-6 text-center">
+      <div>
+        <p className="text-base font-semibold text-ink">{message}</p>
+        <p className="mt-1 text-sm text-muted">
+          Your assessment session is still there -- this was a connection problem, not a
+          submission.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="rounded-full bg-brand px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong"
+      >
+        Retry
+      </button>
     </div>
   );
 }
@@ -913,15 +1044,21 @@ function ReadyCard({
   error: string | null;
   busy: boolean;
 }) {
-  const label = bookedSlot
-    ? new Date(bookedSlot).toLocaleString(undefined, {
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      })
-    : null;
+  // slotKey is a slot key string (e.g. "2026-07-29T09:00"). Format it in the
+  // candidate's local words; if parsing fails, stay honest and show the raw key.
+  let label: string | null = null;
+  if (bookedSlot) {
+    const t = new Date(bookedSlot);
+    label = Number.isNaN(t.getTime())
+      ? bookedSlot
+      : t.toLocaleString(undefined, {
+          weekday: "long",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        });
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -1025,21 +1162,31 @@ function ReflectionCard({
   onSubmit,
   busy,
   error,
+  graceCountdown,
 }: {
   reflection: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
   busy: boolean;
   error: string | null;
+  graceCountdown: string | null;
 }) {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h2 className="text-lg font-semibold text-ink">One last thing</h2>
+        <h2 className="text-lg font-semibold text-ink">
+          {graceCountdown !== null ? "Time is up" : "One last thing"}
+        </h2>
         <p className="mt-2 text-sm text-ink-soft">
           In 3-5 sentences, what did you find and how did you fix it?
         </p>
       </div>
+
+      {graceCountdown !== null && (
+        <p className="rounded-lg border border-brand/40 bg-brand/5 px-4 py-2 text-sm font-medium text-brand-strong">
+          Auto-submitting in {graceCountdown} -- add your reflection now.
+        </p>
+      )}
 
       <textarea
         rows={6}

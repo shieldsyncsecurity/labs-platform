@@ -21,6 +21,7 @@ export const metadata: Metadata = {
   description:
     "See what a ShieldSync hiring-assessment report looks like: candidates ranked by verified performance on a real cloud security task.",
   robots: { index: true, follow: true },
+  alternates: { canonical: "/demo/report" },
 };
 
 // ── Fictional data (illustrative only) ───────────────────────────────────────

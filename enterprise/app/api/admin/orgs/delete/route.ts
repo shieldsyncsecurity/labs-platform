@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
-import { getAdminSession } from "@/lib/server/admin-session";
+import { getAdminActor } from "@/lib/server/admin-session";
 
 // ShieldSync-staff only: delete an org. The engine refuses if the org has any
 // assessments (candidate data must not be orphaned), so this only ever removes
-// empty/mistaken/test orgs. getAdminSession() is checked FIRST; never infer
-// admin-ness from anything else.
+// empty/mistaken/test orgs. The admin session is checked FIRST (getAdminActor
+// is null without a valid session -- same fail-closed gate as getAdminSession,
+// plus the E9 audit identity); never infer admin-ness from anything else.
 export async function POST(req: Request) {
-  if (!(await getAdminSession())) {
+  const actor = await getAdminActor();
+  if (!actor) {
     return NextResponse.json({ error: "Not authorized." }, { status: 401 });
   }
 
@@ -24,7 +26,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    await entFetch("/ent/orgs/delete", { method: "POST", body: { orgId, actor: "admin" } });
+    await entFetch("/ent/orgs/delete", { method: "POST", body: { orgId, actor } });
     return NextResponse.json({ ok: true });
   } catch (err) {
     if (err instanceof EntEngineError && err.status === 409) {
