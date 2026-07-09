@@ -137,26 +137,44 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "  Lambda updated."
 }
 
-# -- Step 5: environment (shared secret) --------------------------------------
-# The ent engine's HTTP auth FAILS CLOSED: in the Lambda runtime an empty
-# ENT_ENGINE_SECRET makes the engine refuse every non-health request. Deploying
-# without it would ship a dead (500-on-everything) engine, so a missing secret is a
-# HARD deploy failure here - never proceed. The enterprise app must send this same
-# value in the x-engine-token header.
-Write-Host "`n[5/6] Setting Lambda environment ..." -ForegroundColor Cyan
-if ([string]::IsNullOrWhiteSpace($env:ENT_ENGINE_SECRET)) {
-    Write-Error "ENT_ENGINE_SECRET is not set. Refusing to deploy the enterprise engine without its HTTP auth secret (it would fail closed and 500 every request). Set it and re-run:  `$env:ENT_ENGINE_SECRET=`"<value>`"; .\deploy\deploy-ent.ps1"
+# -- Step 5: environment (MERGE, never replace) --------------------------------
+# The ent engine's HTTP auth FAILS CLOSED: an empty ENT_ENGINE_SECRET makes the
+# engine refuse every non-health request. This step MERGES local env overrides
+# (ENT_ENGINE_SECRET / ENT_OTP_FROM / ENT_APP_URL / GEMINI_API_KEY, when set in
+# the shell) into the Lambda's CURRENT variables. It must never write a
+# replacement map: the old Variables={ONLY_ONE_KEY} form silently WIPED every
+# other var (would have killed OTP email via ENT_OTP_FROM). A code-only deploy
+# with no local overrides is fine as long as the Lambda already holds a secret.
+Write-Host "`n[5/6] Merging Lambda environment ..." -ForegroundColor Cyan
+$currentJson = aws lambda get-function-configuration `
+  --function-name $FUNCTION_NAME `
+  --query "Environment.Variables" --output json --region $REGION
+if ($LASTEXITCODE -ne 0) { Write-Error "Failed to read current environment"; exit 1 }
+$vars = @{}
+$current = $currentJson | ConvertFrom-Json
+if ($null -ne $current) {
+    $current.PSObject.Properties | ForEach-Object { $vars[$_.Name] = $_.Value }
+}
+foreach ($k in @("ENT_ENGINE_SECRET", "ENT_OTP_FROM", "ENT_APP_URL", "GEMINI_API_KEY")) {
+    $v = [Environment]::GetEnvironmentVariable($k)
+    if (-not [string]::IsNullOrWhiteSpace($v)) { $vars[$k] = $v }
+}
+if ([string]::IsNullOrWhiteSpace($vars["ENT_ENGINE_SECRET"])) {
+    Write-Error "ENT_ENGINE_SECRET is neither set on the Lambda nor in this shell. Refusing to deploy a fail-closed (500-on-everything) engine. Set it and re-run:  `$env:ENT_ENGINE_SECRET=`"<value>`"; .\deploy\deploy-ent.ps1"
     exit 1
-} else {
-    # GEMINI_API_KEY is added later (reflection scoring) via the same command.
-    $envArg = "Variables={ENT_ENGINE_SECRET=$($env:ENT_ENGINE_SECRET)}"
+}
+$envFile = Join-Path $PSScriptRoot "ent-env.tmp.json"
+@{ Variables = $vars } | ConvertTo-Json -Compress | Set-Content -Path $envFile -NoNewline
+try {
     aws lambda update-function-configuration `
       --function-name $FUNCTION_NAME `
-      --environment $envArg `
+      --environment "file://$envFile" `
       --region $REGION | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed to set environment"; exit 1 }
     aws lambda wait function-updated --function-name $FUNCTION_NAME --region $REGION | Out-Null
-    Write-Host "  ENT_ENGINE_SECRET set."
+    Write-Host ("  Environment merged (" + ($vars.Keys -join ", ") + ").")
+} finally {
+    Remove-Item -Path $envFile -Force -ErrorAction SilentlyContinue
 }
 
 # -- Step 6: API Gateway HTTP API ---------------------------------------------

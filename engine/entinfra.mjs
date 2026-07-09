@@ -1037,7 +1037,7 @@ export async function listResults(assessmentId) {
 // ── ORDERS ───────────────────────────────────────────────────────────────────
 
 /** createOrder(): a new credit-purchase / GST invoice record, starting "created". */
-export async function createOrder({ orgId, invoiceNo, gstin, amountMinor, currency, credits }) {
+export async function createOrder({ orgId, invoiceNo, gstin, amountMinor, currency, credits, note }) {
   const db = await ddb();
   const orderId = newToken();
   const item = {
@@ -1048,6 +1048,9 @@ export async function createOrder({ orgId, invoiceNo, gstin, amountMinor, curren
     amountMinor: N(amountMinor ?? 0),
     currency: S(currency ?? "INR"),
     credits: N(credits ?? 0),
+    // Internal founder note (the admin UI offers it) -- persisted on the order
+    // so it is not lost to a transient console.log audit line.
+    note: S(typeof note === "string" ? note.slice(0, 300) : ""),
     status: S("created"),
     createdAt: S(nowIso()),
   };

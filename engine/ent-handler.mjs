@@ -748,8 +748,10 @@ export async function handler(event) {
 
     // ── orders/billing ──────────────────────────────────────────────────────
     if (method === "POST" && path === "/ent/orders") {
-      const { orgId, invoiceNo, gstin, amountMinor, currency, credits } = parsed;
-      const order = await createOrder({ orgId, invoiceNo, gstin, amountMinor, currency, credits });
+      const { orgId, invoiceNo, gstin, amountMinor, currency, credits, note } = parsed;
+      const actor = cleanActor(parsed.actor);
+      const order = await createOrder({ orgId, invoiceNo, gstin, amountMinor, currency, credits, note });
+      console.log(JSON.stringify({ audit: true, action: "order.create", actor, orderId: order.orderId, orgId, credits: order.credits, at: Date.now() }));
       return resp(200, order);
     }
 
