@@ -33,10 +33,11 @@ export function HeroVisual() {
             <StackPanel label="IAM" depth={1} />
             <StackPanel label="DATA (S3)" depth={2} />
 
-            {/* DETECTION / top live-assessment panel */}
+            {/* Top live-assessment panel. NOTE: intentionally has NO hv-edge-label
+                -- unlike the empty stack panels below, this one carries the
+                LIVE ASSESSMENT card content, and an edge label at top:10px
+                collides with the card header under the isometric skew. */}
             <div className="hv-panel hv-panel-top" style={{ transform: "translateZ(144px)" }}>
-              <span className="hv-edge-label">DETECTION</span>
-
               <div className="hv-assess">
                 <div className="hv-assess-head">
                   <span className="hv-assess-title">LIVE ASSESSMENT</span>
