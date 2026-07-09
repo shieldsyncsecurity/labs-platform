@@ -244,7 +244,27 @@ export default function CandidateFlow({ token }: { token: string }) {
       });
       const data = await readJson(res);
       if (!res.ok) {
-        setOtpError("Could not send a code. Please try again in a moment.");
+        const code = data?.code as string | undefined;
+        const retryAfter = typeof data?.retryAfter === "number" ? data.retryAfter : undefined;
+        if (code === "OTP_COOLDOWN") {
+          setOtpError(
+            retryAfter
+              ? `Please wait ${retryAfter}s before requesting another code.`
+              : "Please wait a moment before requesting another code."
+          );
+        } else if (code === "OTP_DAILY_CAP") {
+          setOtpError(
+            "Too many codes requested today. Please contact the organization that invited you."
+          );
+        } else if (code === "NOT_SENDABLE") {
+          setErrorMsg("This assessment link is no longer active.");
+          setPhase("invalid");
+        } else if (code === "LINK_EXPIRED") {
+          setErrorMsg("This link has expired.");
+          setPhase("invalid");
+        } else {
+          setOtpError("Could not send a code. Please try again in a moment.");
+        }
         return;
       }
       setOtpSent(true);
@@ -279,6 +299,17 @@ export default function CandidateFlow({ token }: { token: string }) {
       });
       const data = await readJson(res);
       if (!res.ok) {
+        const code = data?.code as string | undefined;
+        if (code === "LINK_EXPIRED") {
+          setErrorMsg("This link has expired.");
+          setPhase("invalid");
+          return;
+        }
+        if (code === "NOT_VERIFIABLE") {
+          setErrorMsg("This assessment link is no longer active.");
+          setPhase("invalid");
+          return;
+        }
         setOtpError("Could not verify the code. Please try again.");
         return;
       }

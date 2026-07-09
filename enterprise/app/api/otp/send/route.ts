@@ -29,7 +29,17 @@ export async function POST(req: Request) {
   } catch (err) {
     if (err instanceof EntEngineError) {
       console.error("[api/otp/send] engine error", err.status, err.body);
-      return NextResponse.json({ error: "Could not send a code." }, { status: err.status });
+      // Forward ONLY a whitelisted, non-sensitive reason code (+ cooldown
+      // seconds) so the candidate UI can show a precise message. Never echo the
+      // raw engine body.
+      const b = (err.body ?? {}) as { error?: string; retryAfter?: number };
+      const ALLOWED = new Set(["OTP_COOLDOWN", "OTP_DAILY_CAP", "NOT_SENDABLE", "LINK_EXPIRED"]);
+      const code = typeof b.error === "string" && ALLOWED.has(b.error) ? b.error : undefined;
+      const retryAfter = typeof b.retryAfter === "number" ? b.retryAfter : undefined;
+      return NextResponse.json(
+        { error: "Could not send a code.", code, retryAfter },
+        { status: err.status },
+      );
     }
     console.error("[api/otp/send] unexpected error", err);
     return NextResponse.json({ error: "Could not send a code." }, { status: 502 });
