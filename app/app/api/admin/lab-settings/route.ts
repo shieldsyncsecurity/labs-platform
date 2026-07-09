@@ -136,18 +136,22 @@ export async function GET() {
   const user = await getServerUser();
   if (!isAdmin(user)) return NextResponse.json({ error: "not authorized" }, { status: 403 });
 
+  // The page shell is static, so the panel proves its auth state from this
+  // response — return who the server authenticated (short sub, no PII).
+  const admin = user!.id.slice(0, 8);
+
   const { token, owner, canonical } = cfg();
   if (!token) {
     // Not configured yet — serve the build-time bundled copy so the panel still renders.
-    return NextResponse.json({ configured: false, settings: (bundled as { labs?: object }).labs ?? {} });
+    return NextResponse.json({ configured: false, admin, settings: (bundled as { labs?: object }).labs ?? {} });
   }
   try {
     const { content } = await ghGetFile(token, owner, canonical);
     const parsed = content ? (JSON.parse(content) as { labs?: object }) : null;
-    return NextResponse.json({ configured: true, settings: parsed?.labs ?? (bundled as { labs?: object }).labs ?? {} });
+    return NextResponse.json({ configured: true, admin, settings: parsed?.labs ?? (bundled as { labs?: object }).labs ?? {} });
   } catch (e) {
     return NextResponse.json(
-      { configured: true, error: e instanceof Error ? e.message : "GitHub read failed", settings: (bundled as { labs?: object }).labs ?? {} },
+      { configured: true, admin, error: e instanceof Error ? e.message : "GitHub read failed", settings: (bundled as { labs?: object }).labs ?? {} },
       { status: 502 },
     );
   }

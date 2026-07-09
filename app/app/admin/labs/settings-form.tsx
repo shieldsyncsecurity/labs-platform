@@ -56,12 +56,13 @@ function fromDraft(d: Draft): Setting {
 }
 
 const inputCls =
-  "w-full rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink outline-none focus:border-brand";
+  "w-full rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-sm font-medium text-ink shadow-sm outline-none placeholder:font-normal placeholder:text-muted focus:border-brand focus:ring-2 focus:ring-brand/15";
 const selectCls = inputCls + " cursor-pointer";
 
 export function LabSettingsForm({ labs }: { labs: LabCtx[] }) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const [admin, setAdmin] = useState<string>("");
   const [denied, setDenied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -80,9 +81,10 @@ export function LabSettingsForm({ labs }: { labs: LabCtx[] }) {
           }
           return;
         }
-        const d = (await r.json()) as { configured?: boolean; settings?: Record<string, Partial<Setting>>; error?: string };
+        const d = (await r.json()) as { configured?: boolean; admin?: string; settings?: Record<string, Partial<Setting>>; error?: string };
         if (!alive) return;
         setConfigured(!!d.configured);
+        setAdmin(d.admin ?? "");
         const next: Record<string, Draft> = {};
         for (const l of labs) {
           const s = { ...EMPTY, ...(d.settings?.[l.slug] ?? {}) } as Setting;
@@ -144,6 +146,16 @@ export function LabSettingsForm({ labs }: { labs: LabCtx[] }) {
 
   return (
     <div>
+      {/* Explicit auth proof: this chip renders only from the API's authenticated
+          response — the panel must never look anonymous while showing admin data. */}
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/60 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          Signed in as admin{admin ? ` · ${admin}` : ""}
+        </span>
+        <span className="text-xs text-muted">{configured ? "Connected to GitHub — saves commit to both repos" : ""}</span>
+      </div>
+
       {configured === false && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
           <p className="font-semibold">Setup needed — read-only until then.</p>
