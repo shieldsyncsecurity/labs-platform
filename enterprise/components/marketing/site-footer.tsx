@@ -18,13 +18,13 @@ export function SiteFooter() {
             </p>
           </div>
           <nav className="flex flex-wrap gap-x-10 gap-y-3 text-sm">
-            <a href="https://shieldsyncsecurity.com" className="font-medium text-ink-soft hover:text-ink">
+            <a href="https://shieldsyncsecurity.com" className="rounded font-medium text-ink-soft hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
               Main site
             </a>
-            <Link href="/demo/report" className="font-medium text-ink-soft hover:text-ink">
+            <Link href="/demo/report" className="rounded font-medium text-ink-soft hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
               Sample report
             </Link>
-            <a href={CONTACT_MAILTO} className="font-medium text-ink-soft hover:text-ink">
+            <a href={CONTACT_MAILTO} className="rounded font-medium text-ink-soft hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
               Contact
             </a>
           </nav>
@@ -34,13 +34,13 @@ export function SiteFooter() {
             &copy; {new Date().getFullYear()} ShieldSync Security Private Limited. All rights reserved.
           </div>
           <nav className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
-            <Link href="/privacy" className="font-medium text-muted hover:text-ink">
+            <Link href="/privacy" className="rounded font-medium text-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
               Privacy
             </Link>
-            <Link href="/terms" className="font-medium text-muted hover:text-ink">
+            <Link href="/terms" className="rounded font-medium text-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
               Terms
             </Link>
-            <a href="/.well-known/security.txt" className="font-medium text-muted hover:text-ink">
+            <a href="/.well-known/security.txt" className="rounded font-medium text-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
               Security
             </a>
           </nav>

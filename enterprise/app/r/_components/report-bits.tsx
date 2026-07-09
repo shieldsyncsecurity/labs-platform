@@ -35,12 +35,12 @@ export function ReportShell({
               <LockGlyph className="h-3.5 w-3.5 text-brand" />
               Private report
             </span>
-            <a
-              href="https://shieldsyncsecurity.com"
-              className="hidden text-sm font-medium text-muted transition-colors hover:text-ink sm:inline"
+            <Link
+              href="/"
+              className="hidden rounded text-sm font-medium text-muted transition-colors hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand sm:inline"
             >
-              Main site
-            </a>
+              Enterprise home
+            </Link>
           </div>
         </div>
       </header>
@@ -82,10 +82,15 @@ export function ReportHeader({
   eyebrow,
   title,
   meta,
+  as: Heading = "h1",
 }: {
   eyebrow?: React.ReactNode;
   title: React.ReactNode;
   meta?: React.ReactNode;
+  // Semantic level for the title. Defaults to "h1"; pass "h2" when a page
+  // already has an h1 (e.g. the sample report renders a second header inline).
+  // Visual size is unchanged regardless of level.
+  as?: "h1" | "h2";
 }) {
   return (
     <header className="mb-8">
@@ -94,9 +99,9 @@ export function ReportHeader({
           {eyebrow}
         </p>
       ) : null}
-      <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-[2rem] sm:leading-[1.15]">
+      <Heading className="text-2xl font-bold tracking-tight text-ink sm:text-[2rem] sm:leading-[1.15]">
         {title}
-      </h1>
+      </Heading>
       {meta ? <div className="mt-2 text-sm text-muted">{meta}</div> : null}
     </header>
   );
@@ -192,22 +197,22 @@ function GlyphWarn({ className = "" }: { className?: string }) {
  * The honest-MVP-scoring disclosure banner. Every report page must show this
  * near the top — right now only objective "correctness" is computed
  * (criteria pass/fail), so we never render a composite /100 score or a
- * hire-signal verdict. Quality, speed, process, reflection, and integrity
- * are all still "pending" server-side and shown as "Finalizing" here.
+ * hire-signal verdict. The copy states plainly what is scored today and makes
+ * no promise about dimensions that are not yet computed.
  */
 export function PreliminaryBanner() {
   return (
     <div className="flex items-start gap-3 rounded-2xl border border-brand/20 bg-gradient-to-br from-brand/[0.06] to-cyan/[0.04] px-4 py-3.5 text-sm text-ink-soft sm:px-5">
       <span className="mt-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-full bg-brand/10 text-brand">
-        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 animate-pulse" fill="none" aria-hidden="true">
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
           <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.6" />
           <path d="M8 5v3.2l2 1.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
         </svg>
       </span>
       <p>
-        <span className="font-semibold text-brand-strong">Preliminary scoring.</span>{" "}
-        Objective correctness is verified now; quality, speed, process, reflection, and integrity
-        signals are being finalized and will appear here shortly.
+        <span className="font-semibold text-brand-strong">How this is scored.</span>{" "}
+        Reports currently score objective correctness, verified against the live AWS environment
+        each candidate worked in.
       </p>
     </div>
   );
@@ -270,16 +275,19 @@ export function formatDate(value?: string): string {
 export function RankBadge({ rank }: { rank: number }) {
   const isTop = rank === 1;
   return (
-    <span
-      className={
-        isTop
-          ? "inline-flex h-7 w-7 flex-none items-center justify-center rounded-lg bg-brand text-xs font-bold text-white shadow-sm"
-          : "inline-flex h-7 w-7 flex-none items-center justify-center rounded-lg bg-canvas font-mono text-xs font-semibold text-muted ring-1 ring-inset ring-line-strong/60"
-      }
-      aria-hidden="true"
-    >
-      {rank}
-    </span>
+    <>
+      <span className="sr-only">Rank {rank}</span>
+      <span
+        className={
+          isTop
+            ? "inline-flex h-7 w-7 flex-none items-center justify-center rounded-lg bg-brand text-xs font-bold text-white shadow-sm"
+            : "inline-flex h-7 w-7 flex-none items-center justify-center rounded-lg bg-canvas font-mono text-xs font-semibold text-muted ring-1 ring-inset ring-line-strong/60"
+        }
+        aria-hidden="true"
+      >
+        {rank}
+      </span>
+    </>
   );
 }
 

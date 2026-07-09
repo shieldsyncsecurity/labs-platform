@@ -76,16 +76,17 @@ export default async function AdminDashboardPage() {
             </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-line bg-surface">
-              <table className="w-full border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b border-line bg-canvas text-xs uppercase tracking-wide text-muted">
-                    <th className="px-4 py-3 font-semibold">Name</th>
-                    <th className="px-4 py-3 font-semibold">Credits</th>
-                    <th className="px-4 py-3 font-semibold">Status</th>
-                    <th className="px-4 py-3 font-semibold">Created</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-line bg-canvas text-xs uppercase tracking-wide text-muted">
+                      <th scope="col" className="px-4 py-3 font-semibold">Name</th>
+                      <th scope="col" className="px-4 py-3 font-semibold">Credits</th>
+                      <th scope="col" className="px-4 py-3 font-semibold">Status</th>
+                      <th scope="col" className="px-4 py-3 font-semibold">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
                   {orgs.map((org, i) => {
                     const total = org.creditsTotal ?? 0;
                     const used = org.creditsUsed ?? 0;
@@ -127,7 +128,8 @@ export default async function AdminDashboardPage() {
                     );
                   })}
                 </tbody>
-              </table>
+                </table>
+              </div>
             </div>
           )}
         </div>

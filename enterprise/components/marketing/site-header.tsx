@@ -26,7 +26,7 @@ export function SiteHeader() {
             <a
               key={item.href}
               href={item.href}
-              className="rounded-lg px-3 py-2 text-[15px] font-medium text-ink-soft transition-colors hover:text-ink"
+              className="rounded-lg px-3 py-2 text-[15px] font-medium text-ink-soft transition-colors hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
             >
               {item.label}
             </a>
@@ -36,13 +36,13 @@ export function SiteHeader() {
         <div className="flex items-center gap-3">
           <a
             href="https://shieldsyncsecurity.com"
-            className="hidden text-sm font-medium text-muted transition-colors hover:text-ink sm:inline"
+            className="hidden rounded-lg text-sm font-medium text-muted transition-colors hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand sm:inline"
           >
-            Main site
+            shieldsyncsecurity.com
           </a>
           <a
             href={CONTACT_MAILTO}
-            className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong"
+            className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
           >
             Book a walkthrough
           </a>

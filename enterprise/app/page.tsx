@@ -51,7 +51,7 @@ function Hero() {
           <p className="font-mono text-[12px] font-semibold uppercase tracking-[0.18em] text-brand">
             ShieldSync Enterprise &mdash; technical hiring, proven
           </p>
-          <h1 className="mt-5 text-2xl font-bold leading-[1.15] tracking-tight text-ink sm:text-3xl lg:text-4xl">
+          <h1 className="mt-5 text-2xl font-bold leading-[1.15] tracking-tight text-ink sm:text-3xl">
             See candidates secure a real cloud &mdash; before you hire them.
           </h1>
           <p className="mt-6 text-base leading-relaxed text-ink-soft">
@@ -135,15 +135,15 @@ function WhyReal() {
         <table className="w-full min-w-[640px] border-collapse text-left">
           <thead>
             <tr className="border-b border-line">
-              <th className="px-5 py-4 text-sm font-semibold text-ink">Capability</th>
-              <th className="px-5 py-4 text-center text-sm font-semibold text-brand">
+              <th scope="col" className="px-5 py-4 text-sm font-semibold text-ink">Capability</th>
+              <th scope="col" className="px-5 py-4 text-center text-sm font-semibold text-brand">
                 ShieldSync
               </th>
-              <th className="px-5 py-4 text-center text-sm font-medium text-muted">Resume</th>
-              <th className="px-5 py-4 text-center text-sm font-medium text-muted">
+              <th scope="col" className="px-5 py-4 text-center text-sm font-medium text-muted">Resume</th>
+              <th scope="col" className="px-5 py-4 text-center text-sm font-medium text-muted">
                 Whiteboard
               </th>
-              <th className="px-5 py-4 text-center text-sm font-medium text-muted">
+              <th scope="col" className="px-5 py-4 text-center text-sm font-medium text-muted">
                 Quiz platforms
               </th>
             </tr>
@@ -151,7 +151,9 @@ function WhyReal() {
           <tbody>
             {CMP_ROWS.map((row, i) => (
               <tr key={row} className="border-b border-line last:border-b-0">
-                <td className="px-5 py-4 text-[15px] text-ink-soft">{row}</td>
+                <th scope="row" className="px-5 py-4 text-left text-[15px] font-normal text-ink-soft">
+                  {row}
+                </th>
                 {CMP_CELLS[i].map((cell, j) => (
                   <td key={j} className="px-5 py-4 text-center">
                     <CmpMark value={cell} strong={j === 0} />
@@ -205,7 +207,7 @@ function CmpMark({ value, strong }: { value: "yes" | "no" | "partial"; strong?: 
   }
   return (
     <span
-      className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-50 text-line-strong"
+      className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-50 text-muted"
       aria-label="No"
     >
       <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3" aria-hidden="true">

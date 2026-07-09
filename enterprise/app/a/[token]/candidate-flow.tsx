@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ShieldMark } from "@/components/brand";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -59,6 +60,16 @@ const CONSENT_VERSION = "v1";
 // Hard grace period after the room timer expires: the candidate gets this long
 // on the reflection card before we auto-submit for them.
 const GRACE_MS = 5 * 60 * 1000;
+
+// Shared button styles. The candidate room is app UI (rounded-lg, not marketing
+// pills) and every action needs a visible keyboard focus ring. Defined once so
+// the styles never drift across the cards below.
+const FOCUS_RING =
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand";
+const BTN_PRIMARY =
+  `rounded-lg bg-brand px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`;
+const BTN_SECONDARY =
+  `rounded-lg border border-line-strong px-6 py-3 text-sm font-semibold text-ink-soft transition-colors hover:border-brand hover:text-brand-strong ${FOCUS_RING}`;
 
 function isPast(iso?: string): boolean {
   if (!iso) return false;
@@ -119,6 +130,7 @@ export default function CandidateFlow({ token }: { token: string }) {
   const [otpError, setOtpError] = useState<string | null>(null);
   const [otpSent, setOtpSent] = useState(false);
   const [devCode, setDevCode] = useState<string | null>(null);
+  const [resendNotice, setResendNotice] = useState(false);
 
   // schedule
   const [slots, setSlots] = useState<SlotOption[] | null>(null);
@@ -255,9 +267,10 @@ export default function CandidateFlow({ token }: { token: string }) {
   };
 
   // ── Phase 3: otp ────────────────────────────────────────────────────
-  const sendOtp = useCallback(async () => {
+  const sendOtp = useCallback(async (isResend = false) => {
     setOtpBusy(true);
     setOtpError(null);
+    setResendNotice(false);
     try {
       const res = await fetch("/api/otp/send", {
         method: "POST",
@@ -290,6 +303,10 @@ export default function CandidateFlow({ token }: { token: string }) {
         return;
       }
       setOtpSent(true);
+      if (isResend) {
+        setResendNotice(true);
+        setTimeout(() => setResendNotice(false), 6000);
+      }
       if (data?.devCode) {
         setDevCode(data.devCode);
         setOtpCode(data.devCode);
@@ -667,6 +684,7 @@ export default function CandidateFlow({ token }: { token: string }) {
   return (
     <div className="mx-auto flex min-h-screen max-w-xl flex-col px-4 py-10 sm:py-16">
       <header className="mb-8 text-center">
+        <ShieldMark size={30} className="mx-auto mb-3 block" />
         <p className="text-xs font-semibold uppercase tracking-wide text-brand">ShieldSync Assessment</p>
         <h1 className="mt-1 text-2xl font-bold text-ink">
           {invite?.name || "Security Assessment"}
@@ -697,10 +715,11 @@ export default function CandidateFlow({ token }: { token: string }) {
             code={otpCode}
             onCodeChange={setOtpCode}
             onVerify={handleVerifyOtp}
-            onResend={sendOtp}
+            onResend={() => sendOtp(true)}
             busy={otpBusy}
             error={otpError}
             sent={otpSent}
+            resent={resendNotice}
             devCode={devCode}
           />
         )}
@@ -749,6 +768,7 @@ export default function CandidateFlow({ token }: { token: string }) {
             reflection={reflection}
             onChange={setReflection}
             onSubmit={() => handleSubmit()}
+            onBack={() => setPhase("room")}
             busy={submitBusy}
             error={errorMsg}
             graceCountdown={graceDeadline !== null ? formatCountdown(graceLeftMs ?? GRACE_MS) : null}
@@ -792,11 +812,7 @@ function ResumeErrorCard({ message, onRetry }: { message: string; onRetry: () =>
           submission.
         </p>
       </div>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="rounded-full bg-brand px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong"
-      >
+      <button type="button" onClick={onRetry} className={BTN_PRIMARY}>
         Retry
       </button>
     </div>
@@ -839,8 +855,8 @@ function ConsentCard({
         <p className="font-medium text-ink">Before you continue</p>
         <p className="mt-1">
           During this assessment we record the actions you take in a temporary AWS account and
-          retain the results for 24 months, shared with {orgName}. Sub-processors: AWS, Google
-          (Gemini), Amazon SES.
+          retain the results for 24 months, shared with {orgName}. Sub-processors: AWS,
+          Cloudflare, and Google (Gemini).
         </p>
         <p className="mt-2">
           See our{" "}
@@ -875,14 +891,9 @@ function ConsentCard({
         <span>I understand and consent.</span>
       </label>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-rose-700">{error}</p>}
 
-      <button
-        type="button"
-        disabled={!checked || busy}
-        onClick={onContinue}
-        className="rounded-full bg-brand px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <button type="button" disabled={!checked || busy} onClick={onContinue} className={BTN_PRIMARY}>
         {busy ? "Saving..." : "Continue"}
       </button>
     </div>
@@ -897,6 +908,7 @@ function OtpCard({
   busy,
   error,
   sent,
+  resent,
   devCode,
 }: {
   code: string;
@@ -906,6 +918,7 @@ function OtpCard({
   busy: boolean;
   error: string | null;
   sent: boolean;
+  resent: boolean;
   devCode: string | null;
 }) {
   return (
@@ -917,6 +930,11 @@ function OtpCard({
             ? "We sent a 6-digit code to your email."
             : "Sending a 6-digit code to your email..."}
         </p>
+        {resent && (
+          <p className="mt-2 rounded-md border border-brand/40 bg-brand/5 px-3 py-2 text-sm text-brand-strong">
+            A new code is on its way to your email.
+          </p>
+        )}
         {devCode && (
           <p className="mt-2 rounded-md bg-canvas px-3 py-2 font-mono text-xs text-muted">
             Dev mode code: {devCode}
@@ -929,18 +947,15 @@ function OtpCard({
         maxLength={6}
         placeholder="000000"
         value={code}
+        aria-label="6-digit verification code"
+        autoComplete="one-time-code"
         onChange={(e) => onCodeChange(e.target.value.replace(/\D/g, "").slice(0, 6))}
-        className="w-full rounded-lg border border-line-strong px-4 py-3 text-center text-lg tracking-[0.5em] text-ink outline-none focus:border-brand"
+        className="w-full rounded-lg border border-line-strong px-4 py-3 text-center text-lg tracking-[0.5em] text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
       />
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-rose-700">{error}</p>}
 
-      <button
-        type="button"
-        disabled={code.length !== 6 || busy}
-        onClick={onVerify}
-        className="rounded-full bg-brand px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <button type="button" disabled={code.length !== 6 || busy} onClick={onVerify} className={BTN_PRIMARY}>
         {busy ? "Verifying..." : "Verify"}
       </button>
 
@@ -948,7 +963,7 @@ function OtpCard({
         type="button"
         disabled={busy}
         onClick={onResend}
-        className="text-sm font-medium text-brand hover:text-brand-strong disabled:opacity-50"
+        className={`rounded text-sm font-medium text-brand hover:text-brand-strong disabled:opacity-50 ${FOCUS_RING}`}
       >
         Resend code
       </button>
@@ -1002,13 +1017,19 @@ function ScheduleCard({
         </p>
       </div>
 
-      <div className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
+      <div
+        role="radiogroup"
+        aria-label="Available times"
+        className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2"
+      >
         {slots?.map((s) => (
           <button
             key={s.key}
             type="button"
+            role="radio"
+            aria-checked={selected === s.key}
             onClick={() => onSelect(s.key)}
-            className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+            className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${FOCUS_RING} ${
               selected === s.key
                 ? "border-brand bg-brand/5 text-brand-strong"
                 : "border-line text-ink-soft hover:border-brand"
@@ -1019,14 +1040,9 @@ function ScheduleCard({
         ))}
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-rose-700">{error}</p>}
 
-      <button
-        type="button"
-        disabled={!selected || busy}
-        onClick={onBook}
-        className="rounded-full bg-brand px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <button type="button" disabled={!selected || busy} onClick={onBook} className={BTN_PRIMARY}>
         {busy ? "Booking..." : "Book this time"}
       </button>
     </div>
@@ -1070,14 +1086,9 @@ function ReadyCard({
         </p>
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-rose-700">{error}</p>}
 
-      <button
-        type="button"
-        disabled={busy}
-        onClick={onStart}
-        className="rounded-full bg-brand px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <button type="button" disabled={busy} onClick={onStart} className={BTN_PRIMARY}>
         {busy ? "Starting..." : "Start assessment"}
       </button>
     </div>
@@ -1140,16 +1151,12 @@ function RoomCard({
         href={consoleUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="rounded-full bg-brand px-6 py-3 text-center text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong"
+        className={`text-center ${BTN_PRIMARY}`}
       >
         Open AWS Console
       </a>
 
-      <button
-        type="button"
-        onClick={onSubmit}
-        className="rounded-full border border-line-strong px-6 py-3 text-sm font-semibold text-ink-soft transition-colors hover:border-brand hover:text-brand-strong"
-      >
+      <button type="button" onClick={onSubmit} className={BTN_SECONDARY}>
         Submit assessment
       </button>
     </div>
@@ -1160,6 +1167,7 @@ function ReflectionCard({
   reflection,
   onChange,
   onSubmit,
+  onBack,
   busy,
   error,
   graceCountdown,
@@ -1167,6 +1175,7 @@ function ReflectionCard({
   reflection: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
+  onBack: () => void;
   busy: boolean;
   error: string | null;
   graceCountdown: string | null;
@@ -1192,20 +1201,22 @@ function ReflectionCard({
         rows={6}
         value={reflection}
         onChange={(e) => onChange(e.target.value)}
+        aria-label="Your reflection"
         placeholder="Describe what you found and how you addressed it..."
-        className="w-full rounded-lg border border-line-strong px-4 py-3 text-sm text-ink outline-none focus:border-brand"
+        className="w-full rounded-lg border border-line-strong px-4 py-3 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
       />
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-rose-700">{error}</p>}
 
-      <button
-        type="button"
-        disabled={busy}
-        onClick={onSubmit}
-        className="rounded-full bg-brand px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <button type="button" disabled={busy} onClick={onSubmit} className={BTN_PRIMARY}>
         {busy ? "Submitting..." : "Submit"}
       </button>
+
+      {graceCountdown === null && (
+        <button type="button" onClick={onBack} className={BTN_SECONDARY}>
+          Back to the task
+        </button>
+      )}
     </div>
   );
 }

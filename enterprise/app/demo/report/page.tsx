@@ -3,7 +3,6 @@ import {
   Bar,
   PassBadge,
   PreliminaryBanner,
-  FinalizingPill,
   ReportHeader,
   ReportShell,
   WalkthroughCta,
@@ -61,10 +60,15 @@ const DETAIL_REFLECTION =
   "bucket policy. For IAM, I replaced the wildcard with the five actions the pipeline actually uses, " +
   "scoped to the bucket ARN, and detached the admin policy so a leaked key can't escalate.";
 
+// Same contact target as the marketing homepage's "Book a walkthrough" CTA.
+const CONTACT_WALKTHROUGH =
+  "mailto:info@shieldsyncsecurity.com?subject=" +
+  encodeURIComponent("ShieldSync Enterprise - walkthrough");
+
 function SampleRibbon() {
   return (
-    <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3.5 text-sm text-amber-900 sm:px-5">
-      <span className="mt-0.5 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200">
+    <div className="flex items-start gap-3 rounded-2xl border border-brand/20 bg-brand/[0.06] px-4 py-3.5 text-sm text-brand-strong sm:px-5">
+      <span className="mt-0.5 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full bg-brand/10 text-brand ring-1 ring-inset ring-brand/20">
         <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
           <path d="M8 2.5l6 11H2l6-11z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
           <path d="M8 6.5v3.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
@@ -82,7 +86,7 @@ function SampleRibbon() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-line bg-surface px-4 py-3 shadow-sm">
+    <div className="rounded-2xl border border-line bg-surface px-4 py-3 shadow-sm">
       <div className="text-lg font-bold tabular-nums text-ink">{value}</div>
       <div className="mt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted">{label}</div>
     </div>
@@ -103,6 +107,12 @@ export default function DemoReportPage() {
       ? sortedTimes[(sortedTimes.length - 1) / 2]
       : Math.round((sortedTimes[sortedTimes.length / 2 - 1] + sortedTimes[sortedTimes.length / 2]) / 2)
     : 0;
+
+  const top = rows[0];
+  const pcts = rows.map(({ pct }) => pct);
+  const minPct = pcts.length ? Math.min(...pcts) : 0;
+  const maxPct = pcts.length ? Math.max(...pcts) : 0;
+  const fullPass = rows.filter(({ pct }) => pct === 100).length;
 
   const detailPassed = DETAIL_CRITERIA.filter((x) => x.passed).length;
   const detailPct = correctnessPct(detailPassed, DETAIL_CRITERIA.length);
@@ -131,6 +141,24 @@ export default function DemoReportPage() {
         <span><span className="font-semibold text-ink">Time limit:</span> {ASSESSMENT.timeLimitMin} min</span>
         <span><span className="font-semibold text-ink">Environment:</span> {ASSESSMENT.environment}</span>
       </div>
+
+      {/* Verdict first: the plain-language takeaway a hiring panel wants before
+          the table -- who led and how the field did. Verified facts only
+          (objective correctness + timing); never a hire / no-hire call. */}
+      <section className="mb-6 overflow-hidden rounded-2xl border border-brand/25 bg-gradient-to-br from-brand/[0.07] via-surface to-cyan/[0.04] p-5 shadow-sm sm:p-6">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand">
+          At a glance
+        </p>
+        <p className="mt-2 text-lg font-bold leading-snug text-ink sm:text-xl">
+          {top.c.name} leads with {top.c.passedCount} of {top.c.totalCriteria} objectives passed,
+          in {top.c.timeUsedMin} of {ASSESSMENT.timeLimitMin} min.
+        </p>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-ink-soft">
+          {total} of {ASSESSMENT.invited} invited completed the assessment. Verified scores ranged{" "}
+          {minPct}% to {maxPct}% (avg {avgPct}%), and {fullPass} candidate{fullPass === 1 ? "" : "s"}{" "}
+          passed every objective.
+        </p>
+      </section>
 
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
         <StatCard label="Invited" value={String(ASSESSMENT.invited)} />
@@ -163,6 +191,7 @@ export default function DemoReportPage() {
 
       <div id="candidate-report" className="mx-auto max-w-3xl scroll-mt-24">
         <ReportHeader
+          as="h2"
           eyebrow="Candidate report"
           title="Priya S."
           meta={
@@ -172,22 +201,18 @@ export default function DemoReportPage() {
           }
         />
 
-        <div className="mb-8">
-          <PreliminaryBanner />
-        </div>
-
         <section className="mb-8 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
           <div className="border-b border-line bg-gradient-to-br from-brand/[0.05] to-cyan/[0.03] px-6 py-6 sm:px-8">
-            <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand">
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand">
               Objective correctness
-            </h3>
+            </h2>
             <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
               <div className="flex items-baseline gap-3">
-                <span className="text-5xl font-bold tabular-nums leading-none text-ink">{detailPassed}</span>
+                <span className="text-3xl font-bold tabular-nums leading-none text-ink">{detailPassed}</span>
                 <span className="text-2xl font-semibold tabular-nums text-muted">/ {DETAIL_CRITERIA.length}</span>
                 <span className="ml-1 text-sm text-ink-soft">objectives passed</span>
               </div>
-              <span className="text-4xl font-bold tabular-nums text-brand">{detailPct}%</span>
+              <span className="text-2xl font-bold tabular-nums text-brand">{detailPct}%</span>
             </div>
             <div className="mt-5">
               <Bar pct={detailPct} />
@@ -197,7 +222,7 @@ export default function DemoReportPage() {
 
         <section className="mb-8">
           <div className="mb-3 flex items-baseline justify-between">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Objective breakdown</h3>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Objective breakdown</h2>
             <span className="font-mono text-xs text-muted">
               {detailPassed}/{DETAIL_CRITERIA.length} passed
             </span>
@@ -218,7 +243,7 @@ export default function DemoReportPage() {
         </section>
 
         <section className="mb-8">
-          <h3 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted">Written reflection</h3>
+          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted">Written reflection</h2>
           <p className="mb-3 text-xs leading-relaxed text-muted">
             The candidate&apos;s own 3–5 sentence account of what they found and how they fixed it —
             proof they understood the problem, not just clicked through it.
@@ -231,25 +256,6 @@ export default function DemoReportPage() {
               />
               {DETAIL_REFLECTION}
             </blockquote>
-            <p className="mt-5 flex items-center gap-2 border-t border-line/70 pt-4 text-xs text-muted">
-              <span>AI reflection scoring</span>
-              <FinalizingPill />
-            </p>
-          </div>
-        </section>
-
-        <section className="mb-12">
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Other dimensions</h3>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {["Solution quality", "Speed", "Process", "Integrity"].map((d) => (
-              <div
-                key={d}
-                className="flex flex-col items-start gap-2.5 rounded-xl border border-line bg-surface p-4 shadow-sm"
-              >
-                <span className="text-sm font-medium text-ink">{d}</span>
-                <FinalizingPill />
-              </div>
-            ))}
           </div>
         </section>
       </div>
@@ -269,7 +275,7 @@ export default function DemoReportPage() {
             and you get a verified, side-by-side report. No résumé guesswork.
           </p>
           <div className="mt-6">
-            <WalkthroughCta href="/" internal label="Book a walkthrough" />
+            <WalkthroughCta href={CONTACT_WALKTHROUGH} label="Book a walkthrough" />
           </div>
         </div>
       </div>

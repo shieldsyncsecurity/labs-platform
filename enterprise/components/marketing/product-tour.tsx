@@ -142,8 +142,10 @@ export function ProductTour() {
 
         {/* ------------------------------------------------ SCENE VIEWPORT */}
         <div
+          id="pt-panel"
+          role="tabpanel"
+          aria-labelledby={`pt-tab-${active}`}
           className="relative aspect-[16/10] w-full overflow-hidden bg-canvas"
-          aria-live="polite"
         >
           <div key={cycle} className="pt-scene absolute inset-0">
             {active === 0 && <SceneInvite animate={animate} />}
@@ -186,9 +188,11 @@ export function ProductTour() {
             return (
               <button
                 key={s.tab}
+                id={`pt-tab-${i}`}
                 type="button"
                 role="tab"
                 aria-selected={isActive}
+                aria-controls="pt-panel"
                 aria-label={`Stage ${i + 1}: ${s.tab}`}
                 onClick={() => jumpTo(i)}
                 className={`group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand ${
@@ -204,7 +208,7 @@ export function ProductTour() {
                 >
                   {i + 1}
                 </span>
-                <span className="hidden sm:inline">{s.tab}</span>
+                <span className="text-[11px]">{s.tab}</span>
               </button>
             );
           })}

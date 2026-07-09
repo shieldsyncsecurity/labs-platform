@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 import {
   Bar,
-  FinalizingPill,
   PassBadge,
   PreliminaryBanner,
   ReportHeader,
@@ -92,7 +91,6 @@ export default async function CandidateReportPage({
   const pct = correctnessPct(result.passedCount, result.totalCriteria);
   const criteria = Array.isArray(result.criteria) ? result.criteria : [];
   const reflectionText = result.reflectionText?.trim();
-  const dims = result.dims ?? {};
 
   const passedCriteria = criteria.filter((c) => c?.passed).length;
 
@@ -120,7 +118,7 @@ export default async function CandidateReportPage({
             </h2>
             <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
               <div className="flex items-baseline gap-3">
-                <span className="text-5xl font-bold tabular-nums leading-none text-ink">
+                <span className="text-3xl font-bold tabular-nums leading-none text-ink">
                   {total ? passed : "—"}
                 </span>
                 {total ? (
@@ -128,7 +126,7 @@ export default async function CandidateReportPage({
                 ) : null}
                 <span className="ml-1 text-sm text-ink-soft">objectives passed</span>
               </div>
-              <span className="text-4xl font-bold tabular-nums text-brand">{pct}%</span>
+              <span className="text-2xl font-bold tabular-nums text-brand">{pct}%</span>
             </div>
             <div className="mt-5">
               <Bar pct={pct} />
@@ -195,38 +193,7 @@ export default async function CandidateReportPage({
             ) : (
               <p className="text-ink-soft">No written reflection submitted.</p>
             )}
-            <p className="mt-5 flex items-center gap-2 border-t border-line/70 pt-4 text-xs text-muted">
-              <span>AI reflection scoring</span>
-              <FinalizingPill />
-            </p>
           </div>
-        </section>
-
-        <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
-            Other dimensions
-          </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {(
-              [
-                ["Quality", dims.quality],
-                ["Speed", dims.speed],
-                ["Process", dims.process],
-                ["Integrity", result.integrity],
-              ] as const
-            ).map(([label]) => (
-              <div
-                key={label}
-                className="flex flex-col items-start gap-2.5 rounded-xl border border-line bg-surface p-4 shadow-sm"
-              >
-                <span className="text-sm font-medium text-ink">{label}</span>
-                <FinalizingPill />
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-xs text-muted">
-            These signals are computed after correctness and will populate automatically.
-          </p>
         </section>
       </div>
     </ReportShell>
