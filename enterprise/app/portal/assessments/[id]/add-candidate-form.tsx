@@ -14,11 +14,14 @@ export default function AddCandidateForm({ assessmentId }: { assessmentId: strin
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newLink, setNewLink] = useState<string | null>(null);
+  const [emailLink, setEmailLink] = useState(true);
+  const [emailedTo, setEmailedTo] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setNewLink(null);
+    setEmailedTo(null);
 
     const trimmedName = name.trim();
     const trimmedEmail = email.trim();
@@ -36,6 +39,7 @@ export default function AddCandidateForm({ assessmentId }: { assessmentId: strin
           assessmentId,
           candidateName: trimmedName,
           candidateEmail: trimmedEmail,
+          sendLink: emailLink,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -50,6 +54,7 @@ export default function AddCandidateForm({ assessmentId }: { assessmentId: strin
         const origin = typeof window !== "undefined" ? window.location.origin : "";
         setNewLink(`${origin}/a/${inviteToken}`);
       }
+      setEmailedTo(data?.emailed === true ? trimmedEmail : null);
       setName("");
       setEmail("");
       setPending(false);
@@ -96,6 +101,16 @@ export default function AddCandidateForm({ assessmentId }: { assessmentId: strin
         </button>
       </form>
 
+      <label className="mt-3 flex items-center gap-2 text-xs text-ink-soft">
+        <input
+          type="checkbox"
+          checked={emailLink}
+          onChange={(e) => setEmailLink(e.target.checked)}
+          className="h-3.5 w-3.5 rounded border-line-strong"
+        />
+        Email the candidate their link automatically
+      </label>
+
       <p className="mt-2 text-xs text-muted">Each invite uses 1 credit.</p>
 
       {error ? <p className="mt-2 text-sm text-rose-700">{error}</p> : null}
@@ -103,7 +118,11 @@ export default function AddCandidateForm({ assessmentId }: { assessmentId: strin
       {newLink ? (
         <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold text-emerald-800">Candidate link ready — send it yourself:</p>
+            <p className="text-xs font-semibold text-emerald-800">
+              {emailedTo
+                ? `Invitation emailed to ${emailedTo}`
+                : "Candidate link ready — send it to the candidate:"}
+            </p>
             <p className="truncate font-mono text-xs text-emerald-900">{newLink}</p>
           </div>
           <CopyButton value={newLink} label="Copy link" />

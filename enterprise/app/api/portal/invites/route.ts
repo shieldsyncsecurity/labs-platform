@@ -6,7 +6,10 @@ type CreateInviteBody = {
   assessmentId?: string;
   candidateName?: string;
   candidateEmail?: string;
+  sendLink?: boolean;
 };
+
+const APP_URL = process.env.APP_URL ?? "https://enterprise.shieldsyncsecurity.com";
 
 type Assessment = {
   assessmentId?: string;
@@ -62,6 +65,10 @@ export async function POST(req: Request) {
   // Cap the name to a sane length (defence against oversized/abusive input).
   const candidateName = rawName.slice(0, MAX_NAME_LEN);
 
+  // Whether to have the platform email the candidate their magic link (vs the
+  // employer copying + sending it themselves). Opt-in from the form.
+  const sendLink = body.sendLink === true;
+
   // Caller-supplied idempotency key. The engine now REQUIRES an inviteToken on
   // create so a double-click / retry maps to the SAME invite instead of
   // burning a second credit. Generate an unguessable one here.
@@ -83,7 +90,7 @@ export async function POST(req: Request) {
   try {
     const result = await entFetch("/ent/invites", {
       method: "POST",
-      body: { assessmentId, orgId, candidateName, candidateEmail, inviteToken },
+      body: { assessmentId, orgId, candidateName, candidateEmail, inviteToken, sendLink, appUrl: APP_URL },
     });
     return NextResponse.json(result);
   } catch (err) {

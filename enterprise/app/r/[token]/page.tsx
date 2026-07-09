@@ -28,6 +28,7 @@ export const dynamic = "force-dynamic";
 type ResultRow = {
   assessmentId?: string;
   inviteToken?: string;
+  candidateName?: string | null;
   composite?: number;
   correctness?: number;
   dims?: Record<string, string>;
@@ -137,9 +138,12 @@ export default async function AssessmentReportPage({
               <tbody>
                 {rows.map(({ row, pct }, i) => {
                   const rank = i + 1;
-                  const label = row?.inviteToken
-                    ? `${row.inviteToken.slice(0, 8)}…`
-                    : `candidate-${rank}`;
+                  const label =
+                    row?.candidateName && row.candidateName.trim()
+                      ? row.candidateName.trim()
+                      : row?.inviteToken
+                        ? `${row.inviteToken.slice(0, 8)}…`
+                        : `candidate-${rank}`;
                   const passed = row?.passedCount ?? 0;
                   const totalCriteria = row?.totalCriteria ?? 0;
                   const hasReflection = Boolean(
@@ -153,7 +157,7 @@ export default async function AssessmentReportPage({
                       <td className="px-5 py-4">
                         <RankBadge rank={rank} />
                       </td>
-                      <td className="px-5 py-4 font-mono text-[13px] font-medium text-ink">{label}</td>
+                      <td className="px-5 py-4 text-sm font-medium text-ink">{label}</td>
                       <td className="px-5 py-4 tabular-nums text-ink-soft">
                         {totalCriteria ? `${passed} / ${totalCriteria}` : "—"}
                       </td>
@@ -197,8 +201,8 @@ export default async function AssessmentReportPage({
 
       <p className="mt-6 text-xs leading-relaxed text-muted">
         Candidates are ranked by verified objective correctness on a real, isolated AWS environment.
-        Labels above are shortened invite IDs — each candidate&apos;s full name and detailed breakdown
-        live on their individual report link (sent separately per candidate).
+        Each candidate&apos;s full per-objective breakdown and written reasoning is on their individual
+        report link.
       </p>
     </ReportShell>
   );
