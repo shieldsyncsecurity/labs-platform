@@ -29,6 +29,12 @@ import {
   refundInvite,
   revokeInvite,
   eraseCandidatePii,
+  revokeAssessmentReport,
+  renewAssessmentReport,
+  revokeCandidateReport,
+  renewCandidateReport,
+  stampLowCreditNotified,
+  appendProblem,
   setOtp,
   verifyOtp,
   bookSlot,
@@ -102,6 +108,60 @@ function resp(statusCode, body) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   };
+}
+
+// Ops inbox for internal notifications (low-credit alerts, candidate disputes).
+const OPS_EMAIL = "info@shieldsyncsecurity.com";
+
+// sendOpsEmail(): short plain-text SES email to the ops inbox, same from-address
+// + client as the OTP sends. STRICTLY best-effort: a send failure is logged and
+// swallowed -- it must NEVER fail the parent operation (invite charge, problem
+// report). Returns whether the send succeeded so callers can report `emailed`.
+async function sendOpsEmail(subject, text) {
+  const from = process.env.ENT_OTP_FROM;
+  if (!from) return false;
+  try {
+    await ses.send(
+      new SendEmailCommand({
+        Source: from,
+        Destination: { ToAddresses: [OPS_EMAIL] },
+        Message: {
+          Subject: { Data: subject },
+          Body: { Text: { Data: text } },
+        },
+      })
+    );
+    return true;
+  } catch (e) {
+    console.error("[ent] ops email send failed:", e.name, e.message);
+    return false;
+  }
+}
+
+// cleanActor(): sanitize the caller-supplied audit identity (E9). The app injects
+// the staff email server-side; clamp to a short plain string and fall back so
+// existing callers that don't send it keep working.
+function cleanActor(v, fallback = "admin") {
+  return typeof v === "string" && v.trim() ? v.trim().slice(0, 120) : fallback;
+}
+
+// reportDead(): report-token lifecycle check (E1). Revocation always wins; a
+// missing expiry field (rows created before the field existed) means valid.
+function reportDead(revokedAt, expiresAt) {
+  if (revokedAt) return true;
+  if (expiresAt && new Date(expiresAt) < new Date()) return true;
+  return false;
+}
+
+// E3: invite status -> employer-facing roster label. `expired` is the same
+// expiresAt test the candidate endpoints 410 on; a submitted attempt is final
+// and never relabeled Expired.
+function rosterLabel(status, expired) {
+  if (status === "submitted") return "Submitted";
+  if (expired) return "Expired";
+  if (status === "started") return "In progress";
+  if (status === "booked") return "Scheduled";
+  return "Invited"; // created / consented / verified
 }
 
 // ── Async worker actions (deploy + teardown) ─────────────────────────────
@@ -227,11 +287,11 @@ export async function handler(event) {
     // ── admin/org (called by ShieldSync admin UI) ─────────────────────────
     if (method === "POST" && path === "/ent/orgs") {
       const org = await createOrg(parsed);
-      // Attributable audit trail (Batch L) - greppable structured line to
-      // CloudWatch on this privileged mutation. `actor` is the authenticated admin
-      // email the app passes through; null if not supplied.
+      // Attributable audit trail (Batch L / E9) - greppable structured line to
+      // CloudWatch on this privileged mutation. `actor` is the staff email the app
+      // injects server-side; sanitized, defaulting to "admin" for legacy callers.
       console.log(
-        JSON.stringify({ audit: true, action: "org.create", actor: parsed.actor ?? null, orgId: org?.orgId ?? null, at: Date.now() })
+        JSON.stringify({ audit: true, action: "org.create", actor: cleanActor(parsed.actor), orgId: org?.orgId ?? null, at: Date.now() })
       );
       return resp(200, org);
     }
@@ -249,19 +309,27 @@ export async function handler(event) {
     }
 
     if (method === "POST" && path === "/ent/orgs/credits") {
-      const { orgId, delta, actor } = parsed;
+      const { orgId, delta } = parsed;
+      const actor = cleanActor(parsed.actor);
+      // Optional free-text reason (E9) for the audit trail -- clamped, never stored
+      // in DynamoDB, only in the immutable CloudWatch audit line.
+      const reason =
+        typeof parsed.reason === "string" && parsed.reason.trim()
+          ? parsed.reason.trim().slice(0, 300)
+          : null;
       const org = await addCredits(orgId, delta);
-      // Attributable audit trail (Batch L) - every credit adjustment is logged with
-      // the acting admin so a balance change is never anonymous. Immutable in
-      // CloudWatch; no new table required.
+      // Attributable audit trail (Batch L / E9) - every credit adjustment is logged
+      // with the acting staff email + reason so a balance change is never anonymous.
+      // Immutable in CloudWatch; no new table required.
       console.log(
-        JSON.stringify({ audit: true, action: "credits.adjust", actor: actor ?? null, orgId, delta, at: Date.now() })
+        JSON.stringify({ audit: true, action: "credits.adjust", actor, reason, orgId, delta, at: Date.now() })
       );
       return resp(200, org);
     }
 
     if (method === "POST" && path === "/ent/orgs/delete") {
-      const { orgId, actor } = parsed;
+      const { orgId } = parsed;
+      const actor = cleanActor(parsed.actor);
       const org = await getOrg(orgId);
       if (!org) return resp(404, { error: "not found" });
       // Refuse to delete an org that has assessments -- those carry candidate PII
@@ -274,7 +342,7 @@ export async function handler(event) {
       }
       await deleteOrg(orgId);
       console.log(
-        JSON.stringify({ audit: true, action: "org.delete", actor: actor ?? null, orgId, at: Date.now() })
+        JSON.stringify({ audit: true, action: "org.delete", actor, orgId, at: Date.now() })
       );
       return resp(200, { ok: true });
     }
@@ -284,12 +352,13 @@ export async function handler(event) {
     // protects the route itself. Redacts the candidate's PII in place (see
     // eraseCandidatePii) and logs an attributable audit line.
     if (method === "POST" && path === "/ent/invites/erase") {
-      const { inviteToken, actor } = parsed;
+      const { inviteToken } = parsed;
+      const actor = cleanActor(parsed.actor);
       if (!inviteToken) return resp(400, { error: "INVITE_TOKEN_REQUIRED" });
       const r = await eraseCandidatePii(inviteToken);
       if (!r.ok) return resp(404, { error: "INVITE_NOT_FOUND" });
       console.log(
-        JSON.stringify({ audit: true, action: "candidate.erase", actor: actor ?? null, inviteToken, at: Date.now() })
+        JSON.stringify({ audit: true, action: "candidate.erase", actor, inviteToken, at: Date.now() })
       );
       return resp(200, { ok: true, erasedAt: r.erasedAt });
     }
@@ -313,7 +382,7 @@ export async function handler(event) {
     }
 
     if (method === "POST" && path === "/ent/invites") {
-      const { assessmentId, orgId, candidateName, candidateEmail } = parsed;
+      const { assessmentId, orgId, candidateName, candidateEmail, sendLink, appUrl } = parsed;
       // inviteToken MUST be caller-supplied (the app mints it once via newToken()
       // and reuses it on retry) so the credit-ledger charge is idempotent. Minting
       // a fresh token here on a missing value would make a retried create a SECOND
@@ -324,7 +393,70 @@ export async function handler(event) {
         return resp(400, { error: "INVITE_TOKEN_REQUIRED" });
       }
       const result = await createInvite({ assessmentId, orgId, candidateName, candidateEmail, inviteToken });
-      return resp(200, result);
+      // Optionally email the candidate their personal magic link (employer opted
+      // in). Best-effort: NEVER fail invite creation on a send error (the credit
+      // is already spent and the link still works via copy) -- report `emailed`
+      // so the UI can tell the employer whether to send it themselves. In the SES
+      // sandbox this only reaches verified recipients.
+      let emailed = false;
+      const from = process.env.ENT_OTP_FROM;
+      // Send ONLY on the first successful create (an idempotent replay must not
+      // re-email), and ONLY ever linking to our own app origin -- appUrl is
+      // caller input and must not let a leaked engine secret turn SES into a
+      // phishing sender from our identity. candidateName is HTML-escaped for
+      // the same reason.
+      const appOrigin = (process.env.ENT_APP_URL || "https://enterprise.shieldsyncsecurity.com").replace(/\/+$/, "");
+      if (result.creditConsumed && sendLink && candidateEmail && from) {
+        const link = `${appOrigin}/a/${inviteToken}`;
+        const rawWho = typeof candidateName === "string" && candidateName.trim() ? candidateName.trim() : "there";
+        const who = rawWho.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+        try {
+          await ses.send(
+            new SendEmailCommand({
+              Source: from,
+              Destination: { ToAddresses: [candidateEmail] },
+              Message: {
+                Subject: { Data: "You have been invited to a ShieldSync assessment" },
+                Body: {
+                  Text: {
+                    Data: `Hi ${rawWho},\n\nYou have been invited to complete a hands-on cloud security assessment in a real, isolated AWS environment.\n\nStart your assessment: ${link}\n\nThis link is personal to you. If you were not expecting this, you can ignore this email.`,
+                  },
+                  Html: {
+                    Data: `<div style="font-family:system-ui,sans-serif;color:#0f172a;max-width:520px"><p>Hi ${who},</p><p>You have been invited to complete a hands-on cloud security assessment in a real, isolated AWS environment.</p><p><a href="${link}" style="display:inline-block;background:#d97706;color:#fff;padding:11px 20px;border-radius:8px;text-decoration:none;font-weight:600">Start your assessment</a></p><p style="color:#64748b;font-size:13px">Or paste this link into your browser:<br/>${link}</p><p style="color:#64748b;font-size:13px">This link is personal to you. If you were not expecting this, you can ignore this email.</p></div>`,
+                  },
+                },
+              },
+            })
+          );
+          emailed = true;
+        } catch (e) {
+          console.error("[ent/invites] invite email send failed:", e.name, e.message);
+        }
+      }
+      // Low-credit trigger (E5): after a SUCCESSFUL charge (never on an idempotent
+      // replay), check whether this charge pushed usage to >=80%. The conditional
+      // stamp in stampLowCreditNotified makes concurrent crossers race to exactly
+      // one winner, and only the winner emails ops. Entirely best-effort -- a
+      // failure here must never fail the invite that was just created.
+      if (result.creditConsumed) {
+        try {
+          const org = await getOrg(orgId);
+          const total = Number(org?.creditsTotal) || 0;
+          const used = Number(org?.creditsUsed) || 0;
+          if (org && total > 0 && used / total >= 0.8 && !org.lowCreditNotifiedAt) {
+            const won = await stampLowCreditNotified(orgId);
+            if (won) {
+              await sendOpsEmail(
+                "ShieldSync Enterprise: org low on credits",
+                `Org "${org.name || orgId}" (${orgId}) has used ${used} of ${total} credits (>=80%).\n\nConsider reaching out about a top-up.`
+              );
+            }
+          }
+        } catch (e) {
+          console.error("[ent/invites] low-credit check failed (non-fatal):", e.message);
+        }
+      }
+      return resp(200, { ...result, emailed });
     }
 
     if (method === "GET" && path === "/ent/invites") {
@@ -351,7 +483,9 @@ export async function handler(event) {
       const assessment = await getAssessment(invite.assessmentId);
       const org = assessment ? await getOrg(assessment.orgId) : null;
       // Sanitized subset ONLY — never return otpHash, candidateEmail,
-      // candidateReportToken, or any other invite's data.
+      // candidateReportToken, or any other invite's data. slotKey (E7) is set
+      // once booked so a resumed candidate sees their scheduled slot; undefined
+      // before booking (JSON.stringify drops it).
       return resp(200, {
         status: invite.status,
         candidateName: invite.candidateName,
@@ -359,6 +493,7 @@ export async function handler(event) {
         expiresAt: invite.expiresAt,
         otpLocked: invite.otpLocked,
         consentVersion: invite.consentVersion,
+        slotKey: invite.slotKey,
         name: assessment?.name,
         labSlug: assessment?.labSlug,
         hintsOn: assessment?.hintsOn,
@@ -466,20 +601,149 @@ export async function handler(event) {
 
     // ── reports (render /r/<token> and /r/c/<token>) ───────────────────────
     if (method === "GET" && path === "/ent/report") {
-      const assessment = await getAssessmentByReportToken(qs.reportToken);
-      if (!assessment) return resp(404, { error: "not found" });
+      // Two access paths: reportToken = the shareable link, lifecycle-enforced
+      // (E1); assessmentId = internal server-side callers (portal/admin pages
+      // behind the engine secret + their own org/staff gates). Internal access
+      // must keep working after a share link is revoked or expires -- the org
+      // must never lose its OWN scores by killing a forwarded link.
+      let assessment = null;
+      if (qs.reportToken) {
+        assessment = await getAssessmentByReportToken(qs.reportToken);
+        // Lifecycle check (E1): a revoked or expired report link returns the SAME
+        // 404 body as a never-existed token -- no oracle for which case it was.
+        if (!assessment || reportDead(assessment.reportRevokedAt, assessment.reportExpiresAt)) {
+          return resp(404, { error: "not found" });
+        }
+      } else if (qs.assessmentId) {
+        assessment = await getAssessment(qs.assessmentId);
+        if (!assessment) return resp(404, { error: "not found" });
+      } else {
+        return resp(404, { error: "not found" });
+      }
       const results = await listResults(assessment.assessmentId);
+      // Attach each candidate's name -- the employer report is the hiring team's
+      // deliverable, and ranking anonymized tokens is useless for a decision.
+      // Names come from the invite rows (already redacted on an erased invite).
+      const invites = await listInvites(assessment.assessmentId);
+      const nameByToken = {};
+      // Full roster (E3): one row per non-revoked invite with an employer-facing
+      // status label, so the report shows who has NOT finished, not just scores.
+      // candidateReportToken rides ONLY on submitted rows (the per-candidate link
+      // the employer can forward); the org-level token they already hold.
+      const rosterNow = new Date();
+      const roster = [];
+      for (const inv of invites) {
+        if (inv.inviteToken) nameByToken[inv.inviteToken] = inv.candidateName;
+        // Revoked = employer killed the link; refunded = voided + credited back.
+        // Neither belongs on the hiring roster.
+        if (inv.status === "revoked" || inv.status === "refunded") continue;
+        const expired =
+          inv.status !== "submitted" && inv.expiresAt && new Date(inv.expiresAt) < rosterNow;
+        // SECURITY: never emit the full inviteToken here -- it is the candidate's
+        // live bearer credential (/a/<token>), and this response reaches anyone
+        // holding the forwarded report link. The 8-char prefix is display/join-only.
+        const row = {
+          id: (inv.inviteToken || "").slice(0, 8),
+          candidateName: inv.candidateName,
+          status: rosterLabel(inv.status, expired),
+          createdAt: inv.createdAt,
+        };
+        if (inv.slotKey) row.slotKey = inv.slotKey;
+        if (inv.status === "submitted") {
+          row.submittedAt = inv.submittedAt;
+          row.candidateReportToken = inv.candidateReportToken;
+        }
+        roster.push(row);
+      }
+      const named = results.map((r) => ({ ...r, candidateName: nameByToken[r.inviteToken] }));
       return resp(200, {
         assessment: { name: assessment.name, labSlug: assessment.labSlug, createdAt: assessment.createdAt },
-        results,
+        results: named,
+        roster,
       });
     }
 
     if (method === "GET" && path === "/ent/report/candidate") {
       const invite = await getInviteByCandidateReportToken(qs.candidateReportToken);
-      if (!invite) return resp(404, { error: "not found" });
+      // Same E1 lifecycle check as /ent/report -- revoked (incl. via an erasure
+      // cascade, E2) or expired is indistinguishable from never-existed.
+      if (!invite || reportDead(invite.candidateReportRevokedAt, invite.candidateReportExpiresAt)) {
+        return resp(404, { error: "not found" });
+      }
       const result = await getResult(invite.assessmentId, invite.inviteToken);
       return resp(200, { candidateName: invite.candidateName, result });
+    }
+
+    // Report-token lifecycle admin (E1): revoke kills the link now; renew clears
+    // a revoke and extends validity to now + 90d. Target is EITHER the employer
+    // report (assessmentId) or a candidate report (inviteToken). The app enforces
+    // org ownership / staff gate before calling these.
+    if (method === "POST" && path === "/ent/report/revoke") {
+      const { assessmentId, inviteToken } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (assessmentId) {
+        const a = await revokeAssessmentReport(assessmentId);
+        if (!a) return resp(404, { error: "not found" });
+        console.log(
+          JSON.stringify({ audit: true, action: "report.revoke", actor, assessmentId, at: Date.now() })
+        );
+        return resp(200, { ok: true, revokedAt: a.reportRevokedAt });
+      }
+      if (inviteToken) {
+        const inv = await revokeCandidateReport(inviteToken);
+        if (!inv) return resp(404, { error: "not found" });
+        console.log(
+          JSON.stringify({ audit: true, action: "report.revoke", actor, inviteToken, at: Date.now() })
+        );
+        return resp(200, { ok: true, revokedAt: inv.candidateReportRevokedAt });
+      }
+      return resp(400, { error: "TARGET_REQUIRED" });
+    }
+
+    if (method === "POST" && path === "/ent/report/renew") {
+      const { assessmentId, inviteToken } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (assessmentId) {
+        const a = await renewAssessmentReport(assessmentId);
+        if (!a) return resp(404, { error: "not found" });
+        console.log(
+          JSON.stringify({ audit: true, action: "report.renew", actor, assessmentId, at: Date.now() })
+        );
+        return resp(200, { ok: true, reportExpiresAt: a.reportExpiresAt });
+      }
+      if (inviteToken) {
+        const inv = await renewCandidateReport(inviteToken);
+        if (!inv) return resp(404, { error: "not found" });
+        console.log(
+          JSON.stringify({ audit: true, action: "report.renew", actor, inviteToken, at: Date.now() })
+        );
+        return resp(200, { ok: true, reportExpiresAt: inv.candidateReportExpiresAt });
+      }
+      return resp(400, { error: "TARGET_REQUIRED" });
+    }
+
+    // -- dispute path (E6): candidate/employer reports a problem on an invite --
+    if (method === "POST" && path === "/ent/problems") {
+      const { inviteToken } = parsed;
+      if (!inviteToken) return resp(400, { error: "INVITE_TOKEN_REQUIRED" });
+      const message =
+        typeof parsed.message === "string" ? parsed.message.trim().slice(0, 2000) : "";
+      if (!message) return resp(400, { error: "MESSAGE_REQUIRED" });
+      const actor = cleanActor(parsed.actor, "unknown");
+      const res = await appendProblem(inviteToken, { message, actor });
+      if (!res) return resp(404, { error: "not found" });
+      // Best-effort ops notification -- the problem is already persisted on the
+      // invite, so a failed send never fails the report itself. `notify` is false
+      // when another problem landed on this invite <15 min ago: the log always
+      // grows (capped), but a report-spam loop cannot drain the shared SES quota
+      // that also delivers candidate OTPs.
+      const emailed = res.notify
+        ? await sendOpsEmail(
+            "ShieldSync Enterprise: problem reported on an invite",
+            `Invite: ${inviteToken}\nActor: ${actor}\nAt: ${res.entry.ts}\n\n${message}`
+          )
+        : false;
+      return resp(200, { ok: true, problem: res.entry, emailed });
     }
 
     // ── orders/billing ──────────────────────────────────────────────────────
@@ -496,7 +760,14 @@ export async function handler(event) {
 
     if (method === "POST" && path === "/ent/orders/paid") {
       const { orderId } = parsed;
+      const actor = cleanActor(parsed.actor);
+      // markOrderPaid is a single atomic CAS+grant (E4): only the first call
+      // flips created->paid AND adds order.credits to the org; every retry gets
+      // { paid:false } and grants nothing.
       const paid = await markOrderPaid(orderId);
+      console.log(
+        JSON.stringify({ audit: true, action: "order.paid", actor, orderId, paid: paid.paid, creditsGranted: paid.creditsGranted ?? 0, at: Date.now() })
+      );
       return resp(200, { paid });
     }
 
@@ -647,6 +918,9 @@ export async function handler(event) {
 
     if (method === "POST" && path === "/ent/submit") {
       const { inviteToken, reflection } = parsed;
+      // E8: the candidate app's timer/pagehide auto-submit sends auto:true so the
+      // stored result records that the attempt was closed out automatically.
+      const autoSubmitted = parsed.auto === true;
       const invite = await getInvite(inviteToken);
       if (!invite) return resp(404, { error: "not found" });
 
@@ -716,6 +990,7 @@ export async function handler(event) {
           reflectionText,
           reflectionScore: null,
           integrity: "pending",
+          autoSubmitted,
           lateSubmit,
           secondsLate,
           scoredExpiresAt: invite.scoredExpiresAt ?? null,

@@ -180,7 +180,9 @@ export async function deleteOrg(orgId) {
 /**
  * addCredits(): top up an org's credit balance by `delta` (positive integer).
  * Plain ADD on creditsTotal — no condition needed since a top-up can never make
- * the ledger inconsistent (creditsUsed is untouched). Returns the updated org.
+ * the ledger inconsistent (creditsUsed is untouched). Also clears the low-credit
+ * notification stamp (E5): a top-up re-arms the >=80%-usage alert so the NEXT
+ * threshold-cross emails ops again. Returns the updated org.
  */
 export async function addCredits(orgId, delta) {
   const db = await ddb();
@@ -188,12 +190,38 @@ export async function addCredits(orgId, delta) {
     new UpdateItemCommand({
       TableName: ORGS_TABLE,
       Key: { orgId: S(orgId) },
-      UpdateExpression: "ADD creditsTotal :d",
+      UpdateExpression: "ADD creditsTotal :d REMOVE lowCreditNotifiedAt",
       ExpressionAttributeValues: { ":d": N(delta) },
       ReturnValues: "ALL_NEW",
     })
   );
   return itemToObject(r.Attributes);
+}
+
+/**
+ * stampLowCreditNotified(): claim the right to send the ONE low-credit ops email
+ * for the current threshold-cross (E5). Conditional on the stamp being absent so
+ * concurrent invite charges racing past 80% produce exactly one winner -- only the
+ * caller that gets true sends the email. The stamp is cleared whenever credits
+ * are added (addCredits / markOrderPaid), re-arming the alert.
+ */
+export async function stampLowCreditNotified(orgId) {
+  const db = await ddb();
+  try {
+    await db.send(
+      new UpdateItemCommand({
+        TableName: ORGS_TABLE,
+        Key: { orgId: S(orgId) },
+        UpdateExpression: "SET lowCreditNotifiedAt = :ts",
+        ConditionExpression: "attribute_exists(orgId) AND attribute_not_exists(lowCreditNotifiedAt)",
+        ExpressionAttributeValues: { ":ts": S(nowIso()) },
+      })
+    );
+    return true;
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return false; // already notified (or org gone)
+    throw e;
+  }
 }
 
 /** listAllOrgs(): every org (Scan) — for the ShieldSync ADMIN console only (create
@@ -206,6 +234,18 @@ export async function listAllOrgs() {
 }
 
 // ── ASSESSMENTS ──────────────────────────────────────────────────────────────
+
+// Report links (employer /r/<token> and candidate /r/c/<token>) are valid for 90
+// days from creation (or from the latest renew). Rows written BEFORE this field
+// existed have no reportExpiresAt and stay valid indefinitely; revocation is
+// always honored regardless (see the handler's report-access checks).
+const REPORT_LINK_DAYS = 90;
+
+/** reportExpiryIso(): ISO timestamp 90 days from now -- the expiry a fresh or
+ *  renewed report link gets. */
+function reportExpiryIso() {
+  return new Date((now() + REPORT_LINK_DAYS * DAYS) * 1000).toISOString();
+}
 
 /** createAssessment(): one per "job" (which lab, name, whether hints are on). Mints
  *  both the assessmentId (internal) and reportToken (the employer's secret /r/<token>
@@ -221,6 +261,7 @@ export async function createAssessment({ orgId, labSlug, name, hintsOn }) {
     name: S(name ?? ""),
     hintsOn: BOOL(hintsOn),
     reportToken: S(reportToken),
+    reportExpiresAt: S(reportExpiryIso()),
     createdAt: S(nowIso()),
   };
   await db.send(new PutItemCommand({ TableName: ASSESSMENTS_TABLE, Item: item }));
@@ -265,6 +306,100 @@ export async function listAssessments(orgId) {
   return (r.Items ?? []).map(itemToObject);
 }
 
+// -- REPORT-TOKEN LIFECYCLE (E1) ----------------------------------------------
+//
+// Revoke stamps a *RevokedAt timestamp; renew clears it and pushes expiry out
+// another 90 days. All four are guarded by attribute_exists on the row key so a
+// bad id is a clean null (the handler maps that to 404), never a phantom row.
+
+/** revokeAssessmentReport(): kill the employer's /r/<token> link. Returns the
+ *  updated assessment, or null if no such assessment. Idempotent (re-stamps). */
+export async function revokeAssessmentReport(assessmentId) {
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: ASSESSMENTS_TABLE,
+        Key: { assessmentId: S(assessmentId) },
+        UpdateExpression: "SET reportRevokedAt = :ts",
+        ConditionExpression: "attribute_exists(assessmentId)",
+        ExpressionAttributeValues: { ":ts": S(nowIso()) },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObject(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return null;
+    throw e;
+  }
+}
+
+/** renewAssessmentReport(): un-revoke + extend the employer report link to
+ *  now + 90d. Returns the updated assessment, or null if no such assessment. */
+export async function renewAssessmentReport(assessmentId) {
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: ASSESSMENTS_TABLE,
+        Key: { assessmentId: S(assessmentId) },
+        UpdateExpression: "SET reportExpiresAt = :exp REMOVE reportRevokedAt",
+        ConditionExpression: "attribute_exists(assessmentId)",
+        ExpressionAttributeValues: { ":exp": S(reportExpiryIso()) },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObject(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return null;
+    throw e;
+  }
+}
+
+/** revokeCandidateReport(): kill the candidate's /r/c/<token> link. Returns the
+ *  updated invite, or null if no such invite. Idempotent (re-stamps). */
+export async function revokeCandidateReport(inviteToken) {
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: INVITES_TABLE,
+        Key: { inviteToken: S(inviteToken) },
+        UpdateExpression: "SET candidateReportRevokedAt = :ts",
+        ConditionExpression: "attribute_exists(inviteToken)",
+        ExpressionAttributeValues: { ":ts": S(nowIso()) },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObject(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return null;
+    throw e;
+  }
+}
+
+/** renewCandidateReport(): un-revoke + extend the candidate report link to
+ *  now + 90d. Returns the updated invite, or null if no such invite. */
+export async function renewCandidateReport(inviteToken) {
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: INVITES_TABLE,
+        Key: { inviteToken: S(inviteToken) },
+        UpdateExpression: "SET candidateReportExpiresAt = :exp REMOVE candidateReportRevokedAt",
+        ConditionExpression: "attribute_exists(inviteToken)",
+        ExpressionAttributeValues: { ":exp": S(reportExpiryIso()) },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObject(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return null;
+    throw e;
+  }
+}
+
 // ── INVITES ──────────────────────────────────────────────────────────────────
 
 // Invite rows keep candidate PII + OTP state for a bounded window: the candidate
@@ -304,6 +439,7 @@ export async function createInvite({ assessmentId, orgId, candidateName, candida
     candidateName: S(candidateName ?? ""),
     candidateEmail: S(candidateEmail ?? ""),
     candidateReportToken: S(candidateReportToken),
+    candidateReportExpiresAt: S(reportExpiryIso()),
     status: S("created"),
     createdAt: S(new Date(createdAt * 1000).toISOString()),
     expiresAt: S(new Date((createdAt + INVITE_LINK_DAYS * DAYS) * 1000).toISOString()),
@@ -372,6 +508,9 @@ export async function getInvite(inviteToken) {
  * for the employer's legitimate record and the credit ledger stays intact.
  * Blanks candidateName/candidateEmail and drops the OTP hash on the invite, and
  * blanks the free-text reflection on the result (the only PII stored there).
+ * ALSO stamps candidateReportRevokedAt (E2 erasure cascade) so the candidate's
+ * /r/c/<token> report link 404s after the erase -- an erased person's scored
+ * report must not stay reachable via a link that may sit in old emails.
  * Idempotent. Returns { ok:false, notFound:true } if no invite matches.
  */
 export async function eraseCandidatePii(inviteToken) {
@@ -385,7 +524,7 @@ export async function eraseCandidatePii(inviteToken) {
       TableName: INVITES_TABLE,
       Key: { inviteToken: S(inviteToken) },
       UpdateExpression:
-        "SET candidateName = :redacted, candidateEmail = :redacted, erasedAt = :ts REMOVE otpHash",
+        "SET candidateName = :redacted, candidateEmail = :redacted, erasedAt = :ts, candidateReportRevokedAt = :ts REMOVE otpHash",
       ExpressionAttributeValues: { ":redacted": S("[erased]"), ":ts": S(erasedAt) },
     })
   );
@@ -552,6 +691,46 @@ export async function refundInvite(inviteToken) {
  *  the credit stays consumed. Plain status write via setInviteStatus. */
 export async function revokeInvite(inviteToken) {
   return setInviteStatus(inviteToken, "revoked");
+}
+
+// Dispute log cap (E6): the newest PROBLEMS_MAX entries are kept, oldest dropped.
+// The cap is anti-abuse (bounds item size); the read-modify-write here is fine
+// because a lost update between two simultaneous reports of the SAME invite only
+// costs a log entry, never money or state.
+const PROBLEMS_MAX = 10;
+
+/**
+ * appendProblem(): append one { ts, message, actor } entry to invite.problems[]
+ * (E6 dispute path), capped at PROBLEMS_MAX with the oldest dropped. The caller
+ * has already clamped message/actor lengths. Returns { entry, notify } (notify =
+ * ops email allowed, see below), or null if no such invite.
+ */
+export async function appendProblem(inviteToken, { message, actor }) {
+  const db = await ddb();
+  const invite = await getInvite(inviteToken);
+  if (!invite) return null;
+  const entry = { ts: nowIso(), message, actor };
+  const prior = Array.isArray(invite.problems) ? invite.problems : [];
+  const problems = [...prior, entry].slice(-PROBLEMS_MAX);
+  try {
+    await db.send(
+      new UpdateItemCommand({
+        TableName: INVITES_TABLE,
+        Key: { inviteToken: S(inviteToken) },
+        UpdateExpression: "SET problems = :p",
+        ConditionExpression: "attribute_exists(inviteToken)",
+        ExpressionAttributeValues: { ":p": marshalValue(problems) },
+      })
+    );
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return null; // invite vanished between read and write
+    throw e;
+  }
+  // notify = ops email allowed: first problem on this invite, or the newest
+  // prior entry is older than 15 min (SES-quota abuse guard; the caller skips
+  // the email when false, the log itself always records).
+  const lastTs = prior.length ? Date.parse(prior[prior.length - 1].ts) || 0 : 0;
+  return { entry, notify: !lastTs || Date.now() - lastTs > 15 * 60 * 1000 };
 }
 
 /**
@@ -897,26 +1076,70 @@ export async function listOrders(orgId) {
   return (r.Items ?? []).map(itemToObject);
 }
 
-/** markOrderPaid(): idempotent created->paid transition — a webhook retried N
- *  times only flips status once; every retry after the first hits the condition
- *  and fails harmlessly (caller should treat ConditionalCheckFailedException here
- *  as "already handled", not an error). */
+/**
+ * markOrderPaid(): idempotent created->paid transition that ALSO grants the
+ * order's credits to the org, exactly once (E4 money loop).
+ *
+ * The created->paid CAS and the credit ADD ride in ONE TransactWriteItems, so
+ * they are a single atomic winner-takes-all step: a webhook retried N times only
+ * wins the CAS once, and ONLY that winning transaction carries the ADD -- every
+ * retry after the first cancels on the order's ConditionExpression and therefore
+ * cannot re-apply the credit. (Same pattern as createInvite/refundInvite; the
+ * transaction is strictly safer than CAS-then-separate-ADD, which could lose the
+ * grant to a crash between the two writes.)
+ *
+ * The org update also clears lowCreditNotifiedAt (E5): paid credits are a top-up,
+ * which re-arms the low-credit alert.
+ */
 export async function markOrderPaid(orderId) {
   const db = await ddb();
+  const order = await getOrder(orderId);
+  if (!order) return { paid: false, notFound: true };
+  const credits = Number(order.credits) || 0;
+  const orderUpdate = {
+    TableName: ORDERS_TABLE,
+    Key: { orderId: S(orderId) },
+    UpdateExpression: "SET #s = :paid, paidAt = :now",
+    ConditionExpression: "#s = :created",
+    ExpressionAttributeNames: { "#s": "status" },
+    ExpressionAttributeValues: { ":paid": S("paid"), ":created": S("created"), ":now": S(nowIso()) },
+  };
   try {
-    await db.send(
-      new UpdateItemCommand({
-        TableName: ORDERS_TABLE,
-        Key: { orderId: S(orderId) },
-        UpdateExpression: "SET #s = :paid, paidAt = :now",
-        ConditionExpression: "#s = :created",
-        ExpressionAttributeNames: { "#s": "status" },
-        ExpressionAttributeValues: { ":paid": S("paid"), ":created": S("created"), ":now": S(nowIso()) },
-      })
-    );
-    return { paid: true };
+    if (credits > 0 && order.orgId) {
+      await db.send(
+        new TransactWriteItemsCommand({
+          TransactItems: [
+            { Update: orderUpdate },
+            {
+              Update: {
+                TableName: ORGS_TABLE,
+                Key: { orgId: S(order.orgId) },
+                UpdateExpression: "ADD creditsTotal :c REMOVE lowCreditNotifiedAt",
+                // A paid order for a since-deleted org must NOT mint a phantom
+                // org row holding only creditsTotal -- cancel the whole
+                // transaction instead (order stays `created` for investigation).
+                ConditionExpression: "attribute_exists(orgId)",
+                ExpressionAttributeValues: { ":c": N(credits) },
+              },
+            },
+          ],
+        })
+      );
+    } else {
+      // Zero-credit / malformed order: still flip the status, nothing to grant.
+      await db.send(new UpdateItemCommand(orderUpdate));
+    }
+    return { paid: true, creditsGranted: credits };
   } catch (e) {
-    if (e.name === "ConditionalCheckFailedException") return { paid: false }; // already paid / missing
+    const reasons = e.name === "TransactionCanceledException" ? e.CancellationReasons ?? [] : [];
+    const orderCasLost =
+      e.name === "ConditionalCheckFailedException" || reasons[0]?.Code === "ConditionalCheckFailed";
+    // Order CAS held but the org row is gone: surface it distinctly so the
+    // caller/ops can see the order needs manual attention (it stays `created`).
+    if (!orderCasLost && reasons[1]?.Code === "ConditionalCheckFailed") {
+      return { paid: false, orgMissing: true };
+    }
+    if (orderCasLost) return { paid: false }; // already paid -- retry is a harmless no-op
     throw e;
   }
 }
