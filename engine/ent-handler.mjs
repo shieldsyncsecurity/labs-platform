@@ -575,6 +575,12 @@ export async function handler(event) {
       if (["revoked", "submitted"].includes(invite.status)) {
         return resp(409, { error: "NOT_SENDABLE", status: invite.status });
       }
+      // Consent is a hard precondition (verify already enforces it via a CAS; we
+      // also gate the SEND so no OTP email dispatches before the candidate has
+      // consented to data processing). A "created" invite must consent first.
+      if (!["consented", "verified"].includes(invite.status)) {
+        return resp(409, { error: "CONSENT_REQUIRED", status: invite.status });
+      }
 
       // Per-invite send throttle: 45s cooldown + rolling-24h daily cap. Both read
       // from counters on the invite that setOtp does NOT reset, so a resend loop

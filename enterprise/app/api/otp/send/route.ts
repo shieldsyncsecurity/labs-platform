@@ -33,7 +33,7 @@ export async function POST(req: Request) {
       // seconds) so the candidate UI can show a precise message. Never echo the
       // raw engine body.
       const b = (err.body ?? {}) as { error?: string; retryAfter?: number };
-      const ALLOWED = new Set(["OTP_COOLDOWN", "OTP_DAILY_CAP", "NOT_SENDABLE", "LINK_EXPIRED"]);
+      const ALLOWED = new Set(["OTP_COOLDOWN", "OTP_DAILY_CAP", "NOT_SENDABLE", "LINK_EXPIRED", "CONSENT_REQUIRED"]);
       const code = typeof b.error === "string" && ALLOWED.has(b.error) ? b.error : undefined;
       const retryAfter = typeof b.retryAfter === "number" ? b.retryAfter : undefined;
       return NextResponse.json(
