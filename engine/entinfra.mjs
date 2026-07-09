@@ -1303,8 +1303,12 @@ export async function issueAgreement(agreementId, actor) {
       new UpdateItemCommand({
         TableName: AGREEMENTS_TABLE,
         Key: { agreementId: S(agreementId) },
+        // Condition on the sha256 read above as well as the status: a draft
+        // edit racing this issue would otherwise freeze an issued row whose
+        // stored hash no longer matches its bodyText (TOCTOU). On the race the
+        // condition fails -> NOT_ISSUABLE -> the admin re-reads and re-issues.
         UpdateExpression: "SET #s = :issued, issuedAt = :at, issuedBy = :by, sha256 = :h",
-        ConditionExpression: "#s = :draft",
+        ConditionExpression: "#s = :draft AND sha256 = :h",
         ExpressionAttributeNames: { "#s": "status" },
         ExpressionAttributeValues: {
           ":issued": S("issued"),

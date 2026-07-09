@@ -29,6 +29,9 @@ export default function AdminNav() {
           <Link href="/admin/orgs/new" className="text-sm text-ink-soft hover:text-brand-strong">
             New org
           </Link>
+          <Link href="/admin/agreements" className="text-sm text-ink-soft hover:text-brand-strong">
+            Agreements
+          </Link>
           <Link href="/admin/forensics" className="text-sm text-ink-soft hover:text-brand-strong">
             Forensics
           </Link>

@@ -1,8 +1,14 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getAdminSession } from "@/lib/server/admin-session";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 import AdminNav from "../../_components/admin-nav";
+import {
+  AgreementStatusPill,
+  CustomizedBadge,
+  docTypeLabel,
+} from "../../_components/agreement-bits";
 import CopyButton from "../../../portal/_components/copy-button";
 import AdjustCreditsForm from "./adjust-credits-form";
 import DeleteOrgButton from "./delete-org-button";
@@ -32,6 +38,19 @@ type Assessment = {
   name?: string;
   reportToken?: string;
   createdAt?: string;
+};
+
+// Engine list shape (W3-2): rows come back WITHOUT bodyText on purpose.
+type AgreementListRow = {
+  agreementId?: string;
+  docType?: string;
+  templateVersion?: string;
+  status?: string;
+  customized?: boolean;
+  sha256?: string;
+  createdAt?: string;
+  issuedAt?: string;
+  acceptedAt?: string;
 };
 
 const REPORT_BASE_URL = "https://enterprise.shieldsyncsecurity.com";
@@ -93,6 +112,21 @@ export default async function AdminOrgDetailPage({
     orders.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
   } catch {
     ordersError = "Could not load orders right now.";
+  }
+
+  // Agreements (W3-4): the org's legal documents. Same degrade-gracefully
+  // contract as orders -- the section renders its error and the rest of the
+  // page keeps working.
+  let agreements: AgreementListRow[] = [];
+  let agreementsError: string | null = null;
+  try {
+    const data = await entFetch<{ agreements?: AgreementListRow[] }>("/ent/agreements", {
+      query: { orgId },
+    });
+    agreements = Array.isArray(data?.agreements) ? data.agreements : [];
+    agreements.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+  } catch {
+    agreementsError = "Could not load agreements right now.";
   }
 
   const creditsTotal = org.creditsTotal ?? 0;
@@ -170,6 +204,84 @@ export default async function AdminOrgDetailPage({
             </div>
           ) : (
             <OrdersSection orgId={org.orgId ?? orgId} orders={orders} />
+          )}
+        </div>
+
+        {/* Agreements (W3-4): legal documents for this org */}
+        <div className="mt-6 rounded-xl border border-line bg-surface p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-ink-soft">Agreements</h2>
+            <Link
+              href={`/admin/orgs/${org.orgId ?? orgId}/agreements/new`}
+              className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-strong"
+            >
+              New agreement
+            </Link>
+          </div>
+          <p className="mt-1 text-xs text-muted">
+            Enterprise Agreement / DPA record for this org. Drafts are editable; issued documents
+            await the org&apos;s acceptance in the portal.
+          </p>
+          {agreementsError ? (
+            <p className="mt-3 text-sm text-rose-700">{agreementsError}</p>
+          ) : agreements.length === 0 ? (
+            <p className="mt-4 rounded-lg border border-dashed border-line bg-canvas px-4 py-6 text-center text-sm text-ink-soft">
+              No agreements for this org yet.
+            </p>
+          ) : (
+            <div className="mt-4 overflow-x-auto rounded-lg border border-line">
+              <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-line bg-canvas text-xs uppercase tracking-wide text-muted">
+                    <th className="px-4 py-2.5 font-semibold">Document</th>
+                    <th className="px-4 py-2.5 font-semibold">Status</th>
+                    <th className="px-4 py-2.5 font-semibold">Created</th>
+                    <th className="px-4 py-2.5 font-semibold">Issued</th>
+                    <th className="px-4 py-2.5 font-semibold">Accepted</th>
+                    <th className="px-4 py-2.5 font-semibold">SHA-256</th>
+                    <th className="px-4 py-2.5 font-semibold">
+                      <span className="sr-only">View</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {agreements.map((a, i) => (
+                    <tr key={a.agreementId ?? i} className="border-b border-line last:border-b-0">
+                      <td className="px-4 py-3">
+                        <span className="flex flex-wrap items-center gap-2 font-semibold text-ink">
+                          {docTypeLabel(a.docType)}
+                          {a.customized ? <CustomizedBadge /> : null}
+                        </span>
+                        <span className="mt-0.5 block text-[10px] text-muted">
+                          {a.templateVersion ?? ""}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <AgreementStatusPill status={a.status} />
+                      </td>
+                      <td className="px-4 py-3 text-xs text-ink-soft">{formatDate(a.createdAt)}</td>
+                      <td className="px-4 py-3 text-xs text-ink-soft">{formatDate(a.issuedAt)}</td>
+                      <td className="px-4 py-3 text-xs text-ink-soft">{formatDate(a.acceptedAt)}</td>
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-xs text-muted">
+                          {a.sha256 ? a.sha256.slice(0, 12) : "\u2014"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {a.agreementId ? (
+                          <Link
+                            href={`/admin/agreements/${a.agreementId}`}
+                            className="text-xs font-semibold text-brand-strong hover:underline"
+                          >
+                            View
+                          </Link>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 

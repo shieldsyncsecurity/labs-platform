@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getOrgId } from "@/lib/server/portal-session";
+import { getBlockingAgreement } from "@/lib/server/agreement-gate";
 import PortalNav from "../../_components/portal-nav";
 import NewAssessmentForm from "./new-assessment-form";
 
@@ -13,6 +14,12 @@ export default async function NewAssessmentPage() {
   const orgId = await getOrgId();
   if (!orgId) {
     redirect("/portal/login");
+  }
+
+  // Agreement gate (W3-5): an issued-unaccepted agreement blocks the portal.
+  const blocking = await getBlockingAgreement(orgId);
+  if (blocking?.agreementId) {
+    redirect(`/portal/agreements/${encodeURIComponent(blocking.agreementId)}/accept`);
   }
 
   return (

@@ -27,6 +27,9 @@ export default function PortalNav({ orgId }: { orgId: string }) {
           <Link href="/portal/billing" className="text-sm text-ink-soft hover:text-brand-strong">
             Billing
           </Link>
+          <Link href="/portal/agreements" className="text-sm text-ink-soft hover:text-brand-strong">
+            Agreements
+          </Link>
         </div>
         <div className="flex items-center gap-4">
           <span className="font-mono text-xs text-muted">{orgId}</span>

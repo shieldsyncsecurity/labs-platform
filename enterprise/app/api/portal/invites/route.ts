@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 import { getOrgId } from "@/lib/server/portal-session";
+import { getBlockingAgreement } from "@/lib/server/agreement-gate";
 
 type CreateInviteBody = {
   assessmentId?: string;
@@ -34,6 +35,16 @@ export async function POST(req: Request) {
   const orgId = await getOrgId();
   if (!orgId) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+  }
+
+  // Agreement gate (review finding): invites consume credits, so they honor
+  // the pending-agreement block like the pages do. Fails OPEN on engine
+  // trouble by design.
+  if (await getBlockingAgreement(orgId)) {
+    return NextResponse.json(
+      { error: "Your organization has a pending agreement to accept before continuing." },
+      { status: 403 },
+    );
   }
 
   let body: CreateInviteBody;

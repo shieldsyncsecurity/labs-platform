@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getOrgId } from "@/lib/server/portal-session";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
+import { getBlockingAgreement } from "@/lib/server/agreement-gate";
 import PortalNav from "./_components/portal-nav";
 import { formatDate } from "../r/_components/report-bits";
 
@@ -35,6 +36,12 @@ export default async function PortalDashboardPage() {
   const orgId = await getOrgId();
   if (!orgId) {
     redirect("/portal/login");
+  }
+
+  // Agreement gate (W3-5): an issued-unaccepted agreement blocks the portal.
+  const blocking = await getBlockingAgreement(orgId);
+  if (blocking?.agreementId) {
+    redirect(`/portal/agreements/${encodeURIComponent(blocking.agreementId)}/accept`);
   }
 
   let org: Org | null = null;
