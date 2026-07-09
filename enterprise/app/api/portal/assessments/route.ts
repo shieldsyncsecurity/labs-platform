@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 import { getOrgId } from "@/lib/server/portal-session";
 import { getBlockingAgreement } from "@/lib/server/agreement-gate";
+import { isAllowedLabSlug } from "@/lib/labs";
 
 type CreateAssessmentBody = {
   name?: string;
@@ -9,15 +10,10 @@ type CreateAssessmentBody = {
   hintsOn?: boolean;
 };
 
-// Server-side allowlist of enterprise lab slugs an assessment may be created
-// against. The employer UI (app/portal/assessments/new/new-assessment-form.tsx)
-// currently surfaces a subset of these; this set is the authoritative guard so
-// a hand-crafted request can't create an assessment against an arbitrary /
-// unknown slug. Only labs that are actually DEPLOYABLE + GRADEABLE for
-// enterprise belong here -- keep it in lockstep with the portal LAB_OPTIONS
-// (app/portal/assessments/new/new-assessment-form.tsx) and the labs/ templates.
-// Adding a slug the engine can't deploy would just burn a lease and grade to 0.
-const ALLOWED_LAB_SLUGS = new Set(["s3-misconfiguration-audit"]);
+// The authoritative lab allowlist (isAllowedLabSlug) now lives in the shared
+// single source enterprise/lib/labs.ts, imported by both this create route AND
+// the new-assessment form so a hand-crafted request can't create an assessment
+// against an arbitrary/unknown slug and the two surfaces can never drift.
 
 const MAX_NAME_LEN = 200;
 
@@ -57,7 +53,7 @@ export async function POST(req: Request) {
 
   // Reject unknown lab slugs server-side -- do not forward an arbitrary slug
   // to the engine.
-  if (!ALLOWED_LAB_SLUGS.has(labSlug)) {
+  if (!isAllowedLabSlug(labSlug)) {
     return NextResponse.json({ error: "Unknown lab." }, { status: 400 });
   }
 

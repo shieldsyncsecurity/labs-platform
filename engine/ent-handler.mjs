@@ -20,6 +20,7 @@ import {
   getAssessment,
   getAssessmentByReportToken,
   listAssessments,
+  updateAssessment,
   createInvite,
   getInvite,
   getInviteByCandidateReportToken,
@@ -28,6 +29,7 @@ import {
   consentInvite,
   refundInvite,
   revokeInvite,
+  stampInviteResend,
   eraseCandidatePii,
   revokeAssessmentReport,
   renewAssessmentReport,
@@ -55,6 +57,8 @@ import {
   acceptAgreement,
   voidAgreement,
   setOrgAcceptedAgreement,
+  appendAudit,
+  listAudit,
 } from "./entinfra.mjs";
 import {
   leaseEnt,
@@ -109,6 +113,12 @@ const ENT_GRACE_MIN = 15;
 const OTP_SEND_COOLDOWN_SEC = 45;
 const OTP_SEND_DAILY_CAP = 10;
 const REFLECTION_MAX_CHARS = 8000;
+
+// Per-invite cooldown between magic-link resends (W3B-3). Mirrors the OTP send
+// cooldown: a resendLastAt stamp on the invite bounds how often the SAME invite
+// can trigger an SES send, resisting cost/spam abuse. Resend NEVER charges a
+// credit (unlike POST /ent/invites).
+const INVITE_RESEND_COOLDOWN_SEC = 45;
 
 const entLambda = new LambdaClient({ region: "us-east-1" });
 const ses = new SESClient({ region: "us-east-1" });
@@ -175,6 +185,57 @@ async function sendOpsEmail(subject, text) {
 // existing callers that don't send it keep working.
 function cleanActor(v, fallback = "admin") {
   return typeof v === "string" && v.trim() ? v.trim().slice(0, 120) : fallback;
+}
+
+// audit(): best-effort durable audit write (W3B-1). Wraps entinfra.appendAudit so
+// a failed audit write can NEVER fail the parent mutation -- the console.log audit
+// line beside each call is the immediate CloudWatch record; this table is the
+// queryable permanent one the admin Activity panel reads. Logged + swallowed on
+// failure, exactly like sendOpsEmail.
+async function audit(entry) {
+  try {
+    await appendAudit(entry);
+  } catch (e) {
+    console.error("[ent] durable audit write failed (non-fatal):", e.name, e.message);
+  }
+}
+
+// sendInviteLinkEmail(): send a candidate their personal magic-link email via SES.
+// Shared by POST /ent/invites (first successful create) and POST /ent/invites/resend
+// (W3B-3) so the two paths never drift. Best-effort: returns whether the send
+// succeeded; a failure is logged and swallowed (never fails the parent op). The
+// link host is ALWAYS our own pinned origin (env ENT_APP_URL override) -- caller
+// input never controls it (anti-phishing), and candidateName is HTML-escaped.
+async function sendInviteLinkEmail({ candidateEmail, candidateName, inviteToken }) {
+  const from = process.env.ENT_OTP_FROM;
+  if (!from || !candidateEmail) return false;
+  const appOrigin = (process.env.ENT_APP_URL || "https://enterprise.shieldsyncsecurity.com").replace(/\/+$/, "");
+  const link = `${appOrigin}/a/${inviteToken}`;
+  const rawWho = typeof candidateName === "string" && candidateName.trim() ? candidateName.trim() : "there";
+  const who = rawWho.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  try {
+    await ses.send(
+      new SendEmailCommand({
+        Source: from,
+        Destination: { ToAddresses: [candidateEmail] },
+        Message: {
+          Subject: { Data: "Your ShieldSync cloud security assessment" },
+          Body: {
+            Text: {
+              Data: `Hi ${rawWho},\n\nYou've been invited to complete a ShieldSync cloud security assessment -- a short, hands-on exercise in a real, isolated cloud environment. It's a live scenario to secure, not a quiz, and your work is assessed automatically.\n\nWhat to expect:\n  - Runs in your browser; nothing to install.\n  - Timed once you begin, so start when you can focus.\n  - Your progress is saved as you go.\n\nStart your assessment:\n${link}\n\nThis link is personal to you -- please don't share it. If you weren't expecting this, you can safely ignore this email.\n\nGood luck,\nThe ShieldSync team`,
+            },
+            Html: {
+              Data: `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#0f172a;max-width:560px;margin:0 auto;padding:8px"><div style="font-size:15px;font-weight:800;letter-spacing:-0.01em;color:#0a1020;padding:4px 0 18px">Shield<span style="color:#d97706">Sync</span></div><p style="font-size:15px;line-height:1.55;margin:0 0 14px">Hi ${who},</p><p style="font-size:15px;line-height:1.55;margin:0 0 16px">You've been invited to complete a <strong>ShieldSync cloud security assessment</strong> -- a short, hands-on exercise in a real, isolated cloud environment. It's a live scenario to secure, not a quiz, and your work is assessed automatically.</p><div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 16px;margin:0 0 20px"><p style="font-size:13px;font-weight:700;color:#9a3412;margin:0 0 8px">What to expect</p><ul style="font-size:13px;line-height:1.55;color:#7c2d12;margin:0;padding-left:18px"><li>Runs in your browser -- nothing to install.</li><li>Timed once you begin, so start when you can focus.</li><li>Your progress is saved as you go.</li></ul></div><a href="${link}" style="display:inline-block;background:#d97706;color:#ffffff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Start your assessment</a><p style="font-size:12px;line-height:1.5;color:#64748b;margin:18px 0 0">Or paste this link into your browser:<br/><span style="color:#475569">${link}</span></p><p style="font-size:12px;line-height:1.5;color:#94a3b8;margin:14px 0 0">This link is personal to you -- please don't share it. If you weren't expecting this, you can safely ignore this email.</p></div>`,
+            },
+          },
+        },
+      })
+    );
+    return true;
+  } catch (e) {
+    console.error("[ent/invites] invite email send failed:", e.name, e.message);
+    return false;
+  }
 }
 
 // -- Agreements (W3-2) input hygiene ------------------------------------------
@@ -373,12 +434,15 @@ export async function handler(event) {
     // ── admin/org (called by ShieldSync admin UI) ─────────────────────────
     if (method === "POST" && path === "/ent/orgs") {
       const org = await createOrg(parsed);
+      const actor = cleanActor(parsed.actor);
       // Attributable audit trail (Batch L / E9) - greppable structured line to
       // CloudWatch on this privileged mutation. `actor` is the staff email the app
       // injects server-side; sanitized, defaulting to "admin" for legacy callers.
+      // The durable audit (W3B-1) mirrors it into ShieldSyncEntAudit, best-effort.
       console.log(
-        JSON.stringify({ audit: true, action: "org.create", actor: cleanActor(parsed.actor), orgId: org?.orgId ?? null, at: Date.now() })
+        JSON.stringify({ audit: true, action: "org.create", actor, orgId: org?.orgId ?? null, at: Date.now() })
       );
+      await audit({ orgId: org?.orgId, actor, action: "org.create", target: org?.orgId, detail: { name: org?.name ?? "" } });
       return resp(200, org);
     }
 
@@ -406,10 +470,11 @@ export async function handler(event) {
       const org = await addCredits(orgId, delta);
       // Attributable audit trail (Batch L / E9) - every credit adjustment is logged
       // with the acting staff email + reason so a balance change is never anonymous.
-      // Immutable in CloudWatch; no new table required.
+      // Immutable in CloudWatch; mirrored into the durable audit table (W3B-1).
       console.log(
         JSON.stringify({ audit: true, action: "credits.adjust", actor, reason, orgId, delta, at: Date.now() })
       );
+      await audit({ orgId, actor, action: "credits.adjust", target: orgId, detail: { delta, reason } });
       return resp(200, org);
     }
 
@@ -430,6 +495,7 @@ export async function handler(event) {
       console.log(
         JSON.stringify({ audit: true, action: "org.delete", actor, orgId, at: Date.now() })
       );
+      await audit({ orgId, actor, action: "org.delete", target: orgId, detail: { name: org?.name ?? "" } });
       return resp(200, { ok: true });
     }
 
@@ -446,6 +512,10 @@ export async function handler(event) {
       console.log(
         JSON.stringify({ audit: true, action: "candidate.erase", actor, inviteToken, at: Date.now() })
       );
+      // orgId is untouched by the erase (only name/email/reflection are redacted),
+      // so a post-erase read gives the org to index this audit under.
+      const erasedInvite = await getInvite(inviteToken);
+      await audit({ orgId: erasedInvite?.orgId, actor, action: "candidate.erase", target: inviteToken, detail: {} });
       return resp(200, { ok: true, erasedAt: r.erasedAt });
     }
 
@@ -467,6 +537,32 @@ export async function handler(event) {
       return resp(200, assessment);
     }
 
+    // W3B-4: rename an assessment / toggle hints. Existence is checked via the
+    // entinfra ConditionExpression (404 on a bad id); ORG-OWNERSHIP is verified
+    // APP-SIDE before this is called (the portal re-checks the assessment's orgId
+    // against the session org), matching the report/agreement portal contract.
+    if (method === "POST" && path === "/ent/assessments/update") {
+      const { assessmentId } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (!assessmentId || typeof assessmentId !== "string") {
+        return resp(400, { error: "ASSESSMENT_ID_REQUIRED" });
+      }
+      const patch = {};
+      if (parsed.name !== undefined) {
+        if (typeof parsed.name !== "string") return resp(400, { error: "NAME_INVALID" });
+        patch.name = parsed.name.trim().slice(0, 200);
+      }
+      if (parsed.hintsOn !== undefined) patch.hintsOn = parsed.hintsOn === true;
+      if (Object.keys(patch).length === 0) return resp(400, { error: "NOTHING_TO_UPDATE" });
+      const assessment = await updateAssessment(assessmentId, patch);
+      if (!assessment) return resp(404, { error: "not found" });
+      console.log(
+        JSON.stringify({ audit: true, action: "assessment.update", actor, assessmentId, fields: Object.keys(patch), at: Date.now() })
+      );
+      await audit({ orgId: assessment.orgId, actor, action: "assessment.update", target: assessmentId, detail: { fields: Object.keys(patch) } });
+      return resp(200, assessment);
+    }
+
     if (method === "POST" && path === "/ent/invites") {
       const { assessmentId, orgId, candidateName, candidateEmail, sendLink, appUrl } = parsed;
       // inviteToken MUST be caller-supplied (the app mints it once via newToken()
@@ -484,40 +580,13 @@ export async function handler(event) {
       // is already spent and the link still works via copy) -- report `emailed`
       // so the UI can tell the employer whether to send it themselves. In the SES
       // sandbox this only reaches verified recipients.
-      let emailed = false;
-      const from = process.env.ENT_OTP_FROM;
       // Send ONLY on the first successful create (an idempotent replay must not
-      // re-email), and ONLY ever linking to our own app origin -- appUrl is
-      // caller input and must not let a leaked engine secret turn SES into a
-      // phishing sender from our identity. candidateName is HTML-escaped for
-      // the same reason.
-      const appOrigin = (process.env.ENT_APP_URL || "https://enterprise.shieldsyncsecurity.com").replace(/\/+$/, "");
-      if (result.creditConsumed && sendLink && candidateEmail && from) {
-        const link = `${appOrigin}/a/${inviteToken}`;
-        const rawWho = typeof candidateName === "string" && candidateName.trim() ? candidateName.trim() : "there";
-        const who = rawWho.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-        try {
-          await ses.send(
-            new SendEmailCommand({
-              Source: from,
-              Destination: { ToAddresses: [candidateEmail] },
-              Message: {
-                Subject: { Data: "Your ShieldSync cloud security assessment" },
-                Body: {
-                  Text: {
-                    Data: `Hi ${rawWho},\n\nYou've been invited to complete a ShieldSync cloud security assessment -- a short, hands-on exercise in a real, isolated cloud environment. It's a live scenario to secure, not a quiz, and your work is assessed automatically.\n\nWhat to expect:\n  - Runs in your browser; nothing to install.\n  - Timed once you begin, so start when you can focus.\n  - Your progress is saved as you go.\n\nStart your assessment:\n${link}\n\nThis link is personal to you -- please don't share it. If you weren't expecting this, you can safely ignore this email.\n\nGood luck,\nThe ShieldSync team`,
-                  },
-                  Html: {
-                    Data: `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#0f172a;max-width:560px;margin:0 auto;padding:8px"><div style="font-size:15px;font-weight:800;letter-spacing:-0.01em;color:#0a1020;padding:4px 0 18px">Shield<span style="color:#d97706">Sync</span></div><p style="font-size:15px;line-height:1.55;margin:0 0 14px">Hi ${who},</p><p style="font-size:15px;line-height:1.55;margin:0 0 16px">You've been invited to complete a <strong>ShieldSync cloud security assessment</strong> -- a short, hands-on exercise in a real, isolated cloud environment. It's a live scenario to secure, not a quiz, and your work is assessed automatically.</p><div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 16px;margin:0 0 20px"><p style="font-size:13px;font-weight:700;color:#9a3412;margin:0 0 8px">What to expect</p><ul style="font-size:13px;line-height:1.55;color:#7c2d12;margin:0;padding-left:18px"><li>Runs in your browser -- nothing to install.</li><li>Timed once you begin, so start when you can focus.</li><li>Your progress is saved as you go.</li></ul></div><a href="${link}" style="display:inline-block;background:#d97706;color:#ffffff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Start your assessment</a><p style="font-size:12px;line-height:1.5;color:#64748b;margin:18px 0 0">Or paste this link into your browser:<br/><span style="color:#475569">${link}</span></p><p style="font-size:12px;line-height:1.5;color:#94a3b8;margin:14px 0 0">This link is personal to you -- please don't share it. If you weren't expecting this, you can safely ignore this email.</p></div>`,
-                  },
-                },
-              },
-            })
-          );
-          emailed = true;
-        } catch (e) {
-          console.error("[ent/invites] invite email send failed:", e.name, e.message);
-        }
+      // re-email). sendInviteLinkEmail pins our own app origin and HTML-escapes
+      // the name -- appUrl (caller input) is deliberately IGNORED so a leaked
+      // engine secret can't turn SES into a phishing sender from our identity.
+      let emailed = false;
+      if (result.creditConsumed && sendLink) {
+        emailed = await sendInviteLinkEmail({ candidateEmail, candidateName, inviteToken });
       }
       // Low-credit trigger (E5): after a SUCCESSFUL charge (never on an idempotent
       // replay), check whether this charge pushed usage to >=80%. The conditional
@@ -560,6 +629,44 @@ export async function handler(event) {
       const { inviteToken } = parsed;
       const refunded = await refundInvite(inviteToken);
       return resp(200, { refunded });
+    }
+
+    // W3B-3: re-send a candidate's magic-link email. NEVER charges a credit (a
+    // resend re-delivers the SAME link, no new invite/ledger interaction). Reuses
+    // the create-path SES block via sendInviteLinkEmail, throttled per-invite by a
+    // resendLastAt cooldown (mirrors the OTP send cooldown). The app only offers
+    // this for non-terminal invites; the engine enforces the same fail-closed.
+    if (method === "POST" && path === "/ent/invites/resend") {
+      const { inviteToken } = parsed;
+      if (!inviteToken || typeof inviteToken !== "string") {
+        return resp(400, { error: "INVITE_TOKEN_REQUIRED" });
+      }
+      const invite = await getInvite(inviteToken);
+      if (!invite) return resp(404, { error: "not found" });
+      if (invite.expiresAt && new Date(invite.expiresAt) < new Date()) {
+        return resp(410, { error: "LINK_EXPIRED" });
+      }
+      // Terminal invites have no live link to receive -- a revoked / submitted /
+      // refunded candidate must never be re-emailed.
+      if (["revoked", "submitted", "refunded"].includes(invite.status)) {
+        return resp(409, { error: "NOT_RESENDABLE", status: invite.status });
+      }
+      // Per-invite cooldown (whitelisted RESEND_COOLDOWN code for the app UI).
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (invite.resendLastAt && nowSec - invite.resendLastAt < INVITE_RESEND_COOLDOWN_SEC) {
+        return resp(429, { error: "RESEND_COOLDOWN", retryAfter: INVITE_RESEND_COOLDOWN_SEC - (nowSec - invite.resendLastAt) });
+      }
+      // No candidate email on file -> nothing to resend (a copy-link-only invite).
+      if (!invite.candidateEmail) return resp(400, { error: "NO_CANDIDATE_EMAIL" });
+      // Stamp the cooldown BEFORE the send (like setOtp) so a send that fails at
+      // SES still throttles the next attempt.
+      await stampInviteResend(inviteToken);
+      const emailed = await sendInviteLinkEmail({
+        candidateEmail: invite.candidateEmail,
+        candidateName: invite.candidateName,
+        inviteToken,
+      });
+      return resp(200, { ok: true, emailed });
     }
 
     // ── candidate flow (safe subset — pure entinfra) ───────────────────────
@@ -779,6 +886,7 @@ export async function handler(event) {
         console.log(
           JSON.stringify({ audit: true, action: "report.revoke", actor, assessmentId, at: Date.now() })
         );
+        await audit({ orgId: a.orgId, actor, action: "report.revoke", target: assessmentId, detail: { kind: "assessment" } });
         return resp(200, { ok: true, revokedAt: a.reportRevokedAt });
       }
       if (inviteToken) {
@@ -787,6 +895,7 @@ export async function handler(event) {
         console.log(
           JSON.stringify({ audit: true, action: "report.revoke", actor, inviteToken, at: Date.now() })
         );
+        await audit({ orgId: inv.orgId, actor, action: "report.revoke", target: inviteToken, detail: { kind: "candidate" } });
         return resp(200, { ok: true, revokedAt: inv.candidateReportRevokedAt });
       }
       return resp(400, { error: "TARGET_REQUIRED" });
@@ -801,6 +910,7 @@ export async function handler(event) {
         console.log(
           JSON.stringify({ audit: true, action: "report.renew", actor, assessmentId, at: Date.now() })
         );
+        await audit({ orgId: a.orgId, actor, action: "report.renew", target: assessmentId, detail: { kind: "assessment" } });
         return resp(200, { ok: true, reportExpiresAt: a.reportExpiresAt });
       }
       if (inviteToken) {
@@ -809,6 +919,7 @@ export async function handler(event) {
         console.log(
           JSON.stringify({ audit: true, action: "report.renew", actor, inviteToken, at: Date.now() })
         );
+        await audit({ orgId: inv.orgId, actor, action: "report.renew", target: inviteToken, detail: { kind: "candidate" } });
         return resp(200, { ok: true, reportExpiresAt: inv.candidateReportExpiresAt });
       }
       return resp(400, { error: "TARGET_REQUIRED" });
@@ -844,12 +955,23 @@ export async function handler(event) {
       const actor = cleanActor(parsed.actor);
       const order = await createOrder({ orgId, invoiceNo, gstin, amountMinor, currency, credits, note });
       console.log(JSON.stringify({ audit: true, action: "order.create", actor, orderId: order.orderId, orgId, credits: order.credits, at: Date.now() }));
+      await audit({ orgId, actor, action: "order.create", target: order.orderId, detail: { credits: order.credits, invoiceNo: order.invoiceNo } });
       return resp(200, order);
     }
 
     if (method === "GET" && path === "/ent/orders") {
       const orders = await listOrders(qs.orgId);
       return resp(200, { orders });
+    }
+
+    // W3B-1: an org's durable audit trail, newest-first. ShieldSync admin only
+    // (the app enforces the staff gate before calling this; the shared-secret
+    // gate protects the route itself). Optional ?limit= (clamped 1..200 in
+    // entinfra.listAudit).
+    if (method === "GET" && path === "/ent/audit") {
+      if (!qs.orgId) return resp(400, { error: "ORG_ID_REQUIRED" });
+      const auditEvents = await listAudit(qs.orgId, qs.limit);
+      return resp(200, { audit: auditEvents });
     }
 
     if (method === "POST" && path === "/ent/orders/paid") {
@@ -862,6 +984,10 @@ export async function handler(event) {
       console.log(
         JSON.stringify({ audit: true, action: "order.paid", actor, orderId, paid: paid.paid, creditsGranted: paid.creditsGranted ?? 0, at: Date.now() })
       );
+      // markOrderPaid returns only the {paid,creditsGranted} outcome, so read the
+      // order once for the orgId to index this audit under (admin action, rare).
+      const paidOrder = await getOrder(orderId);
+      await audit({ orgId: paidOrder?.orgId, actor, action: "order.paid", target: orderId, detail: { paid: paid.paid, creditsGranted: paid.creditsGranted ?? 0 } });
       return resp(200, { paid });
     }
 
@@ -902,6 +1028,7 @@ export async function handler(event) {
       console.log(
         JSON.stringify({ audit: true, action: "agreement.create", actor, agreementId: agreement.agreementId, orgId, docType, customized: agreement.customized, supersedes: supersedes ?? null, at: Date.now() })
       );
+      await audit({ orgId, actor, action: "agreement.create", target: agreement.agreementId, detail: { docType, customized: agreement.customized, supersedes: supersedes ?? null } });
       return resp(200, agreement);
     }
 
@@ -931,6 +1058,7 @@ export async function handler(event) {
         console.log(
           JSON.stringify({ audit: true, action: "agreement.update", actor, agreementId, fields: Object.keys(patch), at: Date.now() })
         );
+        await audit({ orgId: agreement.orgId, actor, action: "agreement.update", target: agreementId, detail: { fields: Object.keys(patch) } });
         return resp(200, agreement);
       } catch (e) {
         // Draft-only edits: an issued/accepted/void agreement is immutable.
@@ -949,6 +1077,7 @@ export async function handler(event) {
         console.log(
           JSON.stringify({ audit: true, action: "agreement.issue", actor, agreementId, orgId: agreement.orgId, docType: agreement.docType, sha256: agreement.sha256, at: Date.now() })
         );
+        await audit({ orgId: agreement.orgId, actor, action: "agreement.issue", target: agreementId, detail: { docType: agreement.docType, sha256: agreement.sha256 } });
         // Supersede cascade (W3-1): this new agreement replaces an older one.
         // BEST-EFFORT second update by contract -- the issue above already
         // committed, and a cascade failure is logged for ops, never surfaced as
@@ -998,6 +1127,7 @@ export async function handler(event) {
           console.log(
             JSON.stringify({ audit: true, action: "agreement.accept", actor, agreementId, orgId: agreement.orgId, docType: agreement.docType, acceptedBy, sha256: agreement.sha256, at: Date.now() })
           );
+          await audit({ orgId: agreement.orgId, actor, action: "agreement.accept", target: agreementId, detail: { docType: agreement.docType, acceptedBy, sha256: agreement.sha256 } });
         }
         return resp(200, { ok: true, already: r.already, agreement });
       } catch (e) {
@@ -1016,6 +1146,7 @@ export async function handler(event) {
         console.log(
           JSON.stringify({ audit: true, action: "agreement.void", actor, agreementId, orgId: agreement.orgId, at: Date.now() })
         );
+        await audit({ orgId: agreement.orgId, actor, action: "agreement.void", target: agreementId, detail: { docType: agreement.docType } });
         return resp(200, { ok: true, agreement });
       } catch (e) {
         if (e.code === "NOT_VOIDABLE") return resp(409, { error: "NOT_VOIDABLE", status: e.status });

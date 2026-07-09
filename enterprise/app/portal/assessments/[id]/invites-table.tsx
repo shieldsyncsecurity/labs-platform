@@ -28,6 +28,11 @@ const EM_DASH = String.fromCharCode(8212);
 
 const PROBLEM_MAX_CHARS = 2000;
 
+// Invite statuses with no live magic-link to receive -- the engine refuses to
+// re-email these, so the "Resend email" button is hidden for them. Mirrors the
+// engine's NOT_RESENDABLE guard (submitted/revoked/refunded) plus expired.
+const TERMINAL_STATUSES = new Set(["submitted", "revoked", "expired", "refunded"]);
+
 // Local (client-safe) correctness helper -- deliberately NOT imported from the
 // server report-bits module so this "use client" component pulls no server code
 // into the browser bundle. Same formula as report-bits.correctnessPct.
@@ -112,6 +117,10 @@ export default function InvitesTable({
   const [problemPending, setProblemPending] = useState(false);
   const [problemError, setProblemError] = useState<string | null>(null);
   const [problemSent, setProblemSent] = useState<Record<string, boolean>>({});
+  // Resend magic-link email (W3B-3): which row is in flight + the per-row
+  // result notice (success or a cooldown/soft error message).
+  const [resendingToken, setResendingToken] = useState<string | null>(null);
+  const [resendMsg, setResendMsg] = useState<Record<string, { ok: boolean; text: string }>>({});
 
   // Client-only: build absolute links from window.location so copy/open give a
   // URL that works from any device, not just relative.
@@ -166,6 +175,45 @@ export default function InvitesTable({
       setError("Could not reach the server. Try again.");
     } finally {
       setLinkPending(null);
+    }
+  }
+
+  // Re-send the candidate's magic-link email. Never charges a credit; the
+  // server route re-verifies org ownership. On a cooldown the engine returns a
+  // whitelisted 429 -> we show a soft "wait" notice, not a hard error.
+  async function handleResend(inviteToken?: string) {
+    if (!inviteToken) return;
+    setResendingToken(inviteToken);
+    setResendMsg((prev) => {
+      const next = { ...prev };
+      delete next[inviteToken];
+      return next;
+    });
+    try {
+      const res = await fetch("/api/portal/invites/resend", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ inviteToken, assessmentId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResendMsg((prev) => ({
+          ...prev,
+          [inviteToken]: { ok: false, text: data?.error ?? "Could not resend the email." },
+        }));
+        return;
+      }
+      // emailed === false means SES did not accept it (cooldown already stamped
+      // engine-side) -- report honestly rather than a flat "resent".
+      const text = data?.emailed === false ? "Resent (delivery may be delayed)" : "Email resent";
+      setResendMsg((prev) => ({ ...prev, [inviteToken]: { ok: true, text } }));
+    } catch {
+      setResendMsg((prev) => ({
+        ...prev,
+        [inviteToken]: { ok: false, text: "Could not reach the server. Try again." },
+      }));
+    } finally {
+      setResendingToken(null);
     }
   }
 
@@ -298,6 +346,13 @@ export default function InvitesTable({
                     ? `${origin}/r/c/${invite.candidateReportToken}`
                     : "";
                 const hasReportLink = submitted && Boolean(invite.candidateReportToken);
+                // Resend is offered only for non-terminal invites that actually
+                // have an email on file (copy-link-only invites have none).
+                const resendable =
+                  Boolean(token) &&
+                  Boolean(invite.candidateEmail) &&
+                  !TERMINAL_STATUSES.has((invite.status ?? "").toLowerCase());
+                const resendNote = token ? resendMsg[token] : undefined;
                 const problemOpen = Boolean(token) && problemFor === token;
                 return (
                   <SingleRow key={token ?? i}>
@@ -373,6 +428,17 @@ export default function InvitesTable({
                             )
                           ) : null}
                           {link ? <CopyButton value={link} label="Copy link" /> : null}
+                          {resendable ? (
+                            <button
+                              type="button"
+                              onClick={() => handleResend(token)}
+                              disabled={resendingToken === token}
+                              className="text-xs font-semibold text-brand-strong hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                              title="Re-sends the candidate's magic-link email (no credit charged)"
+                            >
+                              {resendingToken === token ? "Sending..." : "Resend email"}
+                            </button>
+                          ) : null}
                           {!revoked && token ? (
                             <button
                               type="button"
@@ -406,6 +472,15 @@ export default function InvitesTable({
                               ? "Report link revoked "
                               : "Report link expired "}
                             {EM_DASH} renew to re-enable. A leaked link should stay revoked.
+                          </p>
+                        ) : null}
+                        {resendNote ? (
+                          <p
+                            className={`mt-1 text-right text-[11px] ${
+                              resendNote.ok ? "text-emerald-700" : "text-rose-700"
+                            }`}
+                          >
+                            {resendNote.text}
                           </p>
                         ) : null}
                       </td>

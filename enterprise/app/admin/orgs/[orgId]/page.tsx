@@ -13,6 +13,7 @@ import CopyButton from "../../../portal/_components/copy-button";
 import AdjustCreditsForm from "./adjust-credits-form";
 import DeleteOrgButton from "./delete-org-button";
 import OrdersSection, { type OrderRow } from "./orders-section";
+import ActivityPanel from "./_components/activity-panel";
 import { Bar, formatDate } from "../../../r/_components/report-bits";
 
 export const metadata: Metadata = {
@@ -205,6 +206,50 @@ export default async function AdminOrgDetailPage({
           ) : (
             <OrdersSection orgId={org.orgId ?? orgId} orders={orders} />
           )}
+        </div>
+
+        {/* Invoices (W3B-2): a GST tax invoice view/PDF per PAID order. Kept as a
+            small companion list to the orders panel so the Invoice link lives in
+            this page (not the client OrdersSection). */}
+        {(() => {
+          const paidOrders = orders.filter((o) => o.status === "paid" && o.orderId);
+          if (ordersError || paidOrders.length === 0) return null;
+          return (
+            <div className="mt-6 rounded-xl border border-line bg-surface p-5">
+              <h2 className="text-sm font-semibold text-ink-soft">Invoices</h2>
+              <p className="mt-1 text-xs text-muted">
+                Print-clean GST tax invoice for each paid order.
+              </p>
+              <ul className="mt-3 divide-y divide-line">
+                {paidOrders.map((o, i) => (
+                  <li
+                    key={o.orderId ?? i}
+                    className="flex flex-wrap items-center justify-between gap-2 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <span className="font-mono text-xs text-ink">
+                        {o.invoiceNo || o.orderId?.slice(0, 8)}
+                      </span>
+                      <span className="ml-2 text-xs text-muted">
+                        {o.credits ?? 0} credits &middot; paid {formatDate(o.paidAt)}
+                      </span>
+                    </div>
+                    <Link
+                      href={`/admin/orgs/${org.orgId ?? orgId}/orders/${o.orderId}/invoice`}
+                      className="text-xs font-semibold text-brand-strong hover:underline"
+                    >
+                      Invoice
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
+
+        {/* Activity (W3B-1): durable audit trail, client-fetched. */}
+        <div className="mt-6">
+          <ActivityPanel orgId={org.orgId ?? orgId} />
         </div>
 
         {/* Agreements (W3-4): legal documents for this org */}

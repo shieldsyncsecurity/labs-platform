@@ -7,6 +7,7 @@ import PortalNav from "../../_components/portal-nav";
 import AddCandidateForm from "./add-candidate-form";
 import InvitesTable, { type InviteRow, type ResultRow } from "./invites-table";
 import ReportLinkControls from "./report-link-controls";
+import AssessmentSettings from "./assessment-settings";
 import { formatDate, correctnessPct } from "../../../r/_components/report-bits";
 
 export const metadata: Metadata = {
@@ -168,6 +169,13 @@ export default async function AssessmentDetailPage({
             <p className="mt-3 text-xs text-muted">No report link available yet.</p>
           </div>
         )}
+
+        {/* Settings: rename + hints toggle (W3B-4) */}
+        <AssessmentSettings
+          assessmentId={id}
+          initialName={assessment.name ?? ""}
+          initialHintsOn={assessment.hintsOn !== false}
+        />
 
         {/* Add candidate */}
         <div className="mt-8 rounded-xl border border-line bg-surface p-5">

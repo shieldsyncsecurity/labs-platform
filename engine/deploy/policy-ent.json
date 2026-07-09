@@ -30,7 +30,9 @@
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntOrders",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntOrders/index/*",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAgreements",
-        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAgreements/index/*"
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAgreements/index/*",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAudit",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAudit/index/*"
       ]
     },
     {

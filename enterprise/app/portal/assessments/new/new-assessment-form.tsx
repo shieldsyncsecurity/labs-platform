@@ -2,13 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-
-// MVP lab catalog. Hardcoded per the build brief -- when more labs are
-// available for assessments, extend this list (and keep it in sync with
-// whatever labSlugs the engine actually recognizes for /ent/assessments).
-const LAB_OPTIONS = [
-  { slug: "s3-misconfiguration-audit", label: "S3 misconfiguration & data exposure" },
-];
+// Single source of truth for the lab catalog (allowlist + labels), shared with
+// the server create route so the two never drift. Add a lab in one place:
+// enterprise/lib/labs.ts.
+import { LAB_OPTIONS } from "@/lib/labs";
 
 export default function NewAssessmentForm() {
   const router = useRouter();

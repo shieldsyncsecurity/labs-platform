@@ -36,6 +36,7 @@ const SLOTS_TABLE = "ShieldSyncEntSlots";
 const RESULTS_TABLE = "ShieldSyncEntResults";
 const ORDERS_TABLE = "ShieldSyncEntOrders";
 const AGREEMENTS_TABLE = "ShieldSyncEntAgreements";
+const AUDIT_TABLE = "ShieldSyncEntAudit";
 
 // Epoch-seconds helpers for ttl / rolling windows.
 const DAYS = 24 * 3600;
@@ -305,6 +306,49 @@ export async function listAssessments(orgId) {
     })
   );
   return (r.Items ?? []).map(itemToObject);
+}
+
+/**
+ * updateAssessment(): patch an assessment's editable settings (W3B-4: name /
+ * hintsOn). Guarded by attribute_exists(assessmentId) so a bad id is a clean
+ * null (the handler maps that to 404), never a phantom row. ORG-OWNERSHIP is
+ * verified APP-SIDE before this is called -- the engine only checks existence.
+ * Returns the updated assessment, or null when no such assessment exists.
+ */
+export async function updateAssessment(assessmentId, patch = {}) {
+  const db = await ddb();
+  const names = {};
+  const values = {};
+  const sets = [];
+  let i = 0;
+  const put = (field, av) => {
+    names[`#f${i}`] = field;
+    values[`:v${i}`] = av;
+    sets.push(`#f${i} = :v${i}`);
+    i++;
+  };
+  if (patch.name !== undefined) put("name", S(patch.name));
+  if (patch.hintsOn !== undefined) put("hintsOn", BOOL(patch.hintsOn));
+  // Nothing to change -- return the current row so the caller still gets a
+  // {found} signal (the handler rejects an empty patch before reaching here).
+  if (sets.length === 0) return getAssessment(assessmentId);
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: ASSESSMENTS_TABLE,
+        Key: { assessmentId: S(assessmentId) },
+        UpdateExpression: "SET " + sets.join(", "),
+        ConditionExpression: "attribute_exists(assessmentId)",
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObject(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return null;
+    throw e;
+  }
 }
 
 // -- REPORT-TOKEN LIFECYCLE (E1) ----------------------------------------------
@@ -692,6 +736,34 @@ export async function refundInvite(inviteToken) {
  *  the credit stays consumed. Plain status write via setInviteStatus. */
 export async function revokeInvite(inviteToken) {
   return setInviteStatus(inviteToken, "revoked");
+}
+
+/**
+ * stampInviteResend(): record resendLastAt (epoch SECONDS) for the magic-link
+ * resend cooldown (W3B-3). Deliberately does NOT touch status -- a resend is not
+ * a state transition and NEVER charges a credit. Stamped BEFORE the SES send (as
+ * setOtp stamps otpLastSentAt) so a send that fails at SES still throttles the
+ * next attempt. Guarded by attribute_exists so a vanished invite is a clean null.
+ * Returns the updated invite, or null if no such invite.
+ */
+export async function stampInviteResend(inviteToken) {
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: INVITES_TABLE,
+        Key: { inviteToken: S(inviteToken) },
+        UpdateExpression: "SET resendLastAt = :ts",
+        ConditionExpression: "attribute_exists(inviteToken)",
+        ExpressionAttributeValues: { ":ts": N(now()) },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObject(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return null;
+    throw e;
+  }
 }
 
 // Dispute log cap (E6): the newest PROBLEMS_MAX entries are kept, oldest dropped.
@@ -1473,4 +1545,61 @@ export async function setOrgAcceptedAgreement(orgId, version) {
       ExpressionAttributeValues: { ":v": S(version ?? ""), ":at": S(nowIso()) },
     })
   );
+}
+
+// -- AUDIT (W3B-1: durable, permanent audit trail) -----------------------------
+//
+// One row per privileged mutation, mirroring the greppable console.log audit
+// line the handler already emits (that console line STAYS -- it is immediate in
+// CloudWatch and effectively free). This table is the queryable, permanent
+// record the admin Activity panel reads: pk=auditId, GSI orgId-index
+// (pk=orgId, sk=createdAt) so an org's recent events list newest-first without a
+// Scan. NO TTL: an audit trail is a permanent record (like Orders/Agreements),
+// and the table has PITR (see create-ent-audit-table.mjs).
+//
+// Writes are BEST-EFFORT at the call site: the handler wraps appendAudit in
+// try/catch so a failed audit write can NEVER fail the parent mutation.
+
+/**
+ * appendAudit(): write one immutable audit row. `detail` is an arbitrary small
+ * plain object (marshalled like a result payload). orgId is the GSI partition
+ * key -- when it is falsy the attribute is OMITTED entirely (a DynamoDB index
+ * key may not be an empty string, and a sparse index just skips the row) so an
+ * unknown-org audit still lands in the base table without throwing.
+ */
+export async function appendAudit({ orgId, actor, action, target, detail } = {}) {
+  const db = await ddb();
+  const item = {
+    auditId: S(newToken()),
+    ...(orgId ? { orgId: S(orgId) } : {}),
+    actor: S(actor ?? ""),
+    action: S(action ?? ""),
+    target: S(target ?? ""),
+    detail: marshalValue(detail && typeof detail === "object" ? detail : {}),
+    createdAt: S(nowIso()),
+  };
+  await db.send(new PutItemCommand({ TableName: AUDIT_TABLE, Item: item }));
+  return itemToObjectDeep(item);
+}
+
+/**
+ * listAudit(): an org's recent audit events, newest-first, via orgId-index
+ * (pk=orgId, sk=createdAt; ScanIndexForward:false = descending createdAt).
+ * `limit` is clamped to [1, 200]. Admin-only (the app enforces the staff gate
+ * before calling GET /ent/audit).
+ */
+export async function listAudit(orgId, limit = 100) {
+  const db = await ddb();
+  const n = Math.min(Math.max(Number(limit) || 100, 1), 200);
+  const r = await db.send(
+    new QueryCommand({
+      TableName: AUDIT_TABLE,
+      IndexName: "orgId-index",
+      KeyConditionExpression: "orgId = :o",
+      ExpressionAttributeValues: { ":o": S(orgId) },
+      ScanIndexForward: false,
+      Limit: n,
+    })
+  );
+  return (r.Items ?? []).map(itemToObjectDeep);
 }
