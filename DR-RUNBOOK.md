@@ -40,7 +40,7 @@ Last verified: 2026-07-09. Keep this file current when infra changes.
 
 ### 2b. Runtime data — DynamoDB, backed up TWO ways
 1. **PITR (point-in-time recovery)** — ENABLED on all 17 `ShieldSync*` tables. Continuous, restore to any second in the last **35 days**, in-account/in-region. Best for "someone deleted/corrupted data today."
-2. **Daily S3 export** — Lambda `ShieldSyncBackupExporter` (EventBridge `rate(1 day)`) exports every table to **`s3://shieldsync-backups-750294427884/exports/<YYYY-MM-DD>/<table>/`** in **us-west-2** (a DIFFERENT region from the us-east-1 data). Versioned + SSE + public-access-blocked. Lifecycle: Deep Archive after 90 days, expire after 730 days. Plain `DYNAMODB_JSON` — downloadable, greppable, re-importable anywhere. Best for "region outage," ">35-day retention" (legal: agreements are permanent, results 24 months), and off-account copies.
+2. **Weekly S3 export** — Lambda `ShieldSyncBackupExporter` (EventBridge `rate(7 days)`) exports every table to **`s3://shieldsync-backups-750294427884/exports/<YYYY-MM-DD>/<table>/`** in **us-west-2** (a DIFFERENT region from the us-east-1 data). Versioned + SSE + public-access-blocked. Lifecycle: Glacier Instant Retrieval at 30d, Deep Archive at 120d, expire at 760d. Plain `DYNAMODB_JSON` — downloadable, greppable, re-importable anywhere. Best for "region outage," ">35-day retention" (legal: agreements are permanent, results 24 months), and off-account copies. **Weekly (not daily) on purpose:** PITR already covers granular in-region recovery, so this tier only needs to cover the catastrophic cases where a 1-week RPO is fine — and DynamoDB charges ~$0.10/GB *per full export*, so weekly keeps that 7x cheaper as data grows.
 
 Trigger a backup on demand: `aws lambda invoke --function-name ShieldSyncBackupExporter --region us-east-1 /tmp/out.json && cat /tmp/out.json` (returns `{started, failed}`).
 
@@ -131,7 +131,8 @@ Cross-account access: base creds `apiuserforclaude` (acct 851) assume `Organizat
 ---
 
 ## 6. Backup system maintenance
-- **Cadence / retention:** daily export; 730-day expiry; Deep Archive after 90 days. Tune in `setup-backup.sh` (lifecycle) — cheap while data is small; revisit if table sizes grow.
+- **Cadence / retention:** weekly full export; lifecycle Glacier-IR@30d -> Deep-Archive@120d -> expire@760d. Tune in `setup-backup.sh`.
+- **When tables get LARGE (the cost lever):** a full export costs ~$0.10/GB *each time*. If tables grow into many GB, switch the exporter from full to **incremental exports** (`ExportType=INCREMENTAL_EXPORT` — deltas only since the last export, a fraction of the size) with a periodic full baseline. Full weekly is fine for small/medium data; incremental is the answer at scale. Storage itself is cheap (Deep Archive ~$0.001/GB-mo) — the export *operation* fee is the thing that scales with size.
 - **Add a new table:** the exporter auto-discovers any `ShieldSync*` table — no change needed. Enable PITR on it at creation (the `create-*-table.mjs` scripts do this).
 - **Monthly:** pull an off-site copy (§2b) and spot-check a restore (§3b into a throwaway table) so recovery is proven, not assumed.
 - **Cross-account hardening (optional):** replicate the backup bucket to a different AWS payer (or download off-cloud) so an org-level loss can't take both the data and its backups.

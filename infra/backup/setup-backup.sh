@@ -38,14 +38,24 @@ aws s3api put-public-access-block --bucket "$BUCKET" \
 aws s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled
 aws s3api put-bucket-encryption --bucket "$BUCKET" --server-side-encryption-configuration \
   '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+# Lifecycle tuned for cost-at-SCALE: backups are cold DR copies, rarely read, so
+# tier them down fast. Glacier Instant Retrieval at 30d (cheap, still instant if
+# you need a recent restore) -> Deep Archive at 120d (~$0.001/GB-mo) -> expire at
+# 760d (comfortably past the 24-month legal retention + Deep Archive's 180d min).
+# S3's default TransitionDefaultMinimumObjectSize keeps tiny manifest files in
+# Standard (transitioning sub-128KB objects to Glacier is a false economy).
 aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" --lifecycle-configuration '{
   "Rules": [{
     "ID": "shieldsync-backup-retention",
     "Filter": {"Prefix": "exports/"},
     "Status": "Enabled",
-    "Transitions": [{"Days": 90, "StorageClass": "DEEP_ARCHIVE"}],
-    "Expiration": {"Days": 730},
-    "NoncurrentVersionExpiration": {"NoncurrentDays": 30}
+    "Transitions": [
+      {"Days": 30, "StorageClass": "GLACIER_IR"},
+      {"Days": 120, "StorageClass": "DEEP_ARCHIVE"}
+    ],
+    "Expiration": {"Days": 760},
+    "NoncurrentVersionExpiration": {"NoncurrentDays": 7},
+    "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7}
   }]
 }'
 echo "  versioning + SSE + block-public + lifecycle applied"
@@ -92,10 +102,15 @@ else
 fi
 aws lambda wait function-updated --function-name "$FN" --region "$DATA_REGION"
 
-echo "== 5/5 EventBridge daily schedule ($RULE) =="
+# WEEKLY, not daily: PITR already gives continuous 35-day in-region recovery, so
+# the S3 export tier only needs to cover region/account loss + >35-day retention,
+# where a 1-week RPO is the right trade. Weekly cuts the per-GB export-operation
+# cost (DynamoDB charges ~$0.10/GB EVERY full export) 7x at scale. For genuinely
+# large tables later, switch to INCREMENTAL exports (deltas only) -- see DR-RUNBOOK.
+echo "== 5/5 EventBridge weekly schedule ($RULE) =="
 aws events put-rule --name "$RULE" --region "$DATA_REGION" \
-  --schedule-expression "rate(1 day)" --state ENABLED \
-  --description "ShieldSync daily DynamoDB backup export" >/dev/null
+  --schedule-expression "rate(7 days)" --state ENABLED \
+  --description "ShieldSync weekly DynamoDB backup export" >/dev/null
 FN_ARN="arn:aws:lambda:${DATA_REGION}:${ACCOUNT}:function:${FN}"
 aws lambda add-permission --function-name "$FN" --region "$DATA_REGION" \
   --statement-id "${RULE}-invoke" --action lambda:InvokeFunction \
