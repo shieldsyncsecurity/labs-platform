@@ -920,9 +920,14 @@ export async function bookSlot(slotKey, capacity, inviteToken) {
       new UpdateItemCommand({
         TableName: SLOTS_TABLE,
         Key: { slotKey: S(slotKey) },
+        // `ttl` is a DynamoDB reserved keyword — it MUST be aliased via
+        // ExpressionAttributeNames or the whole UpdateItem throws
+        // ValidationException. Without this alias, /ent/book 500s every time
+        // and no slot is ever written (root cause: booking never worked).
         UpdateExpression:
-          "ADD booked :one SET inviteTokens = list_append(if_not_exists(inviteTokens, :empty), :it), ttl = :ttl",
+          "ADD booked :one SET inviteTokens = list_append(if_not_exists(inviteTokens, :empty), :it), #ttl = :ttl",
         ConditionExpression: "attribute_not_exists(booked) OR booked < :cap",
+        ExpressionAttributeNames: { "#ttl": "ttl" },
         ExpressionAttributeValues: {
           ":one": N(1),
           ":cap": N(capacity),

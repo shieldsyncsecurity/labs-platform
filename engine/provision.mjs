@@ -23,7 +23,10 @@ const MGMT_ACCOUNT = "851236938541";
 const BUDGET_EMAIL = "info@shieldsyncsecurity.com";
 const ADMIN_POLICY = "arn:aws:iam::aws:policy/AdministratorAccess";
 const CONTROL_ROLES = ["ShieldSyncLabExec", "ShieldSyncLabUser"];
-// Scoped trust: ONLY the engine's Lambda exec role (prod) and the platform-account
+// Scoped trust: the B2C engine role, the ENTERPRISE engine role (an ent-reserved
+// account is leased by the separate ShieldSyncEnterpriseEngine Lambda, which mints
+// the learner console via ShieldSyncLabUser — without this it gets AccessDenied on
+// sts:AssumeRole and /ent/start 500s), and the platform-account
 // OrganizationAccountAccessRole (the local-dev bridge in labinfra) may assume the
 // lab roles — NOT the whole platform-account root. Least privilege for cross-account.
 const TRUST_PLATFORM = JSON.stringify({
@@ -34,6 +37,7 @@ const TRUST_PLATFORM = JSON.stringify({
       Principal: {
         AWS: [
           `arn:aws:iam::${PLATFORM_ACCOUNT}:role/ShieldSyncEngineRole`,
+          `arn:aws:iam::${PLATFORM_ACCOUNT}:role/ShieldSyncEnterpriseEngineRole`,
           `arn:aws:iam::${PLATFORM_ACCOUNT}:role/OrganizationAccountAccessRole`,
         ],
       },

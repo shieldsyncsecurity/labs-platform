@@ -70,7 +70,30 @@ import {
 import { gradeLab } from "./graders.mjs";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { createWriteStream } from "node:fs";
+import { chmod } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import { randomInt } from "node:crypto";
+
+// aws-nuke binary bootstrap — IDENTICAL to handler.mjs (the B2C engine). The
+// 287 MB binary is too large to bundle, so it lives in the deploy bucket and is
+// streamed to /tmp/aws-nuke at container cold-start. teardown() in labinfra
+// spawns /tmp/aws-nuke; without this download the ent engine's teardown failed
+// with `spawn /tmp/aws-nuke ENOENT` and every ent-leased account leaked
+// (root cause: the bootstrap was never ported to this separate Lambda file).
+const DEPLOY_BUCKET = "shieldsync-engine-deploy-750294427884";
+const NUKE_TMP = "/tmp/aws-nuke";
+const nukeReady = process.env.AWS_LAMBDA_FUNCTION_NAME
+  ? (async () => {
+      const s3 = new S3Client({ region: "us-east-1" });
+      const { Body } = await s3.send(new GetObjectCommand({ Bucket: DEPLOY_BUCKET, Key: "aws-nuke-linux" }));
+      const ws = createWriteStream(NUKE_TMP);
+      await pipeline(Body, ws);
+      await chmod(NUKE_TMP, 0o755);
+      console.log("[ent-init] aws-nuke downloaded to /tmp");
+    })().catch((e) => { console.error("[ent-init] aws-nuke download failed:", e.message); throw e; })
+  : Promise.resolve();
 
 // Scored time-box for an enterprise assessment attempt (MVP: fixed for all
 // labs; per-lab override can come later from assessment/lab config). Lease
@@ -230,12 +253,26 @@ async function runDeployEnt({ sessionId, accountId, labSlug, execRoleArn }) {
 
 async function runTeardownEnt({ sessionId }) {
   try {
+    await nukeReady; // ensure /tmp/aws-nuke exists before teardown spawns it
     await teardown(sessionId);
   } catch (e) {
     // Never throw out of the worker — teardown failures are logged and left
     // for the reaper/ops to reconcile, not surfaced to the candidate (who has
     // already submitted and moved on).
     console.error(`[ent-worker] teardown failed ${sessionId}: ${e.message}`);
+  }
+  return { ok: true };
+}
+
+async function runWarmEnt({ labSlug }) {
+  // Pre-warm the reserved pool for a booked slot. This CloudFormation deploy
+  // takes ~90s and MUST run in its own async invocation — awaiting it inline in
+  // the /ent/book HTTP handler blew the API Gateway 30s integration timeout
+  // (candidate saw 503 while the warm kept running + occupied the account).
+  try {
+    if (labSlug) await ensureWarmEnt(labSlug);
+  } catch (e) {
+    console.error(`[ent-worker] warm failed ${labSlug}: ${e.message}`);
   }
   return { ok: true };
 }
@@ -261,6 +298,7 @@ async function invokeEntWorker(action, payload) {
   }
   if (action === "deploy-ent") return runDeployEnt(payload);
   if (action === "teardown-ent") return runTeardownEnt(payload);
+  if (action === "warm-ent") return runWarmEnt(payload);
 }
 
 export async function handler(event) {
@@ -273,6 +311,10 @@ export async function handler(event) {
     }
     if (action === "teardown-ent") {
       await runTeardownEnt(event);
+      return { ok: true };
+    }
+    if (action === "warm-ent") {
+      await runWarmEnt(event);
       return { ok: true };
     }
     return { ok: true };
@@ -1047,12 +1089,15 @@ export async function handler(event) {
       await setInviteStatus(inviteToken, "booked", { slotKey, slotAt: slotKey });
 
       // Best-effort pre-warm so the candidate's Start is instant at their slot.
-      // Warming is an optimization, not correctness — never fail the booking.
+      // DISPATCH ASYNC — the warm is a ~90s CloudFormation deploy; awaiting it
+      // inline blew the API Gateway 30s integration timeout (book 503'd while
+      // the warm ran on + occupied the account). Warming is an optimization,
+      // not correctness, so a dispatch failure never fails the booking.
       try {
         const assessment = await getAssessment(invite.assessmentId);
-        if (assessment?.labSlug) await ensureWarmEnt(assessment.labSlug);
+        if (assessment?.labSlug) await invokeEntWorker("warm-ent", { labSlug: assessment.labSlug });
       } catch (e) {
-        console.error("[ent/book] pre-warm failed (non-fatal):", e.message);
+        console.error("[ent/book] pre-warm dispatch failed (non-fatal):", e.message);
       }
 
       return resp(200, { ok: true, slotKey });
