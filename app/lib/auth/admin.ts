@@ -4,11 +4,14 @@
 
 import type { SessionUser } from "./cognito";
 
-const ADMIN_IDS = (process.env.ADMIN_USER_IDS ?? "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-
 export function isAdmin(user: SessionUser | null | undefined): boolean {
-  return !!user && ADMIN_IDS.includes(user.id);
+  if (!user) return false;
+  // Read at CALL time, not module scope: on Cloudflare Workers env vars are
+  // injected per-request, so a module-init read can see an empty value and
+  // silently lock every admin out.
+  const ids = (process.env.ADMIN_USER_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return ids.includes(user.id);
 }

@@ -1,32 +1,20 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { getServerUser } from "@/lib/auth/session";
-import { isAdmin } from "@/lib/auth/admin";
 import { LABS } from "@/lib/labs";
 import { priceFor, formatMoney } from "@/lib/payments/pricing";
 import { LabSettingsForm } from "./settings-form";
 
 export const metadata: Metadata = { robots: { index: false, follow: false } };
-export const dynamic = "force-dynamic"; // reads the session cookie
 
 /* Admin panel: per-lab prices / keywords / flags. Edits are committed to git
  * (both repos) via the API route, and CI redeploys — git stays the source of
- * truth, the panel is just a friendly pen. */
-export default async function AdminLabSettingsPage() {
-  const user = await getServerUser();
-  if (!isAdmin(user)) {
-    return (
-      <div className="mx-auto max-w-md px-5 py-8 text-center sm:py-10">
-        <h1 className="text-2xl font-bold text-ink">Not authorized</h1>
-        <p className="mt-2 text-base text-ink-soft">This page is for ShieldSync admins.</p>
-        <Link href="/dashboard" className="mt-6 inline-block rounded-xl bg-brand px-6 py-3 text-base font-semibold text-white hover:bg-brand-strong">
-          Back to dashboard
-        </Link>
-      </div>
-    );
-  }
-
-  // Catalog context for the form: current effective prices + defaults.
+ * truth, the panel is just a friendly pen.
+ *
+ * Deliberately a STATIC page (no session read here): the Free-plan CPU cap
+ * 1102s intermittent SSR, and a static shell costs ~0 CPU. All auth lives in
+ * the API route, which fails closed — the form renders "Not authorized" from
+ * its 403. The shell itself contains only public catalog facts. */
+export default function AdminLabSettingsPage() {
+  // Build-time catalog context for the form: current effective prices + defaults.
   const labs = LABS.map((l) => ({
     slug: l.slug,
     title: l.title,

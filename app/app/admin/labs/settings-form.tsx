@@ -62,6 +62,7 @@ const selectCls = inputCls + " cursor-pointer";
 export function LabSettingsForm({ labs }: { labs: LabCtx[] }) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const [denied, setDenied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string; links?: string[] } | null>(null);
@@ -71,6 +72,14 @@ export function LabSettingsForm({ labs }: { labs: LabCtx[] }) {
     (async () => {
       try {
         const r = await fetch("/api/admin/lab-settings", { cache: "no-store" });
+        if (r.status === 401 || r.status === 403) {
+          // The page shell is static; the API is the auth gate.
+          if (alive) {
+            setDenied(true);
+            setLoading(false);
+          }
+          return;
+        }
         const d = (await r.json()) as { configured?: boolean; settings?: Record<string, Partial<Setting>>; error?: string };
         if (!alive) return;
         setConfigured(!!d.configured);
@@ -117,6 +126,21 @@ export function LabSettingsForm({ labs }: { labs: LabCtx[] }) {
   }
 
   if (loading) return <p className="text-base text-muted">Loading current settings…</p>;
+
+  if (denied) {
+    return (
+      <div className="max-w-md rounded-2xl border border-line bg-surface px-6 py-7 text-center shadow-sm">
+        <h2 className="text-xl font-bold text-ink">Not authorized</h2>
+        <p className="mt-2 text-base text-ink-soft">This panel is for ShieldSync admins. Sign in with an admin account.</p>
+        <a
+          href="/sign-in"
+          className="mt-5 inline-block rounded-xl bg-brand px-6 py-2.5 text-base font-semibold text-white hover:bg-brand-strong"
+        >
+          Sign in
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div>
