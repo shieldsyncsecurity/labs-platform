@@ -586,11 +586,15 @@ export async function handler(event) {
       const order = await getOrder(orderId);
       if (!order) return resp(404, { error: "order not found" });
       // #8 + audit#2 FLAW A: re-validate the payment against the PERSISTED order at
-      // the engine's own trust boundary. amount + currency are REQUIRED and must
-      // match — omitting amountMinor must NOT skip validation (that was a self-grant
-      // path for a leaked-secret holder). markOrderPaid (app/lib/server/orders.ts)
-      // always sends both from the verified webhook, so this rejects no real caller.
-      if (Number(amountMinor) !== order.amountMinor || currency !== order.currency) {
+      // the engine's own trust boundary. amountMinor is REQUIRED and must match —
+      // omitting it must NOT skip validation (that was a self-grant path for a
+      // leaked-secret holder; Number(undefined) is NaN, which never equals). currency
+      // is checked only when the provider supplies one: Paytm's /v3/order/status
+      // response body has NO `currency` field, so confirm/callback forward undefined —
+      // a strict !== here rejected every real payment (charged, no access). Relaxing
+      // it loses nothing: a forger holding the worker secret would just send "INR";
+      // the amount check is the real gate.
+      if (Number(amountMinor) !== order.amountMinor || (currency != null && currency !== order.currency)) {
         console.warn(`[orders/paid] amount/currency mismatch or missing on ${orderId}`);
         return resp(400, { error: "amount mismatch" });
       }

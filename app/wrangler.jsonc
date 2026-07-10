@@ -18,9 +18,12 @@
     "APP_URL": "https://labs.shieldsyncsecurity.com",
     "ADMIN_USER_IDS": "b4b864a8-80b1-705f-2c40-fee7397141d2",
     "PAYMENTS_LIVE": "1",
-    "PAYTM_ENV": "staging",
-    "PAYTM_MID": "Xmukal01583191519034",
-    "PAYTM_WEBSITE": "WEBSTAGING",
+    // Production Paytm PG (go-live 2026-07-10). The merchant key is a Worker
+    // secret (wrangler secret put PAYTM_MERCHANT_KEY), never a var. Rollback:
+    // set PAYMENTS_LIVE to "0" and redeploy — that alone closes checkout.
+    "PAYTM_ENV": "production",
+    "PAYTM_MID": "LEfhcl08624319928201",
+    "PAYTM_WEBSITE": "DEFAULT",
     "PAYTM_INDUSTRY_TYPE": "Retail"
   }
 }

@@ -16,8 +16,12 @@ Goal: **same-day go-live**. Everything below is pre-staged; the day Paytm approv
 - [ ] `wrangler.jsonc`: set `PAYTM_ENV` = `production`, `PAYTM_MID` = prod MID, `PAYTM_WEBSITE` = prod website name.
 - [ ] Set the production merchant key as a Worker secret (never in wrangler.jsonc):
       `npx wrangler secret put PAYTM_MERCHANT_KEY` (check `lib/payments/paytm.ts` for the exact env var name before running).
-- [ ] In the Paytm dashboard, set the callback URL to `https://labs.shieldsyncsecurity.com/api/payments/paytm/callback`.
-- [ ] Housekeeping: if a `RAZORPAY_WEBHOOK_SECRET` Worker secret exists in the Cloudflare dashboard, delete it (code no longer reads it).
+- [x] ~~In the Paytm dashboard, set the callback URL~~ — **WRONG, do not do this** (corrected 2026-07-10):
+      the callback URL is passed **per-transaction** by `checkout/route.ts` with a required
+      `?orderId=` param; a static dashboard webhook URL can't carry it. Leave the dashboard's
+      "Webhook URL" page (Payment Notification URL etc.) EMPTY — configuring it would send
+      order-less notifications that silently grant nothing.
+- [ ] Housekeeping: if a `RAZORPAY_WEBHOOK_SECRET` Worker secret exists in the Cloudflare dashboard, delete it (code no longer reads it). (Checked 2026-07-10: not present.)
 
 ## 2. Pre-live security batch (audit #10 / #2 / #8 residuals) (~30 min)
 - [ ] Re-verify paid-content gating (#10): anonymous + free-tier user cannot fetch a paid lab's walkthrough from `/api/lab-content` (expect 401/403).
