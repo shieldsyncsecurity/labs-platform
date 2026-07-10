@@ -243,6 +243,11 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   const [consoleOpening, setConsoleOpening] = useState(false); // "Open AWS console" in flight
   const [consoleError, setConsoleError] = useState(false); // console mint failed (don't fail silently)
   const [wantsLaunch, setWantsLaunch] = useState(false);
+  // Manual-launch confirm, PAID labs only. A mis-click on a paid lab burns one of a
+  // finite launch budget and (on the first launch) starts the irreversible access
+  // window — so the manual button asks once. Free labs and the post-purchase
+  // ?intent=launch auto-launch (which calls launch() directly) are untouched.
+  const [confirmingLaunch, setConfirmingLaunch] = useState(false);
   const [freeNextAt, setFreeNextAt] = useState<string | null>(null); // when a free slot frees up
   const [freeWait, setFreeWait] = useState(0); // seconds until then
   const [freePos, setFreePos] = useState(0); // place in line (1-based; 0 = unknown)
@@ -1118,8 +1123,40 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
           </p>
         )}
 
-        <button onClick={launch} className={`mt-4 ${btnPrimary}`}>Launch lab →</button>
-        <p className="mt-2 text-center text-xs text-muted">Opens the AWS console in a new tab; this guide stays here.</p>
+        {confirmingLaunch ? (
+          <div className="mt-4 rounded-xl border border-line bg-canvas p-3">
+            <p className="text-sm font-semibold text-ink">Start now? This uses one launch.</p>
+            <p className="mt-1 text-xs leading-5 text-ink-soft">
+              {launchPolicy ? `You get ${launchPolicy}. ` : ""}Your access window starts on your first launch.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => { setConfirmingLaunch(false); void launch(); }}
+                className="flex-1 rounded-xl bg-gradient-to-r from-brand to-cyan px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-brand/20 transition hover:brightness-110"
+              >
+                Start lab →
+              </button>
+              <button
+                onClick={() => setConfirmingLaunch(false)}
+                className="rounded-xl border border-line-strong px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-surface"
+              >
+                Not yet
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Free labs launch on one click (flagship funnel — no friction). Paid labs
+                confirm first, since a mis-click spends a finite launch + starts the window. */}
+            <button
+              onClick={() => (lab?.free ? void launch() : setConfirmingLaunch(true))}
+              className={`mt-4 ${btnPrimary}`}
+            >
+              Launch lab →
+            </button>
+            <p className="mt-2 text-center text-xs text-muted">Opens the AWS console in a new tab; this guide stays here.</p>
+          </>
+        )}
       </div>
     </div>
   );

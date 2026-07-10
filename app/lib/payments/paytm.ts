@@ -16,7 +16,6 @@ export type PaytmConfig = {
   key: string;
   website: string;
   industryType: string;
-  channelId: string;
   baseUrl: string;
 };
 
@@ -27,9 +26,9 @@ export function paytmConfig(): PaytmConfig {
     key: (process.env.PAYTM_MERCHANT_KEY ?? "").trim(),
     website: process.env.PAYTM_WEBSITE ?? "WEBSTAGING",
     industryType: process.env.PAYTM_INDUSTRY_TYPE ?? "Retail",
-    channelId: process.env.PAYTM_CHANNEL_ID ?? "WEB",
     // Paytm's CURRENT hosts (the legacy securegw[-stage].paytm.in returns a generic 501
     // "System Error" for MIDs provisioned on the new platform — verified the hard way).
+    // channelId isn't sent — Paytm's CheckoutJS infers WEB/WAP from the client itself.
     baseUrl: env === "production" ? "https://secure.paytmpayments.com" : "https://securestage.paytmpayments.com",
   };
 }
