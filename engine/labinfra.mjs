@@ -150,10 +150,11 @@ export function labLearnerPolicy(labSlug, accountId) {
 // rush of free users can never starve paying customers. Scales as the pool grows
 // (e.g. 20 accounts → 6 free slots, 14 always reserved for paid). Min 1 so the
 // free lab still works on a tiny pool.
-// INTERIM (2026-06-22): the paid tier isn't live yet, so reserving capacity for
-// paid only throttles free users. Set to 1.0 so free can use the WHOLE pool
-// (3 accounts → 3 concurrent free). Revert to ~0.3 once paid launches.
-const FREE_POOL_PCT = 1.0;
+// Reverted to 0.3 on 2026-07-10 when Paytm went live (the 1.0 interim above was
+// only safe while nobody could pay). On today's 3-account pool this reserves 2
+// accounts for paying customers and leaves 1 free slot (min-1 floor); it rebalances
+// automatically as the pool grows past the AWS account-limit block.
+const FREE_POOL_PCT = 0.3;
 
 async function poolSize() {
   const db = await ddb();
