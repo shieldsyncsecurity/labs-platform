@@ -17,12 +17,18 @@ import { ShieldMark } from "@/components/brand";
  *    and the progress bar so their CSS animations RESTART from 0 on each entry,
  *    and so intra-scene animations replay when you revisit a tab.
  *
- * A single useEffect owns the auto-advance timer. It runs only when not paused
- * and not reduced-motion; it schedules one setTimeout for SCENE_MS, then
- * advances (looping 4 -> 0). Changing `active`, `paused`, or `cycle`
- * re-arms the timer. Clicking a tab sets `active`, bumps `cycle`, and pauses.
- * Play/Pause toggles `paused`; pressing Play from a paused state also bumps
- * `cycle` so the current scene restarts cleanly.
+ * A single useEffect owns the auto-advance timer. It runs only when not
+ * paused; it schedules one setTimeout for SCENE_MS, then advances (looping
+ * 4 -> 0). Changing `active`, `paused`, or `cycle` re-arms the timer.
+ * Clicking a tab sets `active`, bumps `cycle`, and pauses. Play/Pause toggles
+ * `paused`; pressing Play from a paused state also bumps `cycle` so the
+ * current scene restarts cleanly.
+ *
+ * Reduced motion: prefers-reduced-motion STARTS the tour paused instead of
+ * disabling the timer outright — an explicit Play click is user opt-in, so
+ * play must always work. (The old build gated the timer on `reduced`, which
+ * left the Play button visibly toggling but doing nothing on machines with
+ * animations off — e.g. Windows "Animation effects" disabled.)
  * ========================================================================== */
 
 const SCENE_MS = 4800;
@@ -73,20 +79,26 @@ export function ProductTour() {
     mounted.current = true;
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     setReduced(mq.matches);
-    const onChange = (e: MediaQueryListEvent) => setReduced(e.matches);
+    // Respect the OS setting as the DEFAULT (start paused), not as a hard
+    // disable — the Play button below is the user's explicit opt-in.
+    if (mq.matches) setPaused(true);
+    const onChange = (e: MediaQueryListEvent) => {
+      setReduced(e.matches);
+      if (e.matches) setPaused(true);
+    };
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
   // Auto-advance timer. One timeout per scene entry.
   useEffect(() => {
-    if (paused || reduced) return;
+    if (paused) return;
     const id = window.setTimeout(() => {
       setActive((a) => (a + 1) % SCENES.length);
       setCycle((c) => c + 1);
     }, SCENE_MS);
     return () => window.clearTimeout(id);
-  }, [active, paused, cycle, reduced]);
+  }, [active, paused, cycle]);
 
   const jumpTo = useCallback((i: number) => {
     setActive(i);
@@ -103,62 +115,17 @@ export function ProductTour() {
   }, []);
 
   const scene = SCENES[active];
-  // Animations run only when the scene is active, playing, and motion allowed.
-  const animate = !reduced;
+  // Intra-scene animations run whenever motion is allowed OR the user pressed
+  // Play themselves (explicit opt-in overrides prefers-reduced-motion).
+  const animate = !reduced || !paused;
 
   return (
     <div className="mx-auto w-full max-w-4xl">
-      {/* ---------------------------------------------------- PLAYER FRAME */}
-      <div
-        className="overflow-hidden rounded-2xl border border-line bg-canvas shadow-[0_24px_60px_-30px_rgba(15,23,42,0.35)]"
-        role="group"
-        aria-label="ShieldSync product tour player"
-      >
-        {/* browser chrome top bar */}
-        <div className="flex items-center gap-3 border-b border-line bg-surface px-3 py-2.5 sm:px-4">
-          <div className="flex items-center gap-1.5" aria-hidden="true">
-            <span className="h-2.5 w-2.5 rounded-full bg-line-strong" />
-            <span className="h-2.5 w-2.5 rounded-full bg-line-strong" />
-            <span className="h-2.5 w-2.5 rounded-full bg-line-strong" />
-          </div>
-          <div className="flex min-w-0 flex-1 items-center justify-center">
-            <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-canvas px-3 py-1">
-              <svg
-                viewBox="0 0 16 16"
-                className="h-3 w-3 flex-none text-muted"
-                fill="none"
-                aria-hidden="true"
-              >
-                <rect x="3.5" y="7" width="9" height="6" rx="1.4" stroke="currentColor" strokeWidth="1.3" />
-                <path d="M5.5 7V5.5a2.5 2.5 0 015 0V7" stroke="currentColor" strokeWidth="1.3" />
-              </svg>
-              <span className="truncate font-mono text-[11px] text-muted sm:text-xs">
-                {scene.host}
-              </span>
-            </div>
-          </div>
-          <div className="w-[46px]" aria-hidden="true" />
-        </div>
-
-        {/* ------------------------------------------------ SCENE VIEWPORT */}
-        <div
-          id="pt-panel"
-          role="tabpanel"
-          aria-labelledby={`pt-tab-${active}`}
-          className="relative aspect-[16/10] w-full overflow-hidden bg-canvas"
-        >
-          <div key={cycle} className="pt-scene absolute inset-0">
-            {active === 0 && <SceneInvite animate={animate} />}
-            {active === 1 && <SceneVerify animate={animate} />}
-            {active === 2 && <SceneSolve animate={animate} />}
-            {active === 3 && <SceneGrade animate={animate} />}
-            {active === 4 && <SceneReport animate={animate} />}
-          </div>
-        </div>
-      </div>
-
       {/* --------------------------------------------------- CONTROL ROW */}
-      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+      {/* Above the player (owner call 2026-07-11): the stage tabs + play
+          control are the affordance — they must be seen before the frame,
+          not discovered under it. */}
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center">
         <button
           type="button"
           onClick={togglePlay}
@@ -216,14 +183,63 @@ export function ProductTour() {
       </div>
 
       {/* progress bar (amber fill), reset per scene entry */}
-      <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-line" aria-hidden="true">
+      <div className="mb-4 h-1 w-full overflow-hidden rounded-full bg-line" aria-hidden="true">
         <div
           key={cycle}
           className={
-            !reduced && !paused ? "pt-progress h-full rounded-full bg-brand" : "h-full rounded-full bg-brand/40"
+            !paused ? "pt-progress h-full rounded-full bg-brand" : "h-full rounded-full bg-brand/40"
           }
           style={{ animationDuration: `${SCENE_MS}ms` }}
         />
+      </div>
+
+      {/* ---------------------------------------------------- PLAYER FRAME */}
+      <div
+        className="overflow-hidden rounded-2xl border border-line bg-canvas shadow-[0_24px_60px_-30px_rgba(15,23,42,0.35)]"
+        role="group"
+        aria-label="ShieldSync product tour player"
+      >
+        {/* browser chrome top bar */}
+        <div className="flex items-center gap-3 border-b border-line bg-surface px-3 py-2.5 sm:px-4">
+          <div className="flex items-center gap-1.5" aria-hidden="true">
+            <span className="h-2.5 w-2.5 rounded-full bg-line-strong" />
+            <span className="h-2.5 w-2.5 rounded-full bg-line-strong" />
+            <span className="h-2.5 w-2.5 rounded-full bg-line-strong" />
+          </div>
+          <div className="flex min-w-0 flex-1 items-center justify-center">
+            <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-canvas px-3 py-1">
+              <svg
+                viewBox="0 0 16 16"
+                className="h-3 w-3 flex-none text-muted"
+                fill="none"
+                aria-hidden="true"
+              >
+                <rect x="3.5" y="7" width="9" height="6" rx="1.4" stroke="currentColor" strokeWidth="1.3" />
+                <path d="M5.5 7V5.5a2.5 2.5 0 015 0V7" stroke="currentColor" strokeWidth="1.3" />
+              </svg>
+              <span className="truncate font-mono text-[11px] text-muted sm:text-xs">
+                {scene.host}
+              </span>
+            </div>
+          </div>
+          <div className="w-[46px]" aria-hidden="true" />
+        </div>
+
+        {/* ------------------------------------------------ SCENE VIEWPORT */}
+        <div
+          id="pt-panel"
+          role="tabpanel"
+          aria-labelledby={`pt-tab-${active}`}
+          className="relative aspect-[16/10] w-full overflow-hidden bg-canvas"
+        >
+          <div key={cycle} className="pt-scene absolute inset-0">
+            {active === 0 && <SceneInvite animate={animate} />}
+            {active === 1 && <SceneVerify animate={animate} />}
+            {active === 2 && <SceneSolve animate={animate} />}
+            {active === 3 && <SceneGrade animate={animate} />}
+            {active === 4 && <SceneReport animate={animate} />}
+          </div>
+        </div>
       </div>
 
       {/* caption */}
