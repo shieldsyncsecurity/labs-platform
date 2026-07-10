@@ -8,7 +8,8 @@ import { AutoCheckout } from "@/components/auto-checkout";
 import { priceFor, formatMoney } from "@/lib/payments/pricing";
 
 const FREE_SLUG = "s3-misconfiguration-audit";
-const MARKETING_WIZARD = "https://shieldsyncsecurity.com/labs-wizard";
+const MARKETING_URL = "https://shieldsyncsecurity.com";
+const MARKETING_WIZARD = `${MARKETING_URL}/labs-wizard`;
 const APP_URL = "https://labs.shieldsyncsecurity.com";
 
 // This static catalog page otherwise defaults to `Cache-Control: s-maxage=31536000`
@@ -21,7 +22,13 @@ export const metadata: Metadata = {
   title: "AWS Security Labs — Hands-on Cloud Security in Real AWS",
   description:
     "Browse hands-on AWS security labs that spin up real, isolated AWS accounts in your browser. Practice IAM, S3 misconfiguration, encryption, GuardDuty, VPC. First lab free.",
-  alternates: { canonical: "/" },
+  // Same near-duplicate content as the marketing site's /aws-security-labs
+  // (same pitch, same keyword target) — canonical there so Google consolidates
+  // ranking signal on ONE page and indexes the faster Amplify version, same
+  // pattern already used by /labs/[slug]. This app stays the funnel target
+  // (search -> marketing landing -> sign in -> app); openGraph.url below stays
+  // on APP_URL since that's the actual page being shared/used.
+  alternates: { canonical: `${MARKETING_URL}/aws-security-labs` },
   openGraph: {
     title: "AWS Security Labs — Hands-on Cloud Security in Real AWS",
     description: "Real, isolated AWS accounts in your browser. First lab free.",
