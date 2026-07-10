@@ -139,14 +139,14 @@ export default async function PortalDashboardPage() {
               </Link>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-line bg-surface">
+            <div className="overflow-x-auto rounded-xl border border-line bg-surface">
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-line bg-canvas text-xs uppercase tracking-wide text-muted">
-                    <th className="px-4 py-3 font-semibold">Name</th>
-                    <th className="px-4 py-3 font-semibold">Lab</th>
-                    <th className="px-4 py-3 font-semibold">Hints</th>
-                    <th className="px-4 py-3 font-semibold">Created</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Name</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Lab</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Hints</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Created</th>
                   </tr>
                 </thead>
                 <tbody>

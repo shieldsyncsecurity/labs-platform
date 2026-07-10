@@ -71,8 +71,9 @@ function StatusBadge({ status }: { status?: string }) {
     booked: "bg-amber-100 text-amber-800",
     started: "bg-brand/10 text-brand-strong",
     submitted: "bg-emerald-100 text-emerald-800",
-    revoked: "bg-line text-muted",
-    expired: "bg-line text-muted",
+    // text-ink-soft, not text-muted: muted on bg-line is ~4.1:1, under AA.
+    revoked: "bg-line text-ink-soft",
+    expired: "bg-line text-ink-soft",
   };
   return (
     <span

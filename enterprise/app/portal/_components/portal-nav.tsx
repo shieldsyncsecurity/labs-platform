@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Logo } from "@/components/brand";
@@ -25,11 +26,20 @@ const SUPPORT_MAILTO =
 export default function PortalNav(_props: { orgId?: string }) {
   const router = useRouter();
   const pathname = usePathname();
+  const [signingOut, setSigningOut] = useState(false);
 
   async function handleSignOut() {
-    await fetch("/api/portal/logout", { method: "POST" });
-    router.push("/portal/login");
-    router.refresh();
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await fetch("/api/portal/logout", { method: "POST" });
+    } finally {
+      // No un-set on success: the redirect unmounts this nav. On a failed
+      // fetch the push below still lands on the login page, which is correct
+      // for "I asked to sign out".
+      router.push("/portal/login");
+      router.refresh();
+    }
   }
 
   // Dashboard owns /portal and the assessment pages; the others match their
@@ -72,9 +82,11 @@ export default function PortalNav(_props: { orgId?: string }) {
           <button
             type="button"
             onClick={handleSignOut}
-            className="rounded text-sm font-medium text-ink-soft transition-colors hover:text-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            disabled={signingOut}
+            aria-live="polite"
+            className="rounded text-sm font-medium text-ink-soft transition-colors hover:text-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Sign out
+            {signingOut ? "Signing out…" : "Sign out"}
           </button>
         </div>
       </div>

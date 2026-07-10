@@ -26,7 +26,7 @@ const TOPIC_LABEL: Record<string, string> = {
 const STATUS_BADGE: Record<string, string> = {
   new: "bg-brand/10 text-brand-strong",
   contacted: "bg-amber-100 text-amber-800",
-  closed: "bg-line text-muted",
+  closed: "bg-line text-ink-soft",
 };
 
 function formatWhen(iso?: string) {

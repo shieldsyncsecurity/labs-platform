@@ -166,7 +166,7 @@ export default async function BillingPage() {
               No orders yet.
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-line bg-surface">
+            <div className="overflow-x-auto rounded-xl border border-line bg-surface">
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-line bg-canvas text-xs uppercase tracking-wide text-muted">

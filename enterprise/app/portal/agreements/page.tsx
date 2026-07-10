@@ -75,15 +75,17 @@ export default async function AgreementsPage() {
               No agreements yet.
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-line bg-surface">
+            <div className="overflow-x-auto rounded-xl border border-line bg-surface">
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-line bg-canvas text-xs uppercase tracking-wide text-muted">
-                    <th className="px-4 py-3 font-semibold">Document</th>
-                    <th className="px-4 py-3 font-semibold">Status</th>
-                    <th className="px-4 py-3 font-semibold">Issued</th>
-                    <th className="px-4 py-3 font-semibold">Accepted</th>
-                    <th className="px-4 py-3 font-semibold" />
+                    <th scope="col" className="px-4 py-3 font-semibold">Document</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Status</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Issued</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Accepted</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
