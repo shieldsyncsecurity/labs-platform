@@ -1603,3 +1603,100 @@ export async function listAudit(orgId, limit = 100) {
   );
   return (r.Items ?? []).map(itemToObjectDeep);
 }
+
+// -- LEADS (demo requests from the public enterprise landing) ------------------
+//
+// One row per "Book a walkthrough" / pricing form submission on the PUBLIC site
+// (pre-auth, pre-org — a lead has no orgId). pk=leadId. Two row shapes share the
+// table: lead rows (permanent — sales pipeline records, tiny volume) and
+// `cooldown:<email-hash>` marker rows carrying a `ttl` so DynamoDB TTL sweeps
+// them; the marker's conditional put is the per-email flood gate for a route
+// that is reachable by anyone on the internet.
+
+const LEADS_TABLE = "ShieldSyncEntLeads";
+const LEAD_COOLDOWN_SEC = 10 * 60;
+export const LEAD_STATUSES = ["new", "contacted", "closed"];
+
+/**
+ * createLead(): persist one demo-request lead. Caller (ent-handler) has already
+ * validated/clamped every field — this layer only owns identity, timestamps and
+ * the cooldown gate. Returns { cooldown:true } (and writes nothing) when the
+ * same email submitted within the last LEAD_COOLDOWN_SEC.
+ */
+export async function createLead({ name, email, company, topic, message, source }) {
+  const db = await ddb();
+  const emailHash = createHash("sha256").update(String(email).trim().toLowerCase()).digest("hex").slice(0, 32);
+  try {
+    await db.send(
+      new PutItemCommand({
+        TableName: LEADS_TABLE,
+        Item: { leadId: S(`cooldown:${emailHash}`), ttl: N(now() + LEAD_COOLDOWN_SEC) },
+        ConditionExpression: "attribute_not_exists(leadId)",
+      })
+    );
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return { cooldown: true };
+    throw e;
+  }
+  const leadId = newToken();
+  const item = {
+    leadId: S(leadId),
+    name: S(name ?? ""),
+    email: S(email),
+    company: S(company ?? ""),
+    topic: S(topic ?? "other"),
+    message: S(message ?? ""),
+    source: S(source ?? ""),
+    status: S("new"),
+    createdAt: S(nowIso()),
+  };
+  await db.send(new PutItemCommand({ TableName: LEADS_TABLE, Item: item }));
+  return { cooldown: false, lead: itemToObject(item) };
+}
+
+/**
+ * listLeads(): every lead, newest-first. A Scan is deliberate (same call as
+ * listAllOrgs): lead volume is human-scale and the table has no GSI to pay for.
+ * Cooldown marker rows are filtered out via attribute_exists(createdAt) — only
+ * real lead rows carry it. Admin-only (the app enforces the staff gate before
+ * calling GET /ent/leads).
+ */
+export async function listLeads() {
+  const db = await ddb();
+  const r = await db.send(
+    new ScanCommand({
+      TableName: LEADS_TABLE,
+      FilterExpression: "attribute_exists(createdAt)",
+    })
+  );
+  const leads = (r.Items ?? []).map(itemToObject);
+  leads.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  return leads;
+}
+
+/**
+ * updateLeadStatus(): staff pipeline transition (new / contacted / closed, any
+ * direction). The condition refuses unknown ids AND cooldown marker rows (no
+ * createdAt) so a status write can never mint a phantom lead. `status` is
+ * validated against LEAD_STATUSES by the handler before this call.
+ */
+export async function updateLeadStatus(leadId, status) {
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: LEADS_TABLE,
+        Key: { leadId: S(leadId) },
+        UpdateExpression: "SET #s = :s, statusUpdatedAt = :at",
+        ConditionExpression: "attribute_exists(leadId) AND attribute_exists(createdAt)",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":s": S(status), ":at": S(nowIso()) },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObject(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return null;
+    throw e;
+  }
+}

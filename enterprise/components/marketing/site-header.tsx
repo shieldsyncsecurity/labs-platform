@@ -1,8 +1,5 @@
+import Link from "next/link";
 import { Logo } from "@/components/brand";
-
-const CONTACT_MAILTO =
-  "mailto:info@shieldsyncsecurity.com?subject=" +
-  encodeURIComponent("ShieldSync Enterprise - book a walkthrough");
 
 // Root-relative (/#how, not #how) so the nav still works from /privacy,
 // /terms and any other page that renders this header.
@@ -40,12 +37,12 @@ export function SiteHeader() {
           >
             shieldsyncsecurity.com
           </a>
-          <a
-            href={CONTACT_MAILTO}
+          <Link
+            href="/book-demo"
             className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
           >
             Book a walkthrough
-          </a>
+          </Link>
         </div>
       </div>
     </header>

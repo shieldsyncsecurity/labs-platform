@@ -60,10 +60,9 @@ const DETAIL_REFLECTION =
   "bucket policy. For IAM, I replaced the wildcard with the five actions the pipeline actually uses, " +
   "scoped to the bucket ARN, and detached the admin policy so a leaked key can't escalate.";
 
-// Same contact target as the marketing homepage's "Book a walkthrough" CTA.
-const CONTACT_WALKTHROUGH =
-  "mailto:info@shieldsyncsecurity.com?subject=" +
-  encodeURIComponent("ShieldSync Enterprise - walkthrough");
+// Same target as the marketing homepage's "Book a walkthrough" CTA — the
+// lead-capture form, not a mailto.
+const CONTACT_WALKTHROUGH = "/book-demo";
 
 function SampleRibbon() {
   return (
@@ -162,7 +161,7 @@ export default function DemoReportPage() {
 
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
         <StatCard label="Invited" value={String(ASSESSMENT.invited)} />
-        <StatCard label="Completed" value={`${total}/${ASSESSMENT.invited}`} />
+        <StatCard label="Submitted" value={`${total}/${ASSESSMENT.invited}`} />
         <StatCard label="Avg correctness" value={`${avgPct}%`} />
         <StatCard label="Median time" value={`${medianTime} min`} />
         <StatCard label="With reflection" value={`${withReflection}/${total}`} />

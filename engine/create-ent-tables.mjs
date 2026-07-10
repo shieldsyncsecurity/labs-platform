@@ -114,6 +114,16 @@ const SPECS = [
     gsis: [{ name: "orgId-index", hash: "orgId" }],
     ttl: null,
   },
+  {
+    // Demo-request leads from the public landing (Book a walkthrough / pricing
+    // form). pk=leadId. Lead rows are permanent sales-pipeline records (no ttl
+    // attribute on them); `cooldown:<email-hash>` marker rows DO carry ttl so the
+    // per-email flood gate self-cleans — hence TTL is enabled on the table.
+    table: "ShieldSyncEntLeads",
+    attrs: [["leadId", "S"]],
+    keys: [["leadId", "HASH"]],
+    ttl: "ttl",
+  },
 ];
 
 async function ensureTable(spec) {

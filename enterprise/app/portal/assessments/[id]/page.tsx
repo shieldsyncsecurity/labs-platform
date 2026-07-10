@@ -150,7 +150,7 @@ export default async function AssessmentDetailPage({
         {invited > 0 ? (
           <div className="mt-6 grid grid-cols-3 gap-3 sm:max-w-md">
             <StatCard label="Invited" value={String(invited)} />
-            <StatCard label="Completed" value={`${completed}/${invited}`} />
+            <StatCard label="Submitted" value={`${completed}/${invited}`} />
             <StatCard label="Avg correctness" value={completed ? `${avgPct}%` : "\u2014"} />
           </div>
         ) : null}

@@ -13,12 +13,10 @@ export const metadata: Metadata = {
   alternates: { canonical: "/" },
 };
 
-const CONTACT_WALKTHROUGH =
-  "mailto:info@shieldsyncsecurity.com?subject=" +
-  encodeURIComponent("ShieldSync Enterprise - walkthrough");
-const CONTACT_PRICING =
-  "mailto:info@shieldsyncsecurity.com?subject=" +
-  encodeURIComponent("ShieldSync Enterprise - pricing");
+// Lead-capture form (replaces the old mailto CTAs — a real funnel we can see
+// and follow up on, backed by /api/leads + the /admin/leads pipeline).
+const BOOK_WALKTHROUGH = "/book-demo";
+const BOOK_PRICING = "/book-demo?topic=pricing";
 
 export default function Home() {
   return (
@@ -61,12 +59,12 @@ function Hero() {
             side-by-side proof of skill.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <a
-              href={CONTACT_WALKTHROUGH}
+            <Link
+              href={BOOK_WALKTHROUGH}
               className="inline-flex items-center justify-center rounded-full bg-brand px-6 py-3 text-sm font-semibold text-white shadow-sm transition-transform transition-colors hover:-translate-y-0.5 hover:bg-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
             >
               Book a walkthrough
-            </a>
+            </Link>
             <Link
               href="/demo/report"
               className="inline-flex items-center justify-center rounded-full border border-line-strong bg-surface px-6 py-3 text-sm font-semibold text-ink-soft transition-colors hover:border-brand hover:text-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
@@ -321,12 +319,12 @@ function FinalCta() {
             walkthrough.
           </p>
           <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row sm:items-center">
-            <a
-              href={CONTACT_WALKTHROUGH}
+            <Link
+              href={BOOK_WALKTHROUGH}
               className="inline-flex items-center justify-center rounded-full bg-white px-6 py-3 text-sm font-semibold text-brand-strong shadow-sm transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
             >
               Book a walkthrough
-            </a>
+            </Link>
             <Link
               href="/demo/report"
               className="inline-flex items-center justify-center rounded-full border border-white/40 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
@@ -337,9 +335,9 @@ function FinalCta() {
           <p className="mx-auto mt-6 max-w-xl text-sm leading-relaxed text-white/70">
             Per-candidate credits, invoiced with GST &mdash; no card, no procurement
             maze.{" "}
-            <a href={CONTACT_PRICING} className="font-semibold text-white underline underline-offset-2">
+            <Link href={BOOK_PRICING} className="font-semibold text-white underline underline-offset-2">
               Talk to us for volume.
-            </a>
+            </Link>
           </p>
         </div>
       </div>

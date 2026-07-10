@@ -42,14 +42,16 @@ function pctOf(passed?: number, total?: number): number {
 }
 
 // Engine invite lifecycle status -> employer-facing label. Shared by the badge
-// and the CSV export so the file says exactly what the screen says.
+// and the CSV export so the file says exactly what the screen says. "Submitted"
+// (not "Completed") — the report roster uses the same word, and one term must
+// mean one thing across the portal and the report.
 const STATUS_LABEL: Record<string, string> = {
   created: "Invited",
   consented: "Consented",
   verified: "Verified",
   booked: "Booked",
   started: "In progress",
-  submitted: "Completed",
+  submitted: "Submitted",
   revoked: "Revoked",
   expired: "Expired",
 };

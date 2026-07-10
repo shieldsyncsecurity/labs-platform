@@ -59,6 +59,10 @@ import {
   setOrgAcceptedAgreement,
   appendAudit,
   listAudit,
+  createLead,
+  listLeads,
+  updateLeadStatus,
+  LEAD_STATUSES,
 } from "./entinfra.mjs";
 import {
   leaseEnt,
@@ -947,6 +951,56 @@ export async function handler(event) {
           )
         : false;
       return resp(200, { ok: true, problem: res.entry, emailed });
+    }
+
+    // -- leads (Book a walkthrough / pricing form on the PUBLIC landing) -------
+    // Pre-auth surface: anyone on the internet reaches this via the app's
+    // /api/leads route, so every field is clamped, email shape is checked, and
+    // entinfra's per-email cooldown row bounds repeat submissions. The lead is
+    // persisted FIRST; the ops email is best-effort on top (sendOpsEmail never
+    // throws), so a SES hiccup can't lose a prospect.
+    if (method === "POST" && path === "/ent/leads") {
+      const email = typeof parsed.email === "string" ? parsed.email.trim().slice(0, 254) : "";
+      if (!/^[^\s@]{1,64}@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+        return resp(400, { error: "EMAIL_INVALID" });
+      }
+      const name = typeof parsed.name === "string" ? parsed.name.trim().slice(0, 120) : "";
+      if (!name) return resp(400, { error: "NAME_REQUIRED" });
+      const company = typeof parsed.company === "string" ? parsed.company.trim().slice(0, 160) : "";
+      const topic = ["walkthrough", "pricing", "other"].includes(parsed.topic) ? parsed.topic : "other";
+      const message = typeof parsed.message === "string" ? parsed.message.trim().slice(0, 2000) : "";
+      const source = typeof parsed.source === "string" ? parsed.source.trim().slice(0, 200) : "";
+
+      const res = await createLead({ name, email, company, topic, message, source });
+      if (res.cooldown) return resp(429, { error: "LEAD_COOLDOWN" });
+
+      console.log(
+        JSON.stringify({ audit: true, action: "lead.create", leadId: res.lead.leadId, topic, at: Date.now() })
+      );
+      const emailed = await sendOpsEmail(
+        `ShieldSync Enterprise: new ${topic} lead — ${company || name}`,
+        `Name: ${name}\nEmail: ${email}\nCompany: ${company || "-"}\nTopic: ${topic}\nSource: ${source || "-"}\n\n${message || "(no message)"}\n\nReview: https://enterprise.shieldsyncsecurity.com/admin/leads`
+      );
+      return resp(200, { ok: true, leadId: res.lead.leadId, emailed });
+    }
+
+    // ShieldSync admin only (the app enforces the staff gate before calling).
+    if (method === "GET" && path === "/ent/leads") {
+      const leads = await listLeads();
+      return resp(200, { leads });
+    }
+
+    if (method === "POST" && path === "/ent/leads/update") {
+      const { leadId, status } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (!leadId) return resp(400, { error: "LEAD_ID_REQUIRED" });
+      if (!LEAD_STATUSES.includes(status)) return resp(400, { error: "STATUS_INVALID" });
+      const lead = await updateLeadStatus(leadId, status);
+      if (!lead) return resp(404, { error: "not found" });
+      console.log(
+        JSON.stringify({ audit: true, action: "lead.status", actor, leadId, status, at: Date.now() })
+      );
+      return resp(200, { ok: true, lead });
     }
 
     // ── orders/billing ──────────────────────────────────────────────────────

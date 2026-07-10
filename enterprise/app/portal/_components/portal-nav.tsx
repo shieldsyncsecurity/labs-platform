@@ -17,8 +17,9 @@ const LINKS = [
   { href: "/portal/agreements", label: "Agreements" },
 ];
 
+// info@ is the monitored inbox (hello@ was never provisioned).
 const SUPPORT_MAILTO =
-  "mailto:hello@shieldsyncsecurity.com?subject=" +
+  "mailto:info@shieldsyncsecurity.com?subject=" +
   encodeURIComponent("ShieldSync Enterprise - support");
 
 export default function PortalNav(_props: { orgId?: string }) {

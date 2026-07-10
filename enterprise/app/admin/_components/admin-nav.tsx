@@ -35,6 +35,12 @@ export default function AdminNav() {
             New org
           </Link>
           <Link
+            href="/admin/leads"
+            className="rounded text-sm text-ink-soft hover:text-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+          >
+            Leads
+          </Link>
+          <Link
             href="/admin/agreements"
             className="rounded text-sm text-ink-soft hover:text-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
           >
