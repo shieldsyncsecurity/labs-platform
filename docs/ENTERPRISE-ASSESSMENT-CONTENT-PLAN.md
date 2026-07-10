@@ -298,6 +298,37 @@ sales**, and elaborate exposure math is meaningless before it. Right-sized seque
 6. **AI-allowed is a segment choice**: it forfeits clients who mandate AI-banned screens
    (one-product rule means no per-company toggle). Stated on the sales page; owner signs off.
 
+## 8b. Console delivery: new tab + floating companion (researched 2026-07-11)
+
+Owner asked whether an embedded in-frame live console (Hyperbeam/Kasm-class streamed browser)
+would beat the separate console tab. Four-lens research verdict:
+
+- **Direct iframing of the real console is impossible** — live header capture confirms
+  `X-Frame-Options: DENY` on signin.aws.amazon.com, console.aws.amazon.com AND CloudShell,
+  with no opt-in toggle (AWS ships such toggles for DCV/Connect — the console omission is a
+  deliberate security posture). Header-stripping proxies break cookie/CSRF/nonce binding and
+  edge into AUP territory. **Never build this.**
+- **Every incumbent that offers a REAL provider console opens it in a new tab** (Qwiklabs/
+  Skills Boost instruct users to). Platforms that look embedded (Instruqt-style) stream a
+  remote desktop — a different, heavier architecture.
+- **Streaming is possible but wrong for a timed, scored assessment**: India→us-east-1 input
+  latency, documented copy-paste breakage in this product category, WebRTC blocked on
+  corporate networks (our candidates may sit on a current employer's laptop), and cost 10–100×
+  the per-session target for managed options (WorkSpaces Secure Browser bills per-MAU ≈
+  ₹670/candidate; AppStream ≈ ₹11–17 + cold start; self-hosted Kasm/neko/Guacamole hit the
+  cost target but add real ops burden). Candidate-minutes lost to streaming lag are a
+  fairness/validity problem, not just UX. CloudTrail already gives the tamper-evident session
+  record streaming would have added.
+- **Adopted pattern**: keep the new-tab federated console + add a **Document
+  Picture-in-Picture floating companion** — an always-on-top mini-window (Chrome 116+/Edge;
+  ~95% of Indian desktop share) carrying the countdown, objective checklist, "test the
+  application" command, and submit button, so the candidate never feels lost between tabs.
+  Fallback for other browsers: live countdown in the tab title/favicon + a prominent
+  "back to assessment" habit line in instructions. India candidates are overwhelmingly
+  single-laptop-screen users — a floating overlay beats split-window guidance.
+- Optional later, only on explicit customer demand for visual proctoring: a pilot of
+  Kasm/Hyperbeam as a separate "recorded mode" — never as the default scored path.
+
 ## 9. Build sequence
 
 | Phase | Ship | Gate |
