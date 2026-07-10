@@ -18,9 +18,12 @@ export function AutoCheckout() {
 
   if (!open) return null;
 
-  // Not signed in yet — the checkout sheet itself handles the 401 from /api/payments/checkout
-  // and shows an error, which is fine. But if we want a smoother UX we could redirect to
-  // sign-in first. For now, let the sheet surface the sign-in error.
+  // Not signed in yet — the sheet renders a "Sign in to continue" step on the 401 from
+  // /api/payments/checkout, carrying ?returnTo back here so checkout resumes after auth.
+  // Deliberately NOT a redirect-before-open: the visitor should see what they're buying
+  // (plan + price) before being sent to sign-in. (Until 2026-07-10 the 401 fell through to
+  // the generic "failed" phase, whose only action was "Try again" — which re-POSTs and 401s
+  // forever, stranding every logged-out visitor who clicked a monthly CTA.)
   return (
     <CheckoutSheet
       labSlug={null}

@@ -54,7 +54,7 @@ export function CheckoutSheet({
   onPaid: () => void | Promise<void>;
 }) {
   const [info, setInfo] = useState<CheckoutInit | null>(null);
-  const [phase, setPhase] = useState<"summary" | "processing" | "confirming" | "done" | "failed" | "notlaunched">("summary");
+  const [phase, setPhase] = useState<"summary" | "processing" | "confirming" | "done" | "failed" | "notlaunched" | "signin">("summary");
   const [err, setErr] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const invoked = useRef(false);
@@ -80,6 +80,13 @@ export function CheckoutSheet({
       // Payments aren't live yet — an expected state, not a retryable failure.
       if (r.status === 503 && d.error === "payments not available yet") {
         setPhase("notlaunched");
+        return null;
+      }
+      // Signed out. NOT retryable — "Try again" just re-POSTs and 401s forever,
+      // which stranded every logged-out visitor who clicked a monthly CTA. Offer
+      // the one action that can actually work, and return them here afterwards.
+      if (r.status === 401) {
+        setPhase("signin");
         return null;
       }
       throw new Error(d.error ?? "Couldn't start checkout");
@@ -236,6 +243,29 @@ export function CheckoutSheet({
               className="mt-2 w-full rounded-xl border border-line px-6 py-3 text-base font-semibold text-ink hover:bg-canvas"
             >
               Close
+            </button>
+          </div>
+        )}
+
+        {phase === "signin" && (
+          <div className="mt-5">
+            <p className="text-base font-semibold text-ink">Sign in to continue</p>
+            <p className="mt-1 text-base text-ink-soft">
+              We keep your labs on your account, so you can pick up where you left off. One click — no signup form.
+            </p>
+            <a
+              href={`/sign-in?returnTo=${encodeURIComponent(
+                typeof window === "undefined" ? "/dashboard" : window.location.pathname + window.location.search,
+              )}`}
+              className="mt-4 block rounded-xl bg-brand px-6 py-3 text-center text-base font-semibold text-white hover:bg-brand-strong"
+            >
+              Sign in
+            </a>
+            <button
+              onClick={onClose}
+              className="mt-2 w-full rounded-xl border border-line px-6 py-3 text-base font-semibold text-ink hover:bg-canvas"
+            >
+              Cancel
             </button>
           </div>
         )}
