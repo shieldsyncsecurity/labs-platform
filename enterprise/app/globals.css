@@ -593,16 +593,25 @@ a {
 }
 
 /* --- Scene 1: Invite --- */
+/* Cursor glides onto the Send invite button, then the press fires on
+ * arrival (delays are paired: cursor ends at 0.85s, press peaks ~1.0s). */
+.pt-cursor-invite {
+  position: absolute;
+  left: 30%;
+  top: 52px;
+  opacity: 0;
+  animation: pt-cursor-invite 0.7s ease-in-out 0.15s both;
+}
 .pt-btn-press {
-  animation: pt-btn-press 0.9s ease-in-out 0.6s both;
+  animation: pt-btn-press 0.5s ease-in-out 0.8s both;
 }
 .pt-toast-in {
   opacity: 0;
-  animation: pt-toast-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) 1.1s forwards;
+  animation: pt-toast-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) 1.3s forwards;
 }
 .pt-fade-in-3 {
   opacity: 0;
-  animation: pt-fade-up 0.5s ease-out 1.7s forwards;
+  animation: pt-fade-up 0.5s ease-out 1.6s forwards;
 }
 
 /* --- Scene 2: Verify --- */
@@ -619,7 +628,7 @@ a {
 .pt-verified {
   opacity: 0;
   transform: scale(0.9);
-  animation: pt-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1) 3.1s forwards;
+  animation: pt-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1) 1.9s forwards;
 }
 
 /* --- Scene 3: Solve (AWS) --- */
@@ -627,26 +636,26 @@ a {
   position: absolute;
   left: 0px;
   top: 0px;
-  animation: pt-cursor-move 1.2s ease-in-out 0.8s both;
+  animation: pt-cursor-move 0.8s ease-in-out 0.4s both;
 }
 .pt-bpa-btn {
-  animation: pt-btn-press 0.5s ease-in-out 1.9s both;
+  animation: pt-btn-press 0.4s ease-in-out 1.15s both;
 }
 .pt-pill-public {
-  animation: pt-flip-out 0.35s ease-in 2.3s both;
+  animation: pt-flip-out 0.35s ease-in 1.6s both;
 }
 .pt-pill-private {
   opacity: 0;
   transform: scale(0.85);
-  animation: pt-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1) 2.65s forwards;
+  animation: pt-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1) 1.9s forwards;
 }
 .pt-json-before {
-  animation: pt-flip-out 0.35s ease-in 3.1s both;
+  animation: pt-flip-out 0.35s ease-in 2.3s both;
 }
 .pt-json-after {
   display: inline;
   opacity: 0;
-  animation: pt-fade-in 0.4s ease-out 3.45s forwards;
+  animation: pt-fade-in 0.4s ease-out 2.6s forwards;
 }
 
 /* --- Scene 4: Grade --- */
@@ -654,11 +663,11 @@ a {
   animation: pt-obj-check 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .pt-checking {
-  animation: pt-checking 0.4s ease-out 3.6s both;
+  animation: pt-checking 0.4s ease-out 2.4s both;
 }
 .pt-score {
   opacity: 0;
-  animation: pt-fade-in 0.4s ease-out 3.7s forwards;
+  animation: pt-fade-in 0.4s ease-out 2.5s forwards;
 }
 
 /* --- Scene 5: Report --- */
@@ -780,6 +789,24 @@ a {
   }
 }
 
+/* Glide onto the Send invite button (percent-based so it tracks the
+ * button across breakpoints; the tip lands mid-button). */
+@keyframes pt-cursor-invite {
+  0% {
+    left: 30%;
+    top: 52px;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    left: 55%;
+    top: 16px;
+    opacity: 1;
+  }
+}
+
 @keyframes pt-flip-out {
   0% {
     opacity: 1;
@@ -820,27 +847,31 @@ a {
   }
 }
 
-/* Product tour: reduced motion - no intra-scene motion, static stills.
- * React also disables JS-driven animation; this covers any residual CSS. */
+/* Product tour: reduced motion - static stills BY DEFAULT, but only while
+ * the tour is not playing. React puts .pt-playing on the tour root when the
+ * user presses Play; that explicit click is opt-in, so the animations must
+ * run then (without this scoping, machines with animations off - e.g.
+ * Windows "Animation effects" disabled - played the tour as frozen stills). */
 @media (prefers-reduced-motion: reduce) {
-  .pt-scene,
-  .pt-progress,
-  .pt-btn-press,
-  .pt-toast-in,
-  .pt-fade-in-3,
-  .pt-otp,
-  .pt-otp-digit,
-  .pt-verified,
-  .pt-cursor,
-  .pt-bpa-btn,
-  .pt-pill-public,
-  .pt-pill-private,
-  .pt-json-before,
-  .pt-json-after,
-  .pt-obj-check,
-  .pt-checking,
-  .pt-score,
-  .pt-bar {
+  .pt-root:not(.pt-playing) .pt-scene,
+  .pt-root:not(.pt-playing) .pt-progress,
+  .pt-root:not(.pt-playing) .pt-btn-press,
+  .pt-root:not(.pt-playing) .pt-toast-in,
+  .pt-root:not(.pt-playing) .pt-fade-in-3,
+  .pt-root:not(.pt-playing) .pt-otp,
+  .pt-root:not(.pt-playing) .pt-otp-digit,
+  .pt-root:not(.pt-playing) .pt-verified,
+  .pt-root:not(.pt-playing) .pt-cursor,
+  .pt-root:not(.pt-playing) .pt-cursor-invite,
+  .pt-root:not(.pt-playing) .pt-bpa-btn,
+  .pt-root:not(.pt-playing) .pt-pill-public,
+  .pt-root:not(.pt-playing) .pt-pill-private,
+  .pt-root:not(.pt-playing) .pt-json-before,
+  .pt-root:not(.pt-playing) .pt-json-after,
+  .pt-root:not(.pt-playing) .pt-obj-check,
+  .pt-root:not(.pt-playing) .pt-checking,
+  .pt-root:not(.pt-playing) .pt-score,
+  .pt-root:not(.pt-playing) .pt-bar {
     animation: none;
   }
 }

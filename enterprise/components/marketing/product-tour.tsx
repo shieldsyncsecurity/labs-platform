@@ -31,7 +31,9 @@ import { ShieldMark } from "@/components/brand";
  * animations off — e.g. Windows "Animation effects" disabled.)
  * ========================================================================== */
 
-const SCENE_MS = 4800;
+// Owner-tuned 2026-07-11: 4800ms/scene read as painfully slow when watched
+// end-to-end (5 scenes = 24s). 3500ms keeps every beat readable at ~17.5s.
+const SCENE_MS = 3500;
 
 const SCENES = [
   {
@@ -120,7 +122,9 @@ export function ProductTour() {
   const animate = !reduced || !paused;
 
   return (
-    <div className="mx-auto w-full max-w-4xl">
+    // pt-root/pt-playing: globals.css scopes its reduced-motion kill-switch to
+    // .pt-root:not(.pt-playing) so an explicit Play always animates.
+    <div className={`pt-root mx-auto w-full max-w-4xl ${paused ? "" : "pt-playing"}`}>
       {/* --------------------------------------------------- CONTROL ROW */}
       {/* Above the player (owner call 2026-07-11): the stage tabs + play
           control are the affordance — they must be seen before the frame,
@@ -306,15 +310,24 @@ function SceneInvite({ animate }: { animate: boolean }) {
               <span className="block text-[9px] uppercase tracking-wide text-muted">Email</span>
               <span className="font-mono text-[12px] text-ink">priya@acmecorp.io</span>
             </div>
-            <div
-              className={`inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand px-3 py-2.5 text-[12px] font-semibold text-white shadow-sm ${
-                animate ? "pt-btn-press" : ""
-              }`}
-            >
-              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
-                <path d="M2 8l12-5-4 12-3-4-5-3z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-              </svg>
-              Send invite
+            <div className="relative">
+              <div
+                className={`flex items-center justify-center gap-1.5 rounded-lg bg-brand px-3 py-2.5 text-[12px] font-semibold text-white shadow-sm ${
+                  animate ? "pt-btn-press" : ""
+                }`}
+              >
+                <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
+                  <path d="M2 8l12-5-4 12-3-4-5-3z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                </svg>
+                Send invite
+              </div>
+              {/* cursor glides in and "clicks" (the pt-btn-press above fires
+                  on its arrival) — same device as scene 3's AWS cursor */}
+              {animate && (
+                <svg viewBox="0 0 16 16" className="pt-cursor-invite h-4 w-4" fill="#16191f" aria-hidden="true">
+                  <path d="M1 1l5 13 2-5 5-2L1 1z" stroke="#fff" strokeWidth="0.8" />
+                </svg>
+              )}
             </div>
           </div>
 
@@ -412,7 +425,7 @@ function SceneVerify({ animate }: { animate: boolean }) {
             {OTP.map((d, i) => (
               <span
                 key={i}
-                style={animate ? { animationDelay: `${0.5 + i * 0.35}s` } : undefined}
+                style={animate ? { animationDelay: `${0.35 + i * 0.22}s` } : undefined}
                 className={`inline-flex h-9 w-7 items-center justify-center rounded-lg border border-line bg-surface font-mono text-base font-bold text-ink sm:w-8 ${
                   animate ? "pt-otp" : ""
                 }`}
@@ -630,7 +643,7 @@ function SceneGrade({ animate }: { animate: boolean }) {
             {OBJECTIVES.map((o, i) => (
               <li key={o} className="flex items-center gap-2.5">
                 <span
-                  style={animate ? { animationDelay: `${0.8 + i * 0.7}s` } : undefined}
+                  style={animate ? { animationDelay: `${0.5 + i * 0.45}s` } : undefined}
                   className={`inline-flex h-4 w-4 flex-none items-center justify-center rounded-full border ${
                     animate ? "pt-obj-check border-line bg-canvas" : "border-green-600 bg-green-600"
                   }`}
