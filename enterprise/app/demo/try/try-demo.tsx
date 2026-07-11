@@ -99,6 +99,9 @@ export default function TryDemo() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<GradeResult | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(5 * 60);
+  // Guided mode — ON by default (owner feedback: the raw room is unreadable for
+  // non-hands-on visitors). null = dismissed; 0..2 = active step.
+  const [guide, setGuide] = useState<number | null>(0);
   const topRef = useRef<HTMLDivElement>(null);
 
   // Cosmetic 5-minute countdown — no enforcement, this is a preview.
@@ -115,6 +118,73 @@ export default function TryDemo() {
     dataStmts === null ? null : JSON.stringify({ Version: "2012-10-17", Statement: dataStmts }, null, 2);
   const stillPublic = (dataStmts ?? []).some(isPublicStmt);
   const masked = stillPublic && (accountBpa || bucketBpa);
+
+  // Client-side step-completion hints for the guide (display only — the server
+  // grades for real at submit).
+  const step1Done = !stillPublic && dataStmts !== null && (accountBpa || bucketBpa);
+  const step2Done = (() => {
+    try {
+      const p = JSON.parse(userPolicy) as { Statement?: Stmt[] };
+      const sts = [p.Statement].flat().filter(Boolean) as Stmt[];
+      const noWildcard = !sts.some(
+        (s) =>
+          s.Effect === "Allow" &&
+          [s.Resource].flat().includes("*") &&
+          [s.Action].flat().some((a) => a === "s3:*" || a === "*"),
+      );
+      const scoped = sts
+        .filter((s) => s.Effect === "Allow")
+        .every((s) => [s.Resource].flat().every((r) => typeof r === "string" && r.startsWith("arn:aws:s3:::sslab-")));
+      return sts.length > 0 && noWildcard && scoped;
+    } catch {
+      return false;
+    }
+  })();
+  const step3Done = canaryMsg?.ok === true;
+  const stepDone = [step1Done, step2Done, step3Done];
+
+  const GUIDE_STEPS = [
+    {
+      title: "Make the data bucket private — the right way",
+      body: (
+        <>
+          The <b className="text-red-700">red card</b> below is the rule making this bucket public.
+          Click <b>Remove statement</b> on it — that removes the <i>cause</i>, not just the symptom.
+          Then tick <b>Block Public Access — entire account</b> as a safety net. Leave the{" "}
+          <span className="font-mono text-[12px]">EnforceTLS</span> card alone — that one is a
+          protection, not a problem.
+        </>
+      ),
+    },
+    {
+      title: "Right-size the pipeline's permissions",
+      body: (
+        <>
+          This service account can currently do <b>anything to every bucket</b>. Click{" "}
+          <b>Insert least-privilege template</b> to give it only what the pipeline needs — or edit
+          the JSON yourself if you're comfortable.
+        </>
+      ),
+    },
+    {
+      title: "Prove nothing broke, then submit",
+      body: (
+        <>
+          Click <b>Run the pipeline</b> on the right — it should succeed. Security that breaks the
+          business doesn't count. Then hit <b>Submit &amp; see my report</b>.
+        </>
+      ),
+    },
+  ];
+
+  function goToStep(i: number) {
+    setGuide(i);
+    setTab(i === 1 ? "iam" : i === 0 ? "storage" : tab);
+  }
+
+  // Highlight helper: ring the control the active guide step points at.
+  const hl = (stepIndex: number) =>
+    guide === stepIndex ? " ring-2 ring-brand/70 ring-offset-2 ring-offset-surface" : "";
 
   function currentState() {
     return { accountBpa, bucketBpa, dataPolicy: dataPolicyJson, userPolicy };
@@ -173,6 +243,7 @@ export default function TryDemo() {
 
   function reset() {
     setPhase("working");
+    setTab("storage");
     setDataStmts(INITIAL_DATA_POLICY.Statement);
     setAccountBpa(false);
     setBucketBpa(false);
@@ -181,6 +252,7 @@ export default function TryDemo() {
     setCanaryMsg(null);
     setResult(null);
     setSecondsLeft(5 * 60);
+    setGuide(0);
   }
 
   /* ------------------------------------------------------------- intro */
@@ -204,6 +276,10 @@ export default function TryDemo() {
           <li>· The pipeline user can do anything to any bucket — right-size it.</li>
           <li>· Test the pipeline anytime. It must still work when you submit.</li>
         </ul>
+        <p className="mt-4 rounded-lg border border-line bg-canvas px-3 py-2 text-[13px] text-ink-soft">
+          <b>Not hands-on with AWS?</b> No problem — a step-by-step guide walks you through every
+          click. (Hands-on people can hide it.)
+        </p>
         <button
           type="button"
           onClick={() => setPhase("working")}
@@ -307,7 +383,16 @@ export default function TryDemo() {
         <p className="text-sm font-semibold text-ink">
           Harden the pipeline <span className="font-normal text-muted">· simulated preview</span>
         </p>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {guide === null && (
+            <button
+              type="button"
+              onClick={() => goToStep(0)}
+              className="rounded-full border border-line px-3 py-1.5 text-xs font-semibold text-ink-soft hover:border-brand hover:text-brand-strong"
+            >
+              Show the guide
+            </button>
+          )}
           <span className="rounded-lg border border-line bg-canvas px-3 py-1 font-mono text-sm font-bold text-ink">
             {mm}:{ss}
           </span>
@@ -315,12 +400,65 @@ export default function TryDemo() {
             type="button"
             onClick={submit}
             disabled={busy}
-            className="rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong disabled:opacity-60"
+            className={`rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong disabled:opacity-60${hl(2)}`}
           >
             {busy ? "Grading…" : "Submit & see my report"}
           </button>
         </div>
       </div>
+
+      {/* guided mode — plain-English steps with highlighted targets */}
+      {guide !== null && (
+        <div className="mt-4 rounded-2xl border border-brand/30 bg-brand/5 px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              {GUIDE_STEPS.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => goToStep(i)}
+                  aria-label={`Step ${i + 1}`}
+                  className={`inline-flex h-6 w-6 items-center justify-center rounded-full font-mono text-[11px] font-bold ${
+                    stepDone[i]
+                      ? "bg-emerald-600 text-white"
+                      : guide === i
+                        ? "bg-brand text-white"
+                        : "bg-surface text-muted border border-line"
+                  }`}
+                >
+                  {stepDone[i] ? "✓" : i + 1}
+                </button>
+              ))}
+              <span className="ml-1 text-sm font-bold text-ink">{GUIDE_STEPS[guide].title}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              {guide < 2 && (
+                <button
+                  type="button"
+                  onClick={() => goToStep(guide + 1)}
+                  className="rounded-full border border-brand/40 bg-surface px-3.5 py-1.5 text-xs font-semibold text-brand-strong hover:bg-brand hover:text-white"
+                >
+                  {stepDone[guide] ? "Next step →" : "Skip ahead →"}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setGuide(null)}
+                className="text-xs font-medium text-muted hover:text-ink-soft"
+              >
+                I know what I'm doing — hide
+              </button>
+            </div>
+          </div>
+          <p className="mt-2 max-w-3xl text-[13.5px] leading-relaxed text-ink-soft">{GUIDE_STEPS[guide].body}</p>
+          {stepDone[guide] && guide < 2 && (
+            <p className="mt-2 text-[12.5px] font-semibold text-emerald-700">✓ Done — hit "Next step".</p>
+          )}
+          {guide === 2 && step3Done && (
+            <p className="mt-2 text-[12.5px] font-semibold text-emerald-700">✓ Pipeline runs — submit when ready.</p>
+          )}
+        </div>
+      )}
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1.5fr_1fr]">
         {/* environment panel */}
@@ -344,6 +482,9 @@ export default function TryDemo() {
 
           {tab === "storage" && (
             <div className="mt-4 space-y-4">
+              <p className="text-[12.5px] text-muted">
+                Two storage buckets used by the pipeline — one of them has a problem.
+              </p>
               {/* data bucket */}
               <div className="rounded-xl border border-line p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -369,7 +510,7 @@ export default function TryDemo() {
                     {dataStmts.map((s) => (
                       <div
                         key={s.Sid}
-                        className={`rounded-lg border px-3 py-2.5 ${isPublicStmt(s) ? "border-red-300 bg-red-50" : "border-line bg-canvas"}`}
+                        className={`rounded-lg border px-3 py-2.5 ${isPublicStmt(s) ? `border-red-300 bg-red-50${hl(0)}` : "border-line bg-canvas"}`}
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="font-mono text-[12px] font-semibold text-ink">{s.Sid}</span>
@@ -387,7 +528,12 @@ export default function TryDemo() {
                         <p className="mt-1 font-mono text-[11.5px] text-ink-soft">{summarize(s)}</p>
                         {isPublicStmt(s) && (
                           <p className="mt-1 text-[11.5px] font-medium text-red-700">
-                            Grants read access to anyone on the internet.
+                            Grants read access to anyone on the internet — this is the problem.
+                          </p>
+                        )}
+                        {!isPublicStmt(s) && s.Condition && (
+                          <p className="mt-1 text-[11.5px] font-medium text-emerald-700">
+                            Forces encrypted connections — a protection worth keeping.
                           </p>
                         )}
                       </div>
@@ -418,22 +564,27 @@ export default function TryDemo() {
               </div>
 
               {/* account BPA */}
-              <label className="flex items-center gap-2 rounded-xl border border-line bg-canvas px-4 py-3 text-[13px] font-medium text-ink-soft">
+              <label className={`flex items-center gap-2 rounded-xl border border-line bg-canvas px-4 py-3 text-[13px] font-medium text-ink-soft${hl(0)}`}>
                 <input type="checkbox" checked={accountBpa} onChange={(e) => setAccountBpa(e.target.checked)} className="h-4 w-4 accent-[#d97706]" />
                 Block Public Access — entire account
+                <span className="ml-auto text-[11px] font-normal text-muted">the account-wide safety net</span>
               </label>
             </div>
           )}
 
           {tab === "iam" && (
             <div className="mt-4">
+              <p className="mb-3 text-[12.5px] text-muted">
+                The pipeline runs as this service account. Right now it can do anything to every
+                bucket — that's the problem.
+              </p>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-mono text-[13px] font-semibold text-ink">user/ pipeline-svc</span>
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => { setUserPolicy(SCOPED_TEMPLATE); setPolicyError(null); }}
-                    className="rounded-lg border border-line px-2.5 py-1 text-[11px] font-semibold text-ink-soft hover:border-brand hover:text-brand-strong"
+                    className={`rounded-lg border border-line px-2.5 py-1 text-[11px] font-semibold text-ink-soft hover:border-brand hover:text-brand-strong${hl(1)}`}
                   >
                     Insert least-privilege template
                   </button>
@@ -477,7 +628,7 @@ export default function TryDemo() {
             <p className="mt-3 text-[11.5px] text-muted">Graded at submit, on final state — partial credit is real.</p>
           </div>
 
-          <div className="rounded-2xl border border-brand/30 bg-brand/5 p-5">
+          <div className={`rounded-2xl border border-brand/30 bg-brand/5 p-5${hl(2)}`}>
             <h3 className="text-sm font-bold text-ink">🧪 Test the pipeline</h3>
             <p className="mt-1.5 text-[12.5px] text-ink-soft">Run it as often as you like — it must work at submit.</p>
             <button
