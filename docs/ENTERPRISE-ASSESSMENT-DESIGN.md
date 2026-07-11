@@ -153,8 +153,10 @@ memory decay; deeper checks are the employer's to run in their own interview, be
   (Note: DPDP has no "sensitive data / compelling purpose" tier — that's GDPR/old-2011-rules;
   DPDP's basis here is straightforward consent, which is clean for a recruiter-reviewed recording
   once notice is proper.)
-- **Retention.** Video is heavy and it's PII — auto-delete on a schedule (e.g. N days after the
-  hiring decision, default ~90 days), never indefinite. Candidate erasure-request path applies.
+- **Retention — DECIDED (owner, 2026-07-12): recording (video snapshots + audio) auto-deletes
+  30 days after the session**, never indefinite. Short by design — video+audio is the most
+  sensitive PII we hold and 30 days comfortably covers identity/dispute review. Candidate
+  erasure-request path applies (can shorten on request).
 - **Capture mechanism — DECIDED (owner delegated, 2026-07-12): snapshot-primary, adaptive.**
   Default = **periodic webcam snapshots** — an identity burst of a few frames at session start
   + a steady cadence (~every 10–15s) thereafter. This is the right call for India-first: it's
@@ -263,7 +265,9 @@ lives in the design-sweep source; port into each level's `lab.json` at build.)*
    Azure results for one candidate are never averaged/interchanged.
 3. **DPDP consent + retention + erasure copy ships before the first real candidate** — PII
    (email, OTP, Activity Log, verbatim reflection) flows at first use and a weak notice can't be
-   retroactively fixed. Retention schedule: raw forensic/session data ~90 days then purge;
+   retroactively fixed. Retention schedule (three tiers by sensitivity): **webcam+audio
+   recording = 30 days** (most sensitive, §3 owner decision); raw Activity Log / session forensic
+   data ~90 days then purge (low-sensitivity API log, kept longer for dispute investigation);
    graded report + reflection for the 6-month validity window then anonymize/delete. Itemized,
    purpose-specific notice (not bundled ToS); build an erasure-request path (manual/email at
    launch is fine).
@@ -323,15 +327,15 @@ regardless of any design here. This sits above the design work in priority.
    (recruiter) reviewed, **no AI analysis**; PLUS a **fresh in-session one-line rationale** per
    objective/at-submit (advisory, shown to employer). **NO ShieldSync-run verification call** —
    it defeats the automated screen's purpose and hits candidate memory-decay; deeper authorship
-   checks fold into the employer's own interview using the recording + rationale. Remaining
-   sub-decision: recording **retention window** (default ~90d post-decision).
+   checks fold into the employer's own interview using the recording + rationale. Recording
+   **retention = 30 days post-session** (owner-decided 2026-07-12).
 2. **Recording UX + bandwidth — DECIDED:** video = snapshot-primary (identity burst + ~10–15s
    cadence, optional low-bit continuous upgrade gated on bandwidth check, auto-degrade to
    snapshots on weak links); **audio = continuous low-bitrate, always on** (cheap even on weak
    links, and the best catch for off-camera voice coaching); recording failure never fails the
    session; PearsonVUE-style live self-view + "● Recording" + live-mic indicator in the companion.
-   Remaining owner to-dos (not decisions): DPDP consent copy naming **webcam snapshots + mic
-   audio** before the first real candidate; retention window (default ~90d post-decision).
+   Remaining owner to-do (not a decision): DPDP consent copy naming **webcam snapshots + mic
+   audio, deleted after 30 days** before the first real candidate.
 3. **Desktop-only** — accepted stated limitation, or is a kiosk/center fallback ever in scope
    for candidates without a personal laptop? (Note: webcam recording assumes a device camera —
    another reason desktop/laptop, and a factor for any kiosk fallback.)
