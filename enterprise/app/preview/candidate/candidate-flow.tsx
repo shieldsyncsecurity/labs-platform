@@ -208,10 +208,14 @@ type Checks = Record<string, { state: CheckState; note: string }>;
 function Readiness({ go }: { go: (s: Step) => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const rafRef = useRef(0);
+  const audioRef = useRef<AudioContext | null>(null);
   const [micLevel, setMicLevel] = useState(0);
+  const [camStatus, setCamStatus] = useState<"idle" | "requesting" | "ok" | "error">("idle");
+  const [camError, setCamError] = useState<string>("");
   const [checks, setChecks] = useState<Checks>({
-    cam: { state: "run", note: "checking…" },
-    mic: { state: "run", note: "checking…" },
+    cam: { state: "run", note: "tap Enable" },
+    mic: { state: "run", note: "tap Enable" },
     spd: { state: "run", note: "checking…" },
     brw: { state: "run", note: "checking…" },
     pip: { state: "run", note: "checking…" },
@@ -221,11 +225,58 @@ function Readiness({ go }: { go: (s: Step) => void }) {
   const set = (k: string, state: CheckState, note: string) =>
     setChecks((c) => ({ ...c, [k]: { state, note } }));
 
-  useEffect(() => {
-    let raf = 0;
-    let audioCtx: AudioContext | null = null;
+  // Camera + mic — gesture-triggerable request (far more reliable than an
+  // auto-prompt on load, and gives candidates a clear Enable/Retry + specific
+  // error). Also attempted once optimistically on mount for returning users
+  // who already granted permission.
+  const requestMedia = useCallback(async () => {
+    setCamStatus("requesting");
+    setCamError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      }
+      setCamStatus("ok");
+      set("cam", "pass", "Detected");
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AC();
+      audioRef.current = ctx;
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      let sawSound = false;
+      const tick = () => {
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        setMicLevel(Math.min(100, avg * 1.6));
+        if (avg > 8 && !sawSound) { sawSound = true; set("mic", "pass", "Working"); }
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+      setTimeout(() => { if (!sawSound) set("mic", "pass", "Ready"); }, 3000);
+    } catch (e) {
+      const name = (e as DOMException)?.name || "";
+      const msg =
+        name === "NotAllowedError" || name === "SecurityError"
+          ? "Permission was blocked. Click Enable and choose Allow — or tap the camera icon in your address bar to reset it."
+          : name === "NotFoundError" || name === "OverconstrainedError"
+          ? "No camera or microphone found on this device."
+          : name === "NotReadableError"
+          ? "Your camera/mic is in use by another app — close Zoom/Teams/Meet and retry."
+          : "Couldn't access camera & mic. Check your browser permissions and retry.";
+      setCamStatus("error");
+      setCamError(msg);
+      set("cam", "fail", "Not enabled");
+      set("mic", "fail", "Not enabled");
+    }
+  }, []);
 
-    // Browser / PiP / screen — synchronous feature detection.
+  useEffect(() => {
+    // Passive feature/network checks run automatically.
     const pip = typeof window !== "undefined" && "documentPictureInPicture" in window;
     set("pip", pip ? "pass" : "warn", pip ? "Yes" : "Docked mode");
     const chromium = typeof navigator !== "undefined" && /Chrome|Edg/.test(navigator.userAgent) && !/Mobile/.test(navigator.userAgent);
@@ -233,42 +284,6 @@ function Readiness({ go }: { go: (s: Step) => void }) {
     const bigEnough = typeof window !== "undefined" && window.innerWidth >= 1000;
     set("scr", bigEnough ? "pass" : "warn", bigEnough ? "OK" : "Small screen");
 
-    // Camera + mic — real getUserMedia (needs permission; graceful on deny).
-    (async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
-        }
-        set("cam", "pass", "Detected");
-        // mic level meter via AudioContext analyser
-        const AC = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext);
-        audioCtx = new AC();
-        const src = audioCtx.createMediaStreamSource(stream);
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 256;
-        src.connect(analyser);
-        const data = new Uint8Array(analyser.frequencyBinCount);
-        let sawSound = false;
-        const tick = () => {
-          analyser.getByteFrequencyData(data);
-          const avg = data.reduce((a, b) => a + b, 0) / data.length;
-          setMicLevel(Math.min(100, avg * 1.6));
-          if (avg > 8 && !sawSound) { sawSound = true; set("mic", "pass", "Working"); }
-          raf = requestAnimationFrame(tick);
-        };
-        tick();
-        // if no sound within 3s, still pass (mic present) but hint
-        setTimeout(() => { if (!sawSound) set("mic", "pass", "Ready"); }, 3000);
-      } catch {
-        set("cam", "fail", "Allow camera access");
-        set("mic", "fail", "Allow mic access");
-      }
-    })();
-
-    // Bandwidth probe — time a real same-origin asset fetch.
     (async () => {
       try {
         const t0 = performance.now();
@@ -279,28 +294,26 @@ function Readiness({ go }: { go: (s: Step) => void }) {
         if (mbps >= 4) set("spd", "pass", `${mbps.toFixed(0)} Mbps`);
         else if (mbps >= 1) set("spd", "warn", `${mbps.toFixed(1)} Mbps — snapshots only`);
         else set("spd", "warn", "Slow — try a better connection");
-      } catch {
-        set("spd", "warn", "Could not measure");
-      }
+      } catch { set("spd", "warn", "Could not measure"); }
     })();
 
-    // Azure Portal reachability — opaque no-cors ping with timeout.
     (async () => {
       const ctrl = new AbortController();
       const to = setTimeout(() => ctrl.abort(), 4000);
       try {
         await fetch("https://portal.azure.com/favicon.ico", { mode: "no-cors", signal: ctrl.signal, cache: "no-store" });
         set("por", "pass", "Reachable");
-      } catch {
-        set("por", "warn", "Blocked? try another network");
-      } finally {
-        clearTimeout(to);
-      }
+      } catch { set("por", "warn", "Blocked? try another network"); }
+      finally { clearTimeout(to); }
     })();
 
+    // Optimistic camera attempt (silent success for already-granted users; a
+    // block just leaves the Enable button visible — no scary auto-fail).
+    requestMedia();
+
     return () => {
-      cancelAnimationFrame(raf);
-      audioCtx?.close().catch(() => {});
+      cancelAnimationFrame(rafRef.current);
+      audioRef.current?.close().catch(() => {});
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -332,12 +345,25 @@ function Readiness({ go }: { go: (s: Step) => void }) {
             <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-slate-900">
               <video ref={videoRef} muted playsInline className="h-full w-full object-cover" />
               <div className="pointer-events-none absolute inset-[14%_26%] rounded-[50%] border-2 border-dashed border-white/50" />
-              <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/45 px-2 py-0.5 text-[11px] text-white">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" /> Camera preview
-              </div>
-              {checks.cam.state === "fail" && (
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-900/80 px-6 text-center text-xs text-slate-300">
-                  Allow camera &amp; microphone access when your browser asks.
+              {camStatus === "ok" && (
+                <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/45 px-2 py-0.5 text-[11px] text-white">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" /> Camera preview
+                </div>
+              )}
+              {camStatus !== "ok" && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-900/85 px-6 text-center">
+                  <p className="text-xs text-slate-300">
+                    {camStatus === "requesting"
+                      ? "Waiting for you to choose Allow…"
+                      : camError || "We need your camera & microphone to continue."}
+                  </p>
+                  <button
+                    onClick={requestMedia}
+                    disabled={camStatus === "requesting"}
+                    className="rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
+                  >
+                    {camStatus === "requesting" ? "Requesting…" : camStatus === "error" ? "Retry camera & mic" : "Enable camera & microphone"}
+                  </button>
                 </div>
               )}
             </div>
