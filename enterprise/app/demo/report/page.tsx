@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import {
   Bar,
   PassBadge,
@@ -77,7 +78,11 @@ function SampleRibbon() {
       <p>
         <span className="font-semibold">Sample report.</span> Every candidate and score below is
         fictional, shown to illustrate what employers receive. Real reports are private,
-        per-assessment secret links.
+        per-assessment secret links. Want to feel where these scores come from?{" "}
+        <Link href="/demo/try" className="font-semibold underline underline-offset-2 hover:text-brand">
+          Try the assessment yourself
+        </Link>
+        .
       </p>
     </div>
   );
