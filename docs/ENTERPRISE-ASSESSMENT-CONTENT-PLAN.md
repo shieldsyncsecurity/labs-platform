@@ -412,14 +412,43 @@ enterprise anyway. Three-lens research verdict (market, grading parity, isolatio
   the current $5k-credit subscription arrangement cannot vend subscriptions (MCA default cap 5,
   no EA enrollment) — billing-container decision needed.
 
-**Adopted sequencing (pending owner confirm):** Phase 1 stays AWS L2 (platform live, spec done,
-nearest revenue). Azure L2 Engineer becomes **Phase 2**, displacing AWS L3 — "both clouds at the
-flagship level" serves the dominant multi-cloud JD pattern better than five levels on one cloud.
-Prereqs to start Azure Phase 2 (can run in parallel with Phase 1): dedicated Entra tenant
-decision + hardening, subscription pool arrangement, graders ported to ARM/Resource Graph.
+**SEQUENCING DECIDED BY OWNER 2026-07-12: AZURE-FIRST.** Rationale (owner): the AWS account
+pool is hard-blocked at 3 accounts (quota case) = the #1 throughput ceiling, while Azure has a
+$5k Microsoft credit valid to Jan 2027 and no vending wall at pilot volume. Capacity model for
+pilot: **serialized sessions in the existing subscription(s) with RG-wipe between candidates** —
+the same serialization we already run on AWS's single reserved account; shared-sub isolation
+caveats are accepted at concurrency ≤2 and revisited (subscription-per-session) at scale.
+
+Revised phases: **Phase 1 = Azure L2 Cloud Security Engineer** (foundation + flagship scenario),
+Phase 2 = AWS L2 (content spec already done; platform already live — slots in whenever the AWS
+account quota unblocks or demos need it), then L3/L1/L4/L5 alternating clouds by demand.
+
+Azure Phase-1 build stages (enterprise engine only — separate Lambda, zero risk to the live
+B2C AWS path):
+- **A0 (owner, one-time GATE): dedicated labs Entra tenant** — candidates need Portal
+  identities; the corp Default Directory cannot be hardened for strangers. Same tenant also
+  unblocks the B2C Azure Portal track. (~1 hr owner step + our hardening runbook; note
+  Microsoft now restricts additional-tenant creation to paid Entra customers — may need one
+  P1 seat.)
+- **A1: ent-engine Azure driver** — track:"azure" dispatch in ent-handler (lease = RG set +
+  minted candidate identity instead of AWS account + federation URL), RG-wipe teardown,
+  Activity Log export, serialized session pool.
+- **A2: candidate identity lifecycle** — per-session member user in the labs tenant → RG-scoped
+  custom role → Portal sign-in → expire + delete on submit/timeout.
+- **A3: Azure L2 flagship scenario** (purpose-built; mirrors the AWS L2 blueprint via the
+  taxonomy map): storage public-exposure fixed at the root (anonymous access + policy),
+  RBAC right-sizing graded by policy-document analysis (no Access Analyzer equivalent —
+  accepted), secret out of app settings → Key Vault, diagnostic-settings "flight recorder",
+  Function-app canary. Sub-check scoring (E1), engine-side truth registry (E2), variants (E5)
+  all port unchanged.
+- **A4: Angoff bar, real-candidate pilot, ready:true; marketing copy sweep** ("real AWS" →
+  "real cloud accounts — AWS & Azure" across enterprise landing/tour/demo — one-business sync
+  applies to the marketing site too).
+
 The L1–L5 architecture, scoring, anti-leakage, and compliance sections port unchanged; the §2
 taxonomy maps 1:1 (Entra/RBAC↔IAM, Storage↔S3, Key Vault↔KMS, NSG↔SG, Defender↔GuardDuty,
-Policy↔Config, Activity Log↔CloudTrail).
+Policy↔Config, Activity Log↔CloudTrail). The §10 owner decisions are cloud-agnostic and still
+gate content design.
 
 ## 10. Owner decisions needed
 
