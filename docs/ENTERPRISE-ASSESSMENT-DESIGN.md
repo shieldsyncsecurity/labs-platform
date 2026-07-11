@@ -50,7 +50,8 @@ never appears in candidate copy.
    app"** (on-demand non-scored canary, 1/2min — the free confidence signal that defuses
    fear-of-breaking-the-sandbox, the #2 rage-quit moment), "Reopen console" (relaunch without
    re-provision), Submit (distinct color, confirm modal), minimize-to-pill, connection-status
-   dot.
+   dot, and a **small live webcam self-view thumbnail with a "● Recording" indicator**
+   (PearsonVUE pattern — ongoing visible recording notice + deterrent; §3).
 8. **Failure/reconnect states** — popup blocked → banner, timer runs server-side; console
    closed → one-click relaunch; network drop/sleep → reconnect within a **5-min grace** to a
    **server-authoritative timer** (never trust local clock), beyond grace → auto-submit at last
@@ -151,13 +152,24 @@ memory decay; deeper checks are the employer's to run in their own interview, be
   once notice is proper.)
 - **Retention.** Video is heavy and it's PII — auto-delete on a schedule (e.g. N days after the
   hiring decision, default ~90 days), never indefinite. Candidate erasure-request path applies.
-- **Bandwidth (the real India constraint).** Continuous HD upload dies on flaky broadband and
-  would fail exactly the candidates being assessed. Design for **low-bitrate / periodic
-  snapshots or a locally-buffered low-res stream**, not a heavy live HD push; degrade gracefully
-  and never let a recording hiccup interrupt the assessment itself (recording failure ≠ session
-  failure).
-- **Candidate-facing framing.** State plainly on the consent screen; recording is normal for
-  proctored hiring assessments in India and accepted when disclosed honestly.
+- **Capture mechanism — DECIDED (owner delegated, 2026-07-12): snapshot-primary, adaptive.**
+  Default = **periodic webcam snapshots** — an identity burst of a few frames at session start
+  + a steady cadence (~every 10–15s) thereafter. This is the right call for India-first: it's
+  the only option that uploads reliably on flaky broadband / mobile-tethered links, keeps
+  storage + DPDP retention cheap, and fully serves the three real purposes (confirm identity,
+  deter, give the recruiter reviewable evidence — a recruiter scrubbing snapshots still catches
+  a wrong face, an empty chair, a second person, or phone use). **Optional** low-bitrate
+  continuous stream is an employer-selectable upgrade for senior/high-value reqs, gated on the
+  pre-flight bandwidth check passing; on a weak link it **auto-degrades to snapshot-only**.
+  Recording is buffered/retried and **never blocks or interrupts the assessment** (recording
+  failure ≠ session failure).
+- **Candidate-facing framing + live self-view (PearsonVUE pattern).** State plainly on the
+  consent screen; recording is normal for proctored hiring assessments in India and accepted
+  when disclosed honestly. In the PiP companion, show a **small live webcam self-view thumbnail
+  with a "● Recording" label**, always visible — as PearsonVUE does. It is honest (an ongoing
+  visible notice that strengthens DPDP consent beyond the one-time tick), a constant deterrent,
+  and reassuring (the candidate can see they're framed and the camera works). A camera-permission
+  prompt + framing check is part of the pre-flight capability gate (§5.4 / §6.3).
 
 **Still never built:** AI analysis of the video, automated face-matching/liveness scoring, or any
 recording-derived "suspicion score" in the employer report. Video stays a human-reviewed identity
@@ -300,9 +312,12 @@ regardless of any design here. This sits above the design work in priority.
    it defeats the automated screen's purpose and hits candidate memory-decay; deeper authorship
    checks fold into the employer's own interview using the recording + rationale. Remaining
    sub-decision: recording **retention window** (default ~90d post-decision).
-2. **Recording UX + bandwidth** — confirm low-bitrate/periodic-snapshot capture (not HD live
-   upload) and that recording failure never fails the session. Build the DPDP recording-consent
-   copy before the first real candidate.
+2. **Recording UX + bandwidth — DECIDED:** snapshot-primary (identity burst + ~10–15s cadence),
+   optional employer-selectable low-bitrate continuous for high-value reqs gated on the bandwidth
+   check, auto-degrade to snapshots on weak links, recording failure never fails the session;
+   PearsonVUE-style live self-view + "● Recording" in the companion. Remaining owner to-dos (not
+   decisions): build the DPDP recording-consent copy before the first real candidate; set the
+   retention window (default ~90d post-decision).
 3. **Desktop-only** — accepted stated limitation, or is a kiosk/center fallback ever in scope
    for candidates without a personal laptop? (Note: webcam recording assumes a device camera —
    another reason desktop/laptop, and a factor for any kiosk fallback.)
