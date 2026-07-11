@@ -329,6 +329,44 @@ would beat the separate console tab. Four-lens research verdict:
 - Optional later, only on explicit customer demand for visual proctoring: a pilot of
   Kasm/Hyperbeam as a separate "recorded mode" — never as the default scored path.
 
+## 8c. Emulator evaluation: Floci / LocalStack-class (owner-raised, researched 2026-07-11)
+
+Owner pointed at github.com/floci-io/floci (MIT, 16.3k stars, active — a LocalStack-community
+replacement: 69 emulated AWS services behind one local endpoint, ~24ms start, ~13MiB idle,
+container-per-session trivially cheap). Could the assessment run against it, embedded in our
+own frame with no separate tab?
+
+**Verdict: never for the scored assessment; adopt for the funnel demo + CI.**
+
+Why not the scored path:
+1. **Floci does not evaluate IAM.** Documented in the LocalStack-vs-Floci comparison: IAM API
+   calls succeed but "permissions aren't evaluated… any test asserting an AccessDenied will
+   silently pass." Our product grades whether an environment actually *became secure* —
+   least-privilege, public-access, key-policy semantics. On an emulator without authorization
+   enforcement, security is not an observable property: a candidate's policy work has no
+   effect, the canary succeeds regardless, and Access Analyzer check APIs (our L3+ grading
+   mechanism) aren't implemented at all. We'd be grading whether someone can type API calls,
+   not whether the result is secure.
+2. **It's an API endpoint, not a console.** No AWS-console GUI exists; candidates would be
+   CLI-only or we'd have to build a fake console (huge scope, trademark exposure, and
+   construct drift — console fluency is part of what employers are buying evidence of).
+3. **It inverts the moat.** The entire researched positioning — landing page comparison table
+   included — is "runs in a real AWS account / graded on live cloud state / not a simulator."
+   Moving the scored path onto an emulator makes us the thing we position against, and senior
+   candidates would spot it in minutes.
+
+Where it genuinely fits (both cheap, both additive):
+- **F1 — Embedded try-it demo on the marketing/enterprise site.** This is the honest version
+  of the owner's "feel the live assessment in-frame" instinct: a 5-minute mini-scenario
+  against a Floci container, wrapped in our own UI (our software — no framing restrictions),
+  zero signup, zero account-pool burn, labeled "simulation preview — real assessments run in
+  live AWS accounts." Solves the funnel-demo problem the account pool can't afford to solve
+  with real accounts.
+- **F2 — CI harness for grader code** (extends E11): run grader smoke tests against Floci in
+  CI for wiring/regression coverage (cheap, fast), while fidelity-dependent checks (policy
+  status, Access Analyzer, canary) still validate against a real pool account before
+  `ready:true`. Never let a Floci-green result substitute for the real-account variant test.
+
 ## 9. Build sequence
 
 | Phase | Ship | Gate |
