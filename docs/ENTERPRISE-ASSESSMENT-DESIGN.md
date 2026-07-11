@@ -32,8 +32,9 @@ never appears in candidate copy.
    must-check gate (activity recorded for scoring integrity · AI assistants allowed, a second
    human is not · privacy/retention link · environment fully isolated from any real company
    system) + a non-destructive "Not right now" exit.
-3. **Identity** — email OTP only (6-digit, 10-min expiry, 30s resend, lockout after repeats).
-   No document/webcam upload (see §3).
+3. **Identity** — email OTP (6-digit, 10-min expiry, 30s resend, lockout after repeats) + the
+   consent gate for the session webcam recording (§3: plain recording, recruiter-reviewed, no
+   AI). Recording consent is a distinct, itemized tick — not bundled into general ToS.
 4. **Pre-brief** — single scroll (not a wizard): Environment · Timer ("60 min, cannot be
    paused, always visible in the floating window") · Objectives ("up to 5, partial credit — 3
    of 5 beats 0 of 5") · Rules · What-happens-after. **Rehearses the tab→companion handoff with
@@ -77,61 +78,81 @@ session start (see §4.2 — this is a validity control, not a nicety).
   objective outcomes, verbatim reflection visually separated as grey/advisory, an
   app-still-works reassurance line). **No numeric score, no hire/no-hire, anywhere.**
 
-## 3. Integrity / anti-cheat — the honest posture **[critic-fixed]**
+## 3. Integrity / anti-cheat — the posture (owner-decided 2026-07-12)
 
 **Threat model first.** Deterministic state-grading already defeats answer-copying (no answer
-string exists, only a correct end-state), but proves nothing about *who was at the keyboard*.
-Residual risk after current controls (fresh parameterized env · Activity Log · single-active-
-session · K-of-N seeding):
+string exists — the candidate must leave a real cloud environment in a correctly-secured final
+state; a leaked walkthrough points at different K-of-N-randomized resources; pasting text solves
+nothing). The only real gap is **who was at the keyboard**. Residual risk after current controls
+(fresh parameterized env · Activity Log · single-active-session · K-of-N seeding):
 
-| Threat | Residual today |
-|--------|----------------|
+| Threat | Residual before this section's controls |
+|--------|------------------------------------------|
 | Impersonation / proxy-taker | **HIGH** — magic link + OTP prove inbox control, not personhood |
 | Second human silently assisting | **HIGH** — invisible to any control that only inspects the cloud |
 | Scenario pre-knowledge / leak | MEDIUM, rising with volume |
 | Cross-candidate collusion (meta-strategy) | MEDIUM |
 | AI does ~100% | Not a security gap — AI is *allowed* by design; it's a validity question (measures prompt skill) |
 
-**Webcam / facial proctoring: do NOT build it, ever — not even as a paid tier.** It catches
-presence/multi-face but misses audio coaching and off-frame help, has documented skin-tone /
-lighting false-positive bias (a live discrimination risk in an India-first pool), reintroduces
-exactly the automated adverse-inference the advisory-only design avoids (EU-AI-Act/LL144), and
-is the precise fact pattern behind the BIPA/ADA suits against HireVue. Disproportionate for a
-60-min screen.
+**Scope reset (owner, 2026-07-12): ShieldSync hiring assessments are INDIA-FIRST, will NOT be
+sold in the US, and any webcam recording is a PLAIN recording reviewed by a human recruiter —
+NO AI analysis of video, ever.** Both facts change the earlier analysis and the prior
+"no webcam ever" recommendation is **retracted** as over-indexed on US law and on
+algorithmic-bias-in-analysis:
+- The **BIPA/ADA/Illinois/EU-AI-Act** exposure is US/EU law → **does not apply** to an India-only
+  product. India has no BIPA equivalent.
+- The **skin-tone false-positive bias** is a property of *automated facial-recognition/liveness
+  algorithms* deciding things. With **no algorithm in the loop — just a video a human watches** —
+  that specific automated disparate-impact engine isn't present. (The "no AI decisioning on the
+  candidate" principle stays: video is for human identity review + deterrence, never fed to any
+  model, never turned into an automated suspicion score.)
 
-**[critic-fixed] The earlier draft's "default = one-time ID/liveness check + passive telemetry"
-is rejected.** The privacy-lawyer critique caught three real problems: (1) **liveness IS
-biometric** — it inherits the same skin-tone bias and, worse, *gates the candidate before they
-start*, creating silent adverse impact; (2) the **passive typing/paste telemetry is theater with
-a downside** — it manufactures a "suspicion" signal for pasting, which is *sanctioned* behavior
-since AI is allowed, and any such signal reaching the employer report is the profiling the
-architecture exists to avoid; (3) the original **DPDP legal basis was factually wrong** (DPDP
-2023 has no "sensitive data / compelling legitimate purpose" tier — that's GDPR Art 9 / the old
-2011 SPDI rules; DPDP's only bases are consent or the §7 legitimate-uses list, and the
-employment legitimate-use almost certainly does **not** cover a pre-hire *candidate*, so
-**consent is the only lawful basis** — and consent conditioned on biometric capture to be
-assessed for a job is likely not "freely given," failing the DPDP "free" standard and GDPR's
-power-imbalance guidance).
+**Adopted two-layer posture:**
 
-**Adopted posture — proportionality flipped to match a screening:**
-- **Default (every candidate): zero biometric friction.** Magic link + OTP + fresh isolated env
-  + Activity Log + single-active-session + K-of-N seeding. Accept bounded residual impersonation
-  risk *at the screening stage* — screening's job is to filter cheaply.
-- **Assurance where it matters: the "defend your work" call.** A short (5–10 min) live
-  follow-up, auto-scripted from the candidate's *actual submitted state* ("walk me through why
-  you scoped this NSG rule to /24 not /32"). This single control defeats impersonation, silent
-  assistance, **and** AI-as-conduit at once, with zero recording/consent infrastructure — apply
-  it to candidates who **advance**, and by default to **L4/L5**. Must be **structured** (fixed
-  rubric generated from submitted state, calibrated reviewers, logged rationale) so it doesn't
-  become an unstructured bias vector.
-- **Any integrity signal stays internal-only**, never in the employer-verbatim report, never
-  rank-affecting, with a human-review gate and a candidate access/correction path (DPDP §11–13
-  rights).
-- **Trust differentiator:** publicly state "we deliberately do not use webcam/facial
-  proctoring, and here's why" — a credible position against HireVue-class incumbents in the 2026
-  enforcement climate.
-- **On US/EU expansion:** the no-facial-analysis posture is a permanent product principle, not a
-  market-specific choice.
+1. **Default (every candidate): plain webcam recording for human identity review + deterrence.**
+   The candidate's webcam records during the session; the employer's recruiter can view it to
+   confirm *this is the person we invited* and as a cheating deterrent. **No AI, no automated
+   flagging, no face-matching** — a human simply watches if/when they choose. This is standard,
+   accepted practice for proctored assessments in India. What it catches: impersonation at the
+   camera, a visible second person in frame, and the deterrent effect of "you're on camera."
+   What it does **not** catch (be honest with buyers): an earpiece, a phone below the desk, a
+   helper on a second machine off-frame — those are the layer-2 job.
+
+2. **Higher assurance for advancers + all L4/L5: the "defend your work" call.** A short (5–10
+   min) live call *after* submit where the interviewer asks the candidate to explain the choices
+   in their own submitted work ("walk me through why you scoped this NSG rule to /24 not /32").
+   An impersonator or an AI-conduit candidate **can't explain work they didn't do** — this is the
+   one control that defeats impersonation, silent off-camera coaching, AND AI-did-it-all at once.
+   Run it only on the shortlist (candidates who pass and are heading to interview anyway), so
+   cost stays low; keep it **structured** (questions auto-generated from the submitted state,
+   consistent rubric, logged rationale) so it doesn't become an unstructured bias vector. Owner
+   decision open: ShieldSync-run (sellable paid tier) vs employer-run.
+
+The two layers are **complementary, not either/or**: recording is the cheap passive layer across
+the whole funnel; defend-your-work is the strong active check on the few who matter.
+
+**India-specific requirements to build with the recording (not blockers — just do them right):**
+- **DPDP consent + notice.** Recording a candidate's video = collecting personal data; India's
+  DPDP Act requires clear, itemized, purpose-specific consent BEFORE the first real candidate:
+  *what* is recorded, *who* sees it (the employer's recruiter), *how long* it's kept, and the
+  withdrawal/grievance path. A tick-box gate on the consent screen, not bundled into general ToS.
+  (Note: DPDP has no "sensitive data / compelling purpose" tier — that's GDPR/old-2011-rules;
+  DPDP's basis here is straightforward consent, which is clean for a recruiter-reviewed recording
+  once notice is proper.)
+- **Retention.** Video is heavy and it's PII — auto-delete on a schedule (e.g. N days after the
+  hiring decision, default ~90 days), never indefinite. Candidate erasure-request path applies.
+- **Bandwidth (the real India constraint).** Continuous HD upload dies on flaky broadband and
+  would fail exactly the candidates being assessed. Design for **low-bitrate / periodic
+  snapshots or a locally-buffered low-res stream**, not a heavy live HD push; degrade gracefully
+  and never let a recording hiccup interrupt the assessment itself (recording failure ≠ session
+  failure).
+- **Candidate-facing framing.** State plainly on the consent screen; recording is normal for
+  proctored hiring assessments in India and accepted when disclosed honestly.
+
+**Still never built:** AI analysis of the video, automated face-matching/liveness scoring, or any
+recording-derived "suspicion score" in the employer report. Video stays a human-reviewed identity
++ deterrence artifact only. AI assistants remain *allowed* during the assessment (realistic job
+preview); the defend-your-work call — not the camera — is what verifies real human judgment.
 
 ## 4. Per-grade complexity — the Azure L1–L5 scenarios
 
@@ -261,14 +282,17 @@ regardless of any design here. This sits above the design work in priority.
 
 ## 7. Owner decisions this design surfaces (adds to plan §10)
 
-1. **Integrity posture** — confirm: default = no biometric friction; assurance = structured
-   "defend your work" call for advancers + all L4/L5; webcam never. **Who runs the call** —
-   ShieldSync-side reviewer (sellable paid tier) or the employer's own interviewer (zero
-   ShieldSync labor, variable quality)?
-2. **Publicly state the no-facial-proctoring position** as a trust differentiator? (recommend
-   yes)
+1. **Integrity posture (owner-decided 2026-07-12):** DEFAULT = plain webcam recording, human
+   (recruiter) reviewed, **no AI analysis**; PLUS the structured "defend your work" call for
+   advancers + all L4/L5. Remaining sub-decisions: **who runs the call** (ShieldSync-side paid
+   tier vs employer's own interviewer)? And **retention window** for recordings (default ~90d
+   post-decision)?
+2. **Recording UX + bandwidth** — confirm low-bitrate/periodic-snapshot capture (not HD live
+   upload) and that recording failure never fails the session. Build the DPDP recording-consent
+   copy before the first real candidate.
 3. **Desktop-only** — accepted stated limitation, or is a kiosk/center fallback ever in scope
-   for candidates without a personal laptop?
+   for candidates without a personal laptop? (Note: webcam recording assumes a device camera —
+   another reason desktop/laptop, and a factor for any kiosk fallback.)
 4. **Cloud track selection** — employer picks per req (recommended), or ShieldSync infers from a
    candidate intake question?
 5. **Validity window / retake numbers** — confirm 6 months + the reuse rules in 5.6.
