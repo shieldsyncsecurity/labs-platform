@@ -362,6 +362,11 @@ Where it genuinely fits (both cheap, both additive):
   zero signup, zero account-pool burn, labeled "simulation preview — real assessments run in
   live AWS accounts." Solves the funnel-demo problem the account pool can't afford to solve
   with real accounts.
+  **STATUS: SHIPPED 2026-07-11 (`82c84f5`) at `/demo/try`** — v1 keeps scenario state in-page
+  and grades server-side in a Worker route mirroring the engine's policy-document analysis
+  (zero new infra; a Workers app can't host a Docker container, and a guided demo doesn't
+  need one). The grade endpoint is stateless with a 20KB clamp. Backend is swappable to a
+  hosted Floci if free-form realism is ever wanted; Floci remains adopted for F2 CI.
 - **F2 — CI harness for grader code** (extends E11): run grader smoke tests against Floci in
   CI for wiring/regression coverage (cheap, fast), while fidelity-dependent checks (policy
   status, Access Analyzer, canary) still validate against a real pool account before
