@@ -67,6 +67,45 @@ never appears in candidate copy.
 Shell" vs "AWS Console + CloudShell" copy; a **2–3 min non-scored Portal orientation primer** at
 session start (see §4.2 — this is a validity control, not a nicety).
 
+### 1a. Pre-flight Readiness Check (OnVUE-style system test) — owner-requested 2026-07-12
+
+Model on PearsonVUE's OnVUE system test, but **zero-install** (pure browser — no download; our
+advantage). It is the single highest-leverage anti-rage-quit control: it moves *every*
+device/network failure OUT of the timed session, where it's an unrecoverable disaster, to
+*before* it, where it's a fixable warning. **Runs twice:**
+- **In advance** — a "Check my setup" link in the invite email + booking confirmation, runnable
+  any time before the slot, so a broken camera/browser surfaces days early, not at Start.
+- **At the pre-start lobby** — the same check re-runs as the **final gate**; Start stays disabled
+  until it's green. Never consumes the 60-min timer (it's entirely pre-Start).
+
+**What it checks (all standard browser APIs, no app):**
+| Check | How | Fail → |
+|-------|-----|--------|
+| Browser / OS | feature-detect Chromium-desktop | **BLOCK** — clear "use Chrome/Edge on a laptop" message (Document-PiP is Chromium-desktop only) |
+| Document Picture-in-Picture | `'documentPictureInPicture' in window` | **BLOCK** (or offer the docked in-tab companion fallback, §6.3) |
+| Pop-up permission | attempt a test pop-up | **FIX** — inline "allow pop-ups" instructions + retry |
+| **Camera** | `getUserMedia` → live framing preview ("center your face — we can see you") + capture the identity snapshot | **BLOCK** — permission/hardware fix steps |
+| **Microphone** | `getUserMedia` → live level meter ("say something — we can hear you") | **BLOCK** — permission/hardware fix steps |
+| Speaker (optional) | play a test tone, "did you hear it?" | WARN only |
+| **Internet speed** | timed download+upload probe of a test asset | **ADAPT + WARN** — sets snapshot cadence; too-low → advise a better connection / reschedule (never silently degrade the assessment) |
+| Azure Portal reachability | timed load of a portal asset (some corporate/college networks block `portal.azure.com`) | **BLOCK** — "your network blocks the cloud console; try another network" *before* the timer, not after |
+| Screen size | `window.screen` vs a two-surface minimum | WARN — "a larger screen works better" |
+
+**Design rules:**
+- **Hard-block vs warn** is deliberate: block only what makes the session *impossible* (no
+  camera/mic, unsupported browser, no PiP, Portal unreachable); everything else warns/adapts so
+  we don't turn a solvable annoyance into a lockout (the OnVUE over-blocking complaint).
+- The **identity snapshot** captured here is under the §3 consent + 30-day retention — this is
+  also where recording consent is confirmed with the live self-view, so the candidate sees
+  exactly what will be recorded before they commit.
+- **Bandwidth result drives the recording mode** (snapshot cadence; and, if the optional
+  continuous-video upgrade is ever enabled, this is the gate that allows or denies it).
+- Fully **keyboard-operable, text-labelled (not color-only)** for accessibility (§5.4).
+- Honest, reassuring copy; each row shows a plain pass/fix state, not a cryptic error.
+
+This section subsumes and makes concrete the "client pre-flight capability gate" and the
+"network+browser check" flagged in §5.4 and §6.3.
+
 ## 2. Employer interface
 
 - **Create assessment + level-picker** — a short JD-mapping picker returns a **plain-language
@@ -163,11 +202,12 @@ memory decay; deeper checks are the employer's to run in their own interview, be
   the only option that uploads reliably on flaky broadband / mobile-tethered links, keeps
   storage + DPDP retention cheap, and fully serves the three real purposes (confirm identity,
   deter, give the recruiter reviewable evidence — a recruiter scrubbing snapshots still catches
-  a wrong face, an empty chair, a second person, or phone use). **Optional** low-bitrate
-  continuous stream is an employer-selectable upgrade for senior/high-value reqs, gated on the
-  pre-flight bandwidth check passing; on a weak link it **auto-degrades to snapshot-only**.
-  Recording is buffered/retried and **never blocks or interrupts the assessment** (recording
-  failure ≠ session failure).
+  a wrong face, an empty chair, a second person, or phone use). **v1 scope LOCKED (owner,
+  2026-07-12): snapshots + continuous audio only — continuous video is DEFERRED (post-launch, on
+  explicit buyer demand).** It adds bandwidth/build complexity for marginal benefit over
+  snapshots+audio; the readiness-check (§1a) bandwidth result is already the gate that would
+  enable it later. Recording is buffered/retried and **never blocks or interrupts the assessment**
+  (recording failure ≠ session failure).
 - **Audio — continuous, always on with the snapshots.** Unlike video, low-bitrate audio (~16–32
   kbps) is cheap enough to run **continuously even on weak links**, so it is NOT reduced to
   snapshots — it is the continuous layer that covers the gaps between video frames and is the
@@ -313,9 +353,10 @@ regardless of any design here. This sits above the design work in priority.
    whole AI-Act/LL144-avoidance posture — rank defensibility rests on the grader being
    demonstrably fair.
 3. **Client pre-flight capability gate + non-PiP fallback** — Document-PiP is Chromium-desktop
-   only; the companion collapses silently on Firefox/Safari/mobile or a blocked pop-up.
-   Capability check before booking is confirmed + a **docked in-tab companion fallback**.
-   (Folded into decision 5.4.)
+   only; the companion collapses silently on Firefox/Safari/mobile or a blocked pop-up. **Now
+   fully designed as the §1a Readiness Check (OnVUE-style)** — camera/mic/speed/PiP/pop-up/Portal-
+   reachability, run in advance + as the pre-start gate, with a docked in-tab companion fallback
+   when PiP is unavailable.
 4. **Accessibility accommodations for the timed assessment itself** — a hard 60-min timed
    pre-hire test + always-on-top widget triggers ADA (US) and the RPwD Act (India) duty to
    accommodate. **Time-extension as a first-class timer parameter, accommodation request at
