@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShieldSync Enterprise — Candidate journey (clickable mock)</title>
+<style>
+  :root{
+    --brand:#d97706; --brand-strong:#b45309; --brand-soft:#fff7ed;
+    --ink:#0f172a; --ink-soft:#334155; --muted:#64748b;
+    --line:#e2e8f0; --line-strong:#cbd5e1; --canvas:#f8fafc; --surface:#fff;
+    --green:#16a34a; --green-soft:#f0fdf4; --red:#dc2626; --red-soft:#fef2f2;
+    --amber-soft:#fffbeb; --azure:#0078d4; --azure-dark:#1f1f1f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#eef1f5;color:var(--ink);font-size:14px;line-height:1.5}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+  button{font-family:inherit;cursor:pointer}
+
+  /* ---- owner scaffolding (not part of the product) ---- */
+  .scaffold{position:sticky;top:0;z-index:100;background:#0f172a;color:#cbd5e1;padding:8px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px}
+  .scaffold b{color:#fbbf24}
+  .scaffold .steps{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}
+  .scaffold .steps button{background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:6px;padding:3px 8px;font-size:11px}
+  .scaffold .steps button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+
+  .stage{max-width:1080px;margin:22px auto;padding:0 18px 80px}
+  .screen{display:none}
+  .screen.on{display:block;animation:fade .25s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .device{background:var(--canvas);border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 50px -28px rgba(15,23,42,.4);overflow:hidden}
+  .topbar{display:flex;align-items:center;justify-content:space-between;background:var(--surface);border-bottom:1px solid var(--line);padding:11px 18px}
+  .logo{font-weight:800;font-size:15px;letter-spacing:-.01em}
+  .logo .sync{color:var(--brand)}
+  .logo .ent{border:1px solid rgba(217,119,6,.4);color:var(--brand);font-size:9px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;border-radius:999px;padding:2px 7px;margin-left:8px;vertical-align:2px}
+  .pad{padding:26px 30px}
+  @media(max-width:640px){.pad{padding:20px}}
+
+  .eyebrow{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--brand)}
+  h1{font-size:22px;font-weight:700;letter-spacing:-.01em;margin-top:6px}
+  h2{font-size:15px;font-weight:700}
+  .sub{color:var(--muted);font-size:13px}
+  .lead{color:var(--ink-soft);font-size:15px;line-height:1.6;margin-top:12px;max-width:60ch}
+
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:none;background:var(--brand);color:#fff;font-weight:600;font-size:14px;padding:11px 22px;border-radius:999px;box-shadow:0 1px 2px rgba(15,23,42,.1)}
+  .btn:hover{background:var(--brand-strong)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.ghost{background:var(--surface);color:var(--ink-soft);border:1px solid var(--line-strong);box-shadow:none}
+  .btn.sm{padding:7px 14px;font-size:12.5px}
+  .btn.block{width:100%}
+
+  .card{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:18px 20px}
+  .pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;letter-spacing:.04em}
+  .pill.brand{background:var(--brand-soft);color:var(--brand-strong)}
+  .pill.ok{background:var(--green-soft);color:var(--green)}
+  .pill.warn{background:var(--amber-soft);color:#92400e}
+  .rec-dot{width:8px;height:8px;border-radius:99px;background:var(--red);display:inline-block;animation:blink 1.4s infinite}
+  @keyframes blink{50%{opacity:.35}}
+
+  ul.clean{list-style:none;display:flex;flex-direction:column;gap:9px;margin-top:14px}
+  ul.clean li{display:flex;gap:9px;align-items:baseline;color:var(--ink-soft);font-size:14px}
+  ul.clean li .tick{flex:none;color:var(--brand);font-weight:800}
+
+  .check-row{display:flex;align-items:center;gap:10px;padding:8px 0}
+  .check-row input{width:17px;height:17px;accent-color:var(--brand);flex:none;margin-top:1px}
+  .check-row label{font-size:13.5px;color:var(--ink-soft)}
+
+  .note{border-radius:10px;padding:11px 14px;font-size:12.5px;line-height:1.5;margin-top:14px}
+  .note.amber{background:var(--amber-soft);border:1px solid #fde68a;color:#92400e}
+  .note.grey{background:var(--canvas);border:1px solid var(--line);color:var(--ink-soft)}
+  .note.blue{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af}
+
+  /* readiness check */
+  .rc-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;margin-top:18px}
+  @media(max-width:720px){.rc-grid{grid-template-columns:1fr}}
+  .webcam{position:relative;background:#111827;border-radius:12px;aspect-ratio:4/3;overflow:hidden;display:flex;align-items:center;justify-content:center}
+  .webcam .face{width:44%;aspect-ratio:3/4;border-radius:50%;background:radial-gradient(circle at 50% 38%, #64748b, #334155);}
+  .webcam .oval{position:absolute;inset:14% 26%;border:2px dashed rgba(255,255,255,.5);border-radius:50%}
+  .webcam .lbl{position:absolute;top:8px;left:8px;color:#fff;font-size:11px;background:rgba(0,0,0,.45);padding:2px 8px;border-radius:99px;display:flex;align-items:center;gap:6px}
+  .meter{height:10px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:6px}
+  .meter > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--green),#4ade80);border-radius:99px}
+  .rc-list{display:flex;flex-direction:column;gap:2px}
+  .rc-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line);font-size:13.5px}
+  .rc-item:last-child{border-bottom:none}
+  .rc-item .st{font-size:12px;font-weight:700}
+  .rc-item .st.run{color:var(--muted)}
+  .rc-item .st.pass{color:var(--green)}
+  .rc-item .st.warn{color:#b45309}
+  .spinner{width:13px;height:13px;border:2px solid var(--line-strong);border-top-color:var(--brand);border-radius:50%;display:inline-block;animation:spin .7s linear infinite;vertical-align:-2px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* OTP */
+  .otp{display:flex;gap:8px;margin-top:10px}
+  .otp input{width:44px;height:52px;text-align:center;font-size:20px;font-weight:700;border:1px solid var(--line-strong);border-radius:10px;background:var(--canvas)}
+  .otp input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(217,119,6,.15)}
+
+  /* booking */
+  .cal{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}
+  .slot{border:1px solid var(--line-strong);background:var(--surface);border-radius:10px;padding:9px 6px;text-align:center;font-size:12.5px;font-weight:600;color:var(--ink-soft)}
+  .slot.sel{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .slot small{display:block;font-weight:400;font-size:10px;opacity:.8}
+
+  /* lobby progress */
+  .prog{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:14px}
+  .prog > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brand),#f59e0b);transition:width .3s}
+
+  /* ============ THE ROOM ============ */
+  .room{position:relative;background:#f3f4f6;border-radius:16px;overflow:hidden;border:1px solid var(--line);min-height:520px}
+  /* faux azure portal */
+  .az-top{background:var(--azure-dark);color:#fff;display:flex;align-items:center;gap:12px;padding:9px 14px;font-size:12px}
+  .az-top .ms{font-weight:600;color:#fff}
+  .az-top .search{margin-left:8px;background:#2d2d2d;border-radius:5px;padding:5px 10px;color:#9ca3af;flex:1;max-width:360px;font-size:11px}
+  .az-top .env{margin-left:auto;background:#0e5a9c;padding:3px 9px;border-radius:5px;font-size:11px}
+  .az-body{display:flex;min-height:460px}
+  .az-nav{width:180px;flex:none;background:#f9fafb;border-right:1px solid #e5e7eb;padding:12px 8px;font-size:12px;color:#374151}
+  @media(max-width:720px){.az-nav{display:none}}
+  .az-nav .grp{color:#6b7280;font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin:10px 6px 4px}
+  .az-nav a{display:block;padding:6px 8px;border-radius:6px;color:#374151;text-decoration:none}
+  .az-nav a.on{background:#e5effb;color:var(--azure);font-weight:600}
+  .az-main{flex:1;padding:16px 18px;overflow:auto}
+  .az-crumb{color:var(--azure);font-size:12px}
+  .az-h{font-size:17px;font-weight:600;margin:4px 0 12px;color:#1f2937}
+  .az-table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden}
+  .az-table th{background:#fafafa;text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;font-size:11px;border-bottom:1px solid #eee}
+  .az-table td{padding:9px 10px;border-bottom:1px solid #f3f4f6;color:#1f2937}
+  .az-table tr:last-child td{border-bottom:none}
+  .badge{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:99px}
+  .badge.pub{background:#fdecea;color:#c0392b}
+  .badge.priv{background:#eafaf1;color:#1e8e4f}
+
+  /* PiP companion (floating) */
+  .pip{position:absolute;right:16px;bottom:16px;width:290px;background:var(--surface);border:1px solid var(--line-strong);border-radius:14px;box-shadow:0 22px 50px -14px rgba(0,0,0,.5);overflow:hidden}
+  .pip .hd{display:flex;align-items:center;justify-content:space-between;background:#0f172a;color:#e2e8f0;padding:7px 11px;font-size:11px;font-weight:600}
+  .pip .hd .dots span{display:inline-block;width:7px;height:7px;border-radius:99px;background:#475569;margin-left:3px}
+  .pip .bd{padding:11px 13px}
+  .pip .tmr{display:flex;align-items:baseline;justify-content:space-between}
+  .pip .tmr b{font-family:ui-monospace,Menlo,monospace;font-size:22px}
+  .pip .tmr span{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+  .pip ol{list-style:none;margin-top:10px;display:flex;flex-direction:column;gap:5px}
+  .pip ol li{font-size:12px;color:var(--ink-soft);display:flex;gap:7px;align-items:baseline;cursor:pointer}
+  .pip ol li .n{flex:none;width:15px;height:15px;border:1.5px solid var(--line-strong);border-radius:5px;font-size:9px;display:flex;align-items:center;justify-content:center;color:var(--muted);margin-top:1px}
+  .pip ol li.done{color:var(--muted);text-decoration:line-through}
+  .pip ol li.done .n{background:var(--green);border-color:var(--green);color:#fff}
+  .pip .row{display:flex;gap:6px;margin-top:11px}
+  .pip .row .btn{flex:1;font-size:11.5px;padding:7px 8px}
+  .pip .selfview{margin-top:11px;display:flex;align-items:center;gap:9px;background:var(--canvas);border:1px solid var(--line);border-radius:10px;padding:7px 9px}
+  .pip .selfview .cam{width:46px;height:34px;border-radius:6px;background:#111827;position:relative;flex:none;overflow:hidden}
+  .pip .selfview .cam .f{position:absolute;inset:20% 32% 0;border-radius:50% 50% 0 0;background:radial-gradient(circle at 50% 40%,#64748b,#334155)}
+  .pip .selfview .meta{font-size:10.5px;color:var(--ink-soft);line-height:1.35}
+  .pip .selfview .meta .live{color:var(--red);font-weight:700;display:flex;align-items:center;gap:4px}
+
+  .toast{position:absolute;left:16px;bottom:16px;background:#fff;border:1px solid #bbf7d0;border-radius:12px;padding:9px 13px;font-size:12.5px;display:flex;align-items:center;gap:8px;box-shadow:0 12px 30px -10px rgba(0,0,0,.25)}
+  .toast .ic{width:20px;height:20px;border-radius:99px;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+
+  /* modal */
+  .modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;z-index:200;padding:20px}
+  .modal-bg.on{display:flex}
+  .modal{background:#fff;border-radius:16px;max-width:420px;width:100%;padding:24px;box-shadow:0 30px 60px -20px rgba(0,0,0,.5)}
+
+  .footer-hint{text-align:center;color:var(--muted);font-size:12px;margin-top:16px}
+  .kicker{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+</style>
+</head>
+<body>
+
+<div class="scaffold">
+  <b>MOCK</b> — clickable candidate journey. Not the real product; no cloud, no backend. Click through as a candidate would.
+  <div class="steps" id="stepNav"></div>
+</div>
+
+<div class="stage">
+
+<!-- 1 — INVITE EMAIL (the magic link) -->
+<section class="screen on" data-step="Invite email">
+  <div class="device">
+    <div class="topbar" style="background:#f1f5f9">
+      <span class="sub">📧 Inbox — 1 new</span><span class="sub">now</span>
+    </div>
+    <div class="pad">
+      <p class="sub">From <b class="mono" style="color:var(--ink)">no-reply@shieldsyncsecurity.com</b></p>
+      <h1 style="font-size:19px">Acme Corp invited you to a hands-on security assessment</h1>
+      <p class="lead">Hi Priya — Acme Corp would like you to complete a <b>Cloud Security Engineer</b>
+        assessment. It's a real, hands-on cloud environment (not a quiz), takes about 60 minutes,
+        and you can do it on your own schedule.</p>
+      <ul class="clean">
+        <li><span class="tick">•</span> Runs in your browser — nothing to install.</li>
+        <li><span class="tick">•</span> Do it whenever you're ready; book a slot that suits you.</li>
+        <li><span class="tick">•</span> Check your setup in 60 seconds before you start.</li>
+      </ul>
+      <div style="margin-top:22px;display:flex;gap:12px;flex-wrap:wrap">
+        <button class="btn" onclick="go(1)">Start my assessment →</button>
+        <button class="btn ghost" onclick="go(2)">Check my setup first</button>
+      </div>
+      <p class="footer-hint" style="text-align:left">This link is personal to you — please don't share it. Expires in 7 days.</p>
+    </div>
+  </div>
+  <p class="footer-hint">The two buttons are the "magic link." "Check my setup first" jumps straight to the readiness check (you can run it days early).</p>
+</section>
+
+<!-- 2 — LANDING / CONSENT -->
+<section class="screen" data-step="Consent">
+  <div class="device">
+    <div class="topbar"><span class="logo">Shield<span class="sync">Sync</span><span class="ent">Enterprise</span></span><span class="pill brand">Acme Corp</span></div>
+    <div class="pad">
+      <span class="eyebrow">Cloud Security Engineer — hands-on assessment</span>
+      <h1>Before you begin</h1>
+      <p class="lead">You'll work in your own private cloud environment for 60 minutes, then a report
+        goes to Acme Corp's hiring team. A few things to know and agree to first:</p>
+      <div class="card" style="margin-top:16px">
+        <div class="check-row"><input type="checkbox" onchange="gate()"><label><b>Your session is recorded.</b> Your webcam (periodic snapshots) and microphone are recorded so Acme's recruiter can confirm it's you. A human reviews it — no AI. Kept 30 days, then deleted.</label></div>
+        <div class="check-row"><input type="checkbox" onchange="gate()"><label><b>AI assistants &amp; docs are allowed</b> — use what you'd use on the job. But you must work <b>alone</b>; a second person helping is not permitted.</label></div>
+        <div class="check-row"><input type="checkbox" onchange="gate()"><label>The environment is <b>fully isolated</b> — nothing you do touches any real Acme system. <a href="#" onclick="return false" style="color:var(--brand-strong)">Privacy &amp; retention</a>.</label></div>
+        <div class="check-row"><input type="checkbox" onchange="gate()"><label>Your written answers are shown to the employer as-is, but <b>don't change your score</b>.</label></div>
+      </div>
+      <div style="margin-top:20px;display:flex;gap:12px">
+        <button class="btn" id="consentBtn" disabled onclick="go(2)">Continue</button>
+        <button class="btn ghost" onclick="go(0)">Not right now</button>
+      </div>
+    </div>
+  </div>
+  <p class="footer-hint">Continue stays disabled until all four are ticked — honest, itemized consent (DPDP), not buried in a ToS.</p>
+</section>
+
+<!-- 3 — READINESS CHECK -->
+<section class="screen" data-step="Readiness check">
+  <div class="device">
+    <div class="topbar"><span class="logo">Shield<span class="sync">Sync</span><span class="ent">Enterprise</span></span><span class="sub">Readiness check</span></div>
+    <div class="pad">
+      <span class="eyebrow">60-second setup test</span>
+      <h1>Let's check your camera, mic &amp; connection</h1>
+      <p class="lead">Just like a proctored exam — we test everything now so nothing surprises you
+        once the clock starts. Run it any time before your slot.</p>
+      <div class="rc-grid">
+        <div>
+          <div class="webcam">
+            <div class="oval"></div>
+            <div class="face"></div>
+            <div class="lbl"><span class="rec-dot"></span> Camera preview — center your face</div>
+          </div>
+          <div class="card" style="margin-top:12px">
+            <h2 style="font-size:13px">Microphone <span class="sub" style="font-weight:400">— say something</span></h2>
+            <div class="meter"><i id="micBar"></i></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="rc-list" id="rcList">
+            <div class="rc-item" data-k="cam">Camera detected &amp; framed <span class="st run">checking…</span></div>
+            <div class="rc-item" data-k="mic">Microphone working <span class="st run">checking…</span></div>
+            <div class="rc-item" data-k="spd">Internet speed <span class="st run">checking…</span></div>
+            <div class="rc-item" data-k="brw">Browser supported (Chrome/Edge) <span class="st run">checking…</span></div>
+            <div class="rc-item" data-k="pip">Floating window supported <span class="st run">checking…</span></div>
+            <div class="rc-item" data-k="pop">Pop-ups allowed <span class="st run">checking…</span></div>
+            <div class="rc-item" data-k="por">Cloud console reachable <span class="st run">checking…</span></div>
+            <div class="rc-item" data-k="scr">Screen size OK <span class="st run">checking…</span></div>
+          </div>
+          <div class="note grey" id="rcMsg">Running checks… this takes a few seconds.</div>
+        </div>
+      </div>
+      <div style="margin-top:18px"><button class="btn" id="rcNext" disabled onclick="go(3)">All good — continue →</button></div>
+    </div>
+  </div>
+  <p class="footer-hint">Zero install (OnVUE needs a download; we're pure browser). Fails here are fixable warnings — never a lockout mid-test. Only session-breakers (no camera/mic, unsupported browser, console blocked) hard-stop.</p>
+</section>
+
+<!-- 4 — IDENTITY (OTP) -->
+<section class="screen" data-step="Verify identity">
+  <div class="device">
+    <div class="topbar"><span class="logo">Shield<span class="sync">Sync</span><span class="ent">Enterprise</span></span><span class="sub">Verify it's you</span></div>
+    <div class="pad" style="text-align:center">
+      <span class="eyebrow">Check your email</span>
+      <h1>Enter your 6-digit code</h1>
+      <p class="lead" style="margin:12px auto 0">We sent a code to <b>priya@examplemail.com</b>. It expires in 10 minutes.</p>
+      <div class="otp" style="justify-content:center" id="otp">
+        <input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric">
+        <input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric">
+      </div>
+      <div style="margin-top:22px"><button class="btn" onclick="go(4)">Verify →</button></div>
+      <p class="footer-hint">No document or face-upload for identity — just email. Identity is confirmed by the recruiter from the session recording later.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 5 — PRE-BRIEF -->
+<section class="screen" data-step="What to expect">
+  <div class="device">
+    <div class="topbar"><span class="logo">Shield<span class="sync">Sync</span><span class="ent">Enterprise</span></span><span class="sub">What to expect</span></div>
+    <div class="pad">
+      <span class="eyebrow">Read this once — 1 minute</span>
+      <h1>How the assessment works</h1>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">
+        <div class="card"><h2>🖥️ Your environment</h2><p class="sub" style="margin-top:6px">Your own private Azure environment — the real Azure Portal, isolated. Nothing touches any real company system.</p></div>
+        <div class="card"><h2>⏱️ 60 minutes</h2><p class="sub" style="margin-top:6px">Can't be paused. Always visible in a small floating window that stays on top of the Azure Portal.</p></div>
+        <div class="card"><h2>✅ Up to 5 tasks</h2><p class="sub" style="margin-top:6px">Partial credit is real — 3 of 5 done well beats 0 of 5. You never see a score.</p></div>
+        <div class="card"><h2>🤝 The rules</h2><p class="sub" style="margin-top:6px">AI &amp; docs allowed. Work alone. Session is recorded (camera + mic).</p></div>
+      </div>
+      <div class="note blue" style="margin-top:16px">
+        <b>How the two windows work:</b> when you press Start, the <b>Azure Portal opens in a new tab</b>,
+        and a small <b>floating companion</b> (your timer, tasks, and Submit) appears on top of it. This
+        ShieldSync tab goes quiet — you'll only ever use those two. You'll see it on the next screen.
+      </div>
+      <div style="margin-top:18px"><button class="btn" onclick="go(5)">Got it — book my slot →</button></div>
+    </div>
+  </div>
+  <p class="footer-hint">This screen rehearses the tab→companion handoff <i>before</i> the timer — the #1 place candidates get confused.</p>
+</section>
+
+<!-- 6 — BOOKING -->
+<section class="screen" data-step="Book a slot">
+  <div class="device">
+    <div class="topbar"><span class="logo">Shield<span class="sync">Sync</span><span class="ent">Enterprise</span></span><span class="sub">Pick a time</span></div>
+    <div class="pad">
+      <span class="eyebrow">Times shown in your timezone · IST</span>
+      <h1>When would you like to take it?</h1>
+      <p class="lead">Block about 75 minutes total (setup + 60-min assessment). Or start right now.</p>
+      <div class="cal" id="cal">
+        <div class="slot" onclick="pickSlot(this)">Today<small>4:00 PM</small></div>
+        <div class="slot" onclick="pickSlot(this)">Today<small>6:30 PM</small></div>
+        <div class="slot" onclick="pickSlot(this)">Tomorrow<small>10:00 AM</small></div>
+        <div class="slot" onclick="pickSlot(this)">Tomorrow<small>2:00 PM</small></div>
+        <div class="slot" onclick="pickSlot(this)">Thu<small>11:00 AM</small></div>
+        <div class="slot" onclick="pickSlot(this)">Thu<small>5:00 PM</small></div>
+        <div class="slot" onclick="pickSlot(this)">Fri<small>9:30 AM</small></div>
+        <div class="slot" onclick="pickSlot(this)">Fri<small>3:00 PM</small></div>
+      </div>
+      <div style="margin-top:20px;display:flex;gap:12px;flex-wrap:wrap">
+        <button class="btn ghost" id="bookBtn" disabled onclick="go(6)">Confirm slot</button>
+        <button class="btn" onclick="go(6)">⚡ Start now</button>
+      </div>
+    </div>
+  </div>
+  <p class="footer-hint">"Start now" is gated by live capacity. A confirmed slot pre-provisions the environment ahead of time so Start is instant.</p>
+</section>
+
+<!-- 7 — LOBBY -->
+<section class="screen" data-step="Get ready">
+  <div class="device">
+    <div class="topbar"><span class="logo">Shield<span class="sync">Sync</span><span class="ent">Enterprise</span></span><span class="sub">Preparing…</span></div>
+    <div class="pad" style="text-align:center">
+      <span class="eyebrow">Almost there</span>
+      <h1 id="lobbyTitle">Building your private cloud environment</h1>
+      <p class="lead" id="lobbyMsg" style="margin:12px auto 0">This usually takes under a minute. Please don't close this window.</p>
+      <div class="prog" style="max-width:440px;margin:18px auto 0"><i id="lobbyBar"></i></div>
+      <div id="lobbyReady" style="display:none;margin-top:22px">
+        <div class="pill ok" style="font-size:13px;padding:6px 14px">✓ Environment ready</div>
+        <p class="lead" style="margin:14px auto 0">The moment you press Start, the timer begins and can't be paused.</p>
+        <div style="margin-top:16px"><button class="btn" onclick="openModal('startModal')">Start assessment →</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 — THE ROOM -->
+<section class="screen" data-step="The assessment room">
+  <p class="kicker"><span class="pill brand">Two windows</span><span class="sub">The real product opens Azure in a separate browser tab. Here we show both side-by-side so you can see the whole thing.</span></p>
+  <div class="room">
+    <div class="az-top">
+      <span class="ms">▦ Microsoft Azure</span>
+      <span class="search">Search resources, services, and docs</span>
+      <span class="env">🔒 assessment-rg · Priya S.</span>
+    </div>
+    <div class="az-body">
+      <div class="az-nav">
+        <div class="grp">Storage</div>
+        <a class="on">Storage accounts</a>
+        <a>Containers</a>
+        <div class="grp">Identity</div>
+        <a>Microsoft Entra ID</a>
+        <a>Access control (IAM)</a>
+        <div class="grp">Security</div>
+        <a>Key vaults</a>
+        <a>Defender for Cloud</a>
+        <a>Activity log</a>
+      </div>
+      <div class="az-main">
+        <div class="az-crumb">Home &gt; Storage accounts</div>
+        <div class="az-h">Storage accounts</div>
+        <table class="az-table">
+          <thead><tr><th>Name</th><th>Public access</th><th>Secure transfer</th><th>Resource group</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">stpipelinedata7f2a</td><td><span class="badge pub">Enabled ⚠</span></td><td>Disabled</td><td>assessment-rg</td></tr>
+            <tr><td class="mono">stpipelineassets</td><td><span class="badge priv">Disabled</span></td><td>Enabled</td><td>assessment-rg</td></tr>
+            <tr><td class="mono">stpipelinelogs</td><td><span class="badge priv">Disabled</span></td><td>Enabled</td><td>assessment-rg</td></tr>
+          </tbody>
+        </table>
+        <p class="sub" style="margin-top:12px">This is a realistic Azure Portal — the candidate actually fixes these resources. (Mock: the table is illustrative.)</p>
+      </div>
+    </div>
+
+    <!-- floating companion -->
+    <div class="pip">
+      <div class="hd"><span>ShieldSync · assessment</span><span class="dots"><span></span><span></span><span></span></span></div>
+      <div class="bd">
+        <div class="tmr"><b id="roomTimer">59:41</b><span>remaining</span></div>
+        <ol id="objList">
+          <li onclick="toggleObj(this)"><span class="n">1</span> Make the data storage private — at the root</li>
+          <li onclick="toggleObj(this)"><span class="n">2</span> Enforce encryption &amp; secure transfer</li>
+          <li onclick="toggleObj(this)"><span class="n">3</span> Right-size the pipeline identity</li>
+          <li onclick="toggleObj(this)"><span class="n">4</span> Move the secret into Key Vault</li>
+          <li onclick="toggleObj(this)"><span class="n">5</span> Turn on the audit log</li>
+        </ol>
+        <div class="row">
+          <button class="btn ghost" onclick="testApp(this)">🧪 Test the app</button>
+          <button class="btn" onclick="openModal('submitModal')">Submit</button>
+        </div>
+        <div id="testMsg" style="display:none;font-size:11.5px;margin-top:8px;padding:7px 9px;border-radius:8px;background:var(--green-soft);color:var(--green);border:1px solid #bbf7d0">✓ Pipeline ran — the app still works.</div>
+        <div class="selfview">
+          <div class="cam"><div class="f"></div></div>
+          <div class="meta">
+            <div class="live"><span class="rec-dot"></span> Recording</div>
+            <div>Camera · 🎙 Mic on</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="toast"><span class="ic">✓</span> Auto-saved — your work lives in the cloud, not this window.</div>
+  </div>
+  <p class="footer-hint">The companion floats on top of the Azure tab: timer, tasks, "Test the app," Submit, and your live self-view with the ● Recording + mic indicator (PearsonVUE-style). Click a task to tick it; try "Test the app" and "Submit."</p>
+</section>
+
+<!-- 9 — REFLECTION -->
+<section class="screen" data-step="Reflection">
+  <div class="device">
+    <div class="topbar"><span class="logo">Shield<span class="sync">Sync</span><span class="ent">Enterprise</span></span><span class="sub">2 quick questions · not scored</span></div>
+    <div class="pad">
+      <span class="eyebrow">While it's fresh</span>
+      <h1>Tell us how you approached it</h1>
+      <p class="lead">Optional, ~1 minute. These don't change your score — the employer reads them as-is.
+        (This is what proves <i>you</i> did the work, without a follow-up call weeks later.)</p>
+      <div class="card" style="margin-top:14px">
+        <label class="sub">In one line — what did you fix first, and why?</label>
+        <textarea rows="2" style="width:100%;margin-top:6px;border:1px solid var(--line);border-radius:8px;padding:8px;font-family:inherit;font-size:13px" placeholder="The public storage account — it was the only internet-reachable exposure…"></textarea>
+        <label class="sub" style="display:block;margin-top:12px">One thing you'd still improve if you had more time?</label>
+        <textarea rows="2" style="width:100%;margin-top:6px;border:1px solid var(--line);border-radius:8px;padding:8px;font-family:inherit;font-size:13px" placeholder="Rotate the storage keys and move fully to managed identity…"></textarea>
+      </div>
+      <div style="margin-top:18px;display:flex;gap:12px">
+        <button class="btn" onclick="go(9)">Submit &amp; finish →</button>
+        <button class="btn ghost" onclick="go(9)">Skip</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 — DONE -->
+<section class="screen" data-step="All done">
+  <div class="device">
+    <div class="topbar"><span class="logo">Shield<span class="sync">Sync</span><span class="ent">Enterprise</span></span><span class="pill ok">Submitted</span></div>
+    <div class="pad" style="text-align:center">
+      <div style="width:64px;height:64px;border-radius:99px;background:var(--green-soft);color:var(--green);display:flex;align-items:center;justify-content:center;font-size:30px;margin:8px auto 0">✓</div>
+      <h1 style="margin-top:14px">You're all done, Priya</h1>
+      <p class="lead" style="margin:12px auto 0">Your work has been submitted to Acme Corp's hiring team.
+        You completed <b>4 of 5 tasks</b> and your app kept running throughout. Thanks for your time.</p>
+      <p class="footer-hint" style="margin-top:18px">You won't see a score — that's by design. Acme's team reviews your verified results and will be in touch.</p>
+      <div style="margin-top:16px"><button class="btn ghost" onclick="go(0)">↺ Replay the journey</button></div>
+    </div>
+  </div>
+  <p class="footer-hint">That's the full candidate journey — magic link to done.</p>
+</section>
+
+</div>
+
+<!-- modals -->
+<div class="modal-bg" id="startModal">
+  <div class="modal">
+    <h2 style="font-size:17px">Ready to start?</h2>
+    <p class="sub" style="margin-top:8px">The 60-minute timer begins immediately and can't be paused. Your Azure Portal will open in a new tab and the floating companion will appear.</p>
+    <div style="margin-top:18px;display:flex;gap:10px">
+      <button class="btn" onclick="closeModal();go(7)">Yes, start now</button>
+      <button class="btn ghost" onclick="closeModal()">Wait</button>
+    </div>
+  </div>
+</div>
+<div class="modal-bg" id="submitModal">
+  <div class="modal">
+    <h2 style="font-size:17px">Submit your assessment?</h2>
+    <p class="sub" style="margin-top:8px">You have <b>52:10</b> left. You can keep working, or submit now — your work is graded either way.</p>
+    <div style="margin-top:18px;display:flex;gap:10px">
+      <button class="btn" onclick="closeModal();go(8)">Submit now</button>
+      <button class="btn ghost" onclick="closeModal()">Keep working</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const screens = [...document.querySelectorAll('.screen')];
+  const nav = document.getElementById('stepNav');
+  screens.forEach((s,i)=>{
+    const b=document.createElement('button');
+    b.textContent=(i+1)+'. '+s.dataset.step;
+    b.onclick=()=>go(i);
+    nav.appendChild(b);
+  });
+  function go(i){
+    i=Math.max(0,Math.min(screens.length-1,i));
+    screens.forEach((s,n)=>s.classList.toggle('on',n===i));
+    [...nav.children].forEach((b,n)=>b.classList.toggle('on',n===i));
+    window.scrollTo({top:0,behavior:'smooth'});
+    if(i===2) runReadiness();
+    if(i===6) runLobby();
+    if(i===7) runRoom();
+  }
+
+  // consent gate
+  function gate(){
+    const boxes=[...document.querySelectorAll('[data-step="Consent"] input')];
+    document.getElementById('consentBtn').disabled = !boxes.every(b=>b.checked);
+  }
+
+  // readiness check animation
+  let rcDone=false;
+  function runReadiness(){
+    if(rcDone) return; rcDone=true;
+    // mic meter wobble
+    const bar=document.getElementById('micBar');
+    setInterval(()=>{ bar.style.width=(25+Math.abs(Math.sin(Date.now()/240))*60)+'%'; },120);
+    const order=[['cam','pass','Detected'],['mic','pass','Working'],['spd','pass','18 Mbps'],
+      ['brw','pass','Chrome'],['pip','pass','Yes'],['pop','pass','Allowed'],['por','pass','Reachable'],['scr','pass','OK']];
+    let d=500;
+    order.forEach(([k,cls,txt])=>{
+      setTimeout(()=>{
+        const el=document.querySelector('.rc-item[data-k="'+k+'"] .st');
+        el.className='st '+cls; el.textContent=txt;
+        if(k==='scr'){
+          document.getElementById('rcMsg').className='note';
+          document.getElementById('rcMsg').style.cssText='background:var(--green-soft);border:1px solid #bbf7d0;color:var(--green);border-radius:10px;padding:11px 14px;font-size:12.5px;margin-top:14px';
+          document.getElementById('rcMsg').innerHTML='✓ Everything looks good — you\'re ready to go.';
+          document.getElementById('rcNext').disabled=false;
+        }
+      }, d);
+      d+=520;
+    });
+  }
+
+  // booking
+  function pickSlot(el){
+    document.querySelectorAll('#cal .slot').forEach(s=>s.classList.remove('sel'));
+    el.classList.add('sel');
+    document.getElementById('bookBtn').disabled=false;
+  }
+
+  // lobby
+  let lobbyDone=false;
+  function runLobby(){
+    if(lobbyDone) return; lobbyDone=true;
+    const bar=document.getElementById('lobbyBar'); let p=0;
+    const steps=['Creating your resource group…','Deploying the scenario…','Applying your access…','Final checks…'];
+    const t=setInterval(()=>{
+      p+=8+Math.random()*10; if(p>100)p=100;
+      bar.style.width=p+'%';
+      document.getElementById('lobbyMsg').textContent=steps[Math.min(steps.length-1,Math.floor(p/26))];
+      if(p>=100){ clearInterval(t);
+        document.getElementById('lobbyTitle').textContent='Your environment is ready';
+        document.getElementById('lobbyReady').style.display='block';
+      }
+    },420);
+  }
+
+  // room timer
+  let roomStarted=false;
+  function runRoom(){
+    if(roomStarted) return; roomStarted=true;
+    let s=59*60+41; const el=document.getElementById('roomTimer');
+    setInterval(()=>{ s--; const m=Math.floor(s/60), ss=String(s%60).padStart(2,'0'); el.textContent=m+':'+ss; },1000);
+  }
+  function toggleObj(li){ li.classList.toggle('done'); }
+  function testApp(btn){ document.getElementById('testMsg').style.display='block'; }
+
+  // modals
+  function openModal(id){ document.getElementById(id).classList.add('on'); }
+  function closeModal(){ document.querySelectorAll('.modal-bg').forEach(m=>m.classList.remove('on')); }
+  document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModal(); }));
+</script>
+</body>
+</html>
