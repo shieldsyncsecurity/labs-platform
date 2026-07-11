@@ -67,6 +67,27 @@
   .apptest{background:var(--brand-soft);border:1px solid rgba(217,119,6,.3)}
   .footer-note{color:var(--muted);font-size:11.5px;margin-top:10px}
 
+  /* ---- floating PiP companion (plan section 8b: new-tab console + always-on-top companion) ---- */
+  .pip{position:fixed;right:22px;bottom:22px;width:250px;background:var(--surface);border:1px solid var(--line-strong);border-radius:12px;box-shadow:0 18px 44px -12px rgba(15,23,42,.38);overflow:hidden;z-index:50}
+  .pip .piphead{display:flex;align-items:center;justify-content:space-between;background:#0f172a;color:#e2e8f0;font-size:10.5px;font-weight:600;padding:6px 10px}
+  .pip .piphead .dot3{display:flex;gap:4px}
+  .pip .piphead .dot3 span{width:7px;height:7px;border-radius:99px;background:#475569}
+  .pip .pipbody{padding:10px 12px}
+  .pip .piptimer{display:flex;align-items:baseline;justify-content:space-between}
+  .pip .piptimer b{font-family:ui-monospace,Menlo,monospace;font-size:20px}
+  .pip .piptimer span{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+  .pip ul{list-style:none;margin-top:8px}
+  .pip li{display:flex;gap:7px;font-size:11.5px;color:var(--ink-soft);padding:2.5px 0;align-items:baseline}
+  .pip li .cb{flex:none;width:12px;height:12px;border:1.5px solid var(--line-strong);border-radius:4px;position:relative;top:1px}
+  .pip li.done .cb{background:var(--green);border-color:var(--green)}
+  .pip li.done{color:var(--muted);text-decoration:line-through}
+  .pip .pipbtns{display:flex;gap:6px;margin-top:10px}
+  .pip .pipbtns .btn{font-size:11px;padding:6px 10px;flex:1;justify-content:center}
+  .pip .pipnote{position:absolute;right:262px;bottom:30px;width:210px;background:#0f172a;color:#e2e8f0;font-size:11px;line-height:1.45;border-radius:10px;padding:9px 12px}
+  .pip .pipnote b{color:#fbbf24}
+  @media(max-width:1120px){.pip .pipnote{display:none}}
+  @media(max-width:600px){.pip{display:none}}
+
   /* ---- report view ---- */
   .scorehero{display:grid;grid-template-columns:auto 1fr auto;gap:22px;align-items:center}
   @media(max-width:720px){.scorehero{grid-template-columns:1fr}}
@@ -115,7 +136,6 @@
       <button class="btn">Open AWS Console ↗</button>
     </div>
   </div>
-
   <div class="card" style="border-radius:0 0 14px 14px;margin-top:0;border-top:none">
     <span class="eyebrow">Cloud Security Engineer — hands-on assessment</span>
     <h1>Harden the data pipeline</h1>
@@ -125,6 +145,10 @@
       flagged the account as risky — your job is to harden it <b>without breaking the
       pipeline</b>. Work in any order. You don't need to finish everything for a strong
       result — quality beats coverage.
+    </p>
+    <p class="sub" style="margin-top:8px">
+      The AWS console opens in a <b>new tab</b>; the <b>floating companion</b> (bottom-right)
+      stays on top of it with your timer, checklist and submit — you never lose this page.
     </p>
   </div>
 
@@ -206,6 +230,36 @@
         <button class="btn" style="margin-top:12px;width:100%;justify-content:center">Submit assessment</button>
         <p class="footer-note">Auto-submits when the timer ends. Your work so far is graded either way.</p>
       </div>
+    </div>
+  </div>
+
+  <!-- Floating companion (plan section 8b): Document Picture-in-Picture window that stays
+       on top while the candidate works in the AWS console tab. Checklist is the candidate's
+       own tick-list (self-tracking) — grading only happens at submit. -->
+  <div class="pip">
+    <div class="piphead">
+      <span>ShieldSync · assessment companion</span>
+      <span class="dot3"><span></span><span></span><span></span></span>
+    </div>
+    <div class="pipbody">
+      <div class="piptimer"><b>42:17</b><span>remaining</span></div>
+      <ul>
+        <li class="done"><span class="cb"></span>1 · Public exposure</li>
+        <li class="done"><span class="cb"></span>2 · Encryption + TLS</li>
+        <li><span class="cb"></span>3 · Pipeline user permissions</li>
+        <li><span class="cb"></span>4 · Flight recorder</li>
+        <li><span class="cb"></span>5 · Secret out of code</li>
+      </ul>
+      <p style="font-size:10px;color:var(--muted);margin-top:6px">Your own tick-list — grading happens at submit.</p>
+      <div class="pipbtns">
+        <button class="btn secondary">Test the pipeline</button>
+        <button class="btn">Submit</button>
+      </div>
+    </div>
+    <div class="pipnote">
+      <b>Always-on-top companion</b> — a Picture-in-Picture mini-window (Chrome/Edge) that
+      floats above the AWS console tab, so the timer and submit are never lost behind it.
+      There's no embedded console by design: AWS blocks framing its console — see plan §8b.
     </div>
   </div>
 </div>
