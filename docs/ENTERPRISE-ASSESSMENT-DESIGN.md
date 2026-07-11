@@ -118,18 +118,28 @@ algorithmic-bias-in-analysis:
    What it does **not** catch (be honest with buyers): an earpiece, a phone below the desk, a
    helper on a second machine off-frame — those are the layer-2 job.
 
-2. **Higher assurance for advancers + all L4/L5: the "defend your work" call.** A short (5–10
-   min) live call *after* submit where the interviewer asks the candidate to explain the choices
-   in their own submitted work ("walk me through why you scoped this NSG rule to /24 not /32").
-   An impersonator or an AI-conduit candidate **can't explain work they didn't do** — this is the
-   one control that defeats impersonation, silent off-camera coaching, AND AI-did-it-all at once.
-   Run it only on the shortlist (candidates who pass and are heading to interview anyway), so
-   cost stays low; keep it **structured** (questions auto-generated from the submitted state,
-   consistent rubric, logged rationale) so it doesn't become an unstructured bias vector. Owner
-   decision open: ShieldSync-run (sellable paid tier) vs employer-run.
+2. **In-session fresh rationale — the async "defense," NO separate call.** (Owner, 2026-07-12:
+   a mandatory ShieldSync-run "defend your work" call is REJECTED — it defeats the purpose of an
+   *automated* screen that exists to save interviewer time and scale, and the employer's real
+   interview lands days-to-weeks later, by which point the candidate has genuinely forgotten the
+   specifics, making a delayed "explain what you did" both wasteful and unfair.) Instead capture
+   the defense **at the moment of doing, while it's fresh**: as the candidate submits (per
+   objective or at the end), a quick one-line "why did you do it this way?" — their own
+   live-typed reasoning, captured *during* the session, shown to the employer as advisory
+   context (never scored — stays LL144/DPDP-clean). An impersonator or paste-only candidate
+   can't fluently justify each specific choice in real time. Combined with the **recording**
+   (which is itself the async, anytime-reviewable proof that *this person did this work* — no
+   call, no memory decay), this covers the who-did-it question without any synchronous step.
+3. **Deeper authorship probing folds into the employer's EXISTING interview — not a ShieldSync
+   step.** If an employer wants to verify authorship, they do it in the interview round they were
+   already going to run, walking in holding the candidate's own recorded session + written
+   rationale as reference — they can replay the recording to jog memory and compare "does the
+   explanation match what the video shows them doing." This makes their interview better rather
+   than adding a step, and keeps ShieldSync's product a pure automated screen.
 
-The two layers are **complementary, not either/or**: recording is the cheap passive layer across
-the whole funnel; defend-your-work is the strong active check on the few who matter.
+The layers are **complementary**: the recording is the cheap passive proof across the whole
+funnel; the fresh in-session rationale is the zero-friction written defense captured before any
+memory decay; deeper checks are the employer's to run in their own interview, better-equipped.
 
 **India-specific requirements to build with the recording (not blockers — just do them right):**
 - **DPDP consent + notice.** Recording a candidate's video = collecting personal data; India's
@@ -152,7 +162,9 @@ the whole funnel; defend-your-work is the strong active check on the few who mat
 **Still never built:** AI analysis of the video, automated face-matching/liveness scoring, or any
 recording-derived "suspicion score" in the employer report. Video stays a human-reviewed identity
 + deterrence artifact only. AI assistants remain *allowed* during the assessment (realistic job
-preview); the defend-your-work call — not the camera — is what verifies real human judgment.
+preview) — and no synchronous ShieldSync-run verification call exists; the recording + the fresh
+in-session rationale are the whole authorship story, and any deeper probe is the employer's to run
+in their own interview using those artifacts.
 
 ## 4. Per-grade complexity — the Azure L1–L5 scenarios
 
@@ -283,10 +295,11 @@ regardless of any design here. This sits above the design work in priority.
 ## 7. Owner decisions this design surfaces (adds to plan §10)
 
 1. **Integrity posture (owner-decided 2026-07-12):** DEFAULT = plain webcam recording, human
-   (recruiter) reviewed, **no AI analysis**; PLUS the structured "defend your work" call for
-   advancers + all L4/L5. Remaining sub-decisions: **who runs the call** (ShieldSync-side paid
-   tier vs employer's own interviewer)? And **retention window** for recordings (default ~90d
-   post-decision)?
+   (recruiter) reviewed, **no AI analysis**; PLUS a **fresh in-session one-line rationale** per
+   objective/at-submit (advisory, shown to employer). **NO ShieldSync-run verification call** —
+   it defeats the automated screen's purpose and hits candidate memory-decay; deeper authorship
+   checks fold into the employer's own interview using the recording + rationale. Remaining
+   sub-decision: recording **retention window** (default ~90d post-decision).
 2. **Recording UX + bandwidth** — confirm low-bitrate/periodic-snapshot capture (not HD live
    upload) and that recording failure never fails the session. Build the DPDP recording-consent
    copy before the first real candidate.
