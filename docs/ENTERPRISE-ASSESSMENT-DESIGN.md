@@ -39,12 +39,15 @@ never appears in candidate copy.
    paused, always visible in the floating window") · Objectives ("up to 5, partial credit — 3
    of 5 beats 0 of 5") · Rules · What-happens-after. **Rehearses the tab→companion handoff with
    a screenshot/gif before Start** (defuses the #1 rage-quit moment). "Block ~75 minutes total."
-5. **Slot booking** — 7–14 day grid in the candidate's **local timezone** (shows recruiter TZ
-   too when it differs — cheapest fix for the #1 no-show cause), "Start now" gated by live pool
-   capacity, .ics + 24h/1h reminders, self-serve reschedule to 1h before.
+5. **~~Slot booking~~ DROPPED (owner, 2026-07-12).** The recruiter's invite + a **7-day link
+   expiry** IS the schedule — the candidate takes it whenever they're ready in that window, so a
+   booking calendar is a redundant step. Capacity is handled **backend-side** (warm pool + a
+   brief "preparing your environment" waiting-room if all environments are momentarily busy),
+   never a candidate-facing calendar. This removes the timezone-coordination and no-show-slot
+   machinery entirely.
 6. **Pre-start lobby** — "provisioning your environment" (30–90s), pop-up-blocker check,
-   irreversible-Start confirmation modal. **Provisioning failure retries without burning the
-   slot.**
+   irreversible-Start confirmation modal, and the capacity waiting-room state. **Provisioning
+   failure retries without penalty.**
 7. **The room** — companion contents: countdown (amber@10m / red@2m / overlay@30s), expandable
    objective checklist with optional hints + a cosmetic "mark attempted" toggle, **"Test the
    app"** (on-demand non-scored canary, 1/2min — the free confidence signal that defuses

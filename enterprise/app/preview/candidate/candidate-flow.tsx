@@ -19,15 +19,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type Step =
   | "invite" | "consent" | "readiness" | "otp" | "prebrief"
-  | "booking" | "lobby" | "room" | "reflection" | "done";
+  | "lobby" | "room" | "reflection" | "done";
 
+// No slot-booking step: the recruiter's invite + a 7-day link expiry IS the
+// scheduling. The candidate starts whenever they're ready in that window;
+// capacity is handled backend-side (warm pool + brief waiting-room), never a
+// candidate-facing calendar. (Owner call 2026-07-12.)
 const STEPS: { id: Step; label: string }[] = [
   { id: "invite", label: "Invite" },
   { id: "consent", label: "Consent" },
   { id: "readiness", label: "Readiness check" },
   { id: "otp", label: "Verify" },
   { id: "prebrief", label: "What to expect" },
-  { id: "booking", label: "Book a slot" },
   { id: "lobby", label: "Get ready" },
   { id: "room", label: "Assessment room" },
   { id: "reflection", label: "Reflection" },
@@ -82,7 +85,6 @@ export default function CandidateFlow() {
         {step === "readiness" && <Readiness go={go} />}
         {step === "otp" && <Otp go={go} />}
         {step === "prebrief" && <PreBrief go={go} />}
-        {step === "booking" && <Booking go={go} />}
         {step === "lobby" && <Lobby go={go} />}
         {step === "room" && <Room go={go} />}
         {step === "reflection" && <Reflection go={go} />}
@@ -477,56 +479,20 @@ function PreBrief({ go }: { go: (s: Step) => void }) {
             page goes quiet — you&apos;ll only ever use those two.
           </span>
         </div>
-        <div className="mt-5"><button className={BTN} onClick={() => go("booking")}>Got it — book my slot →</button></div>
-      </Device>
-      <p className="mt-4 text-center text-xs text-muted">Rehearses the tab↔companion handoff before the timer — the #1 confusion point.</p>
-    </>
-  );
-}
-
-/* --------------------------------------------------------- 6 booking */
-
-const SLOTS = [
-  ["Today", "4:00 PM"], ["Today", "6:30 PM"], ["Tomorrow", "10:00 AM"], ["Tomorrow", "2:00 PM"],
-  ["Thu", "11:00 AM"], ["Thu", "5:00 PM"], ["Fri", "9:30 AM"], ["Fri", "3:00 PM"],
-];
-
-function Booking({ go }: { go: (s: Step) => void }) {
-  const [sel, setSel] = useState<number | null>(null);
-  return (
-    <>
-      <Device title="Pick a time">
-        <Eyebrow>Times shown in your timezone · IST</Eyebrow>
-        <h1 className="mt-1.5 text-xl font-bold text-ink">When would you like to take it?</h1>
-        <p className="mt-3 max-w-[60ch] text-[15px] leading-relaxed text-ink-soft">
-          Block about 75 minutes total (setup + 60-min assessment). Or start right now.
-        </p>
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {SLOTS.map(([d, t], i) => (
-            <button
-              key={i}
-              onClick={() => setSel(i)}
-              className={`rounded-lg border px-2 py-2.5 text-center text-[12.5px] font-semibold transition-colors ${
-                sel === i ? "border-brand bg-brand text-white" : "border-line-strong bg-surface text-ink-soft hover:border-brand"
-              }`}
-            >
-              {d}<span className="block text-[10px] font-normal opacity-80">{t}</span>
-            </button>
-          ))}
-        </div>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <button className={BTN_GHOST} disabled={sel === null} onClick={() => go("lobby")}>Confirm slot</button>
-          <button className={BTN} onClick={() => go("lobby")}>⚡ Start now</button>
+        <p className="mt-4 text-[13px] text-muted">You have <b>7 days</b> to take this — start whenever you&apos;re ready.</p>
+        <div className="mt-3 flex gap-3">
+          <button className={BTN} onClick={() => go("lobby")}>I&apos;m ready — begin →</button>
+          <button className={BTN_GHOST} onClick={() => go("invite")}>I&apos;ll come back later</button>
         </div>
       </Device>
       <p className="mt-4 text-center text-xs text-muted">
-        &ldquo;Start now&rdquo; is gated by live capacity. A confirmed slot pre-provisions the environment ahead of time. <span className="font-mono">{/* TODO(engine): slot capacity + warm pool */}</span>
+        No slot booking — the invite + 7-day expiry is the schedule. Rehearses the tab↔companion handoff before the timer (the #1 confusion point).
       </p>
     </>
   );
 }
 
-/* ---------------------------------------------------------- 7 lobby */
+/* ---------------------------------------------------------- 6 lobby */
 
 function Lobby({ go }: { go: (s: Step) => void }) {
   const [pct, setPct] = useState(0);
