@@ -50,7 +50,7 @@ never appears in candidate copy.
    app"** (on-demand non-scored canary, 1/2min — the free confidence signal that defuses
    fear-of-breaking-the-sandbox, the #2 rage-quit moment), "Reopen console" (relaunch without
    re-provision), Submit (distinct color, confirm modal), minimize-to-pill, connection-status
-   dot, and a **small live webcam self-view thumbnail with a "● Recording" indicator**
+   dot, and a **small live webcam self-view thumbnail with "● Recording" + a live-mic indicator**
    (PearsonVUE pattern — ongoing visible recording notice + deterrent; §3).
 8. **Failure/reconnect states** — popup blocked → banner, timer runs server-side; console
    closed → one-click relaunch; network drop/sleep → reconnect within a **5-min grace** to a
@@ -110,14 +110,16 @@ algorithmic-bias-in-analysis:
 
 **Adopted two-layer posture:**
 
-1. **Default (every candidate): plain webcam recording for human identity review + deterrence.**
-   The candidate's webcam records during the session; the employer's recruiter can view it to
-   confirm *this is the person we invited* and as a cheating deterrent. **No AI, no automated
-   flagging, no face-matching** — a human simply watches if/when they choose. This is standard,
-   accepted practice for proctored assessments in India. What it catches: impersonation at the
-   camera, a visible second person in frame, and the deterrent effect of "you're on camera."
-   What it does **not** catch (be honest with buyers): an earpiece, a phone below the desk, a
-   helper on a second machine off-frame — those are the layer-2 job.
+1. **Default (every candidate): plain webcam + mic recording for human identity review +
+   deterrence.** The candidate's webcam AND microphone record during the session; the employer's
+   recruiter can view/listen to confirm *this is the person we invited* and as a cheating
+   deterrent. **No AI, no automated flagging, no face-matching, no transcription** — a human
+   simply reviews if/when they choose. Standard, accepted practice for proctored assessments in
+   India. **Audio is the highest-value signal**: video/snapshots catch impersonation-at-camera
+   and a visible second person, but only **audio catches the #2 threat — an off-camera human
+   coaching by voice, dictation, a phone call, or an earpiece conversation** (otherwise invisible
+   to any camera). Video still misses a phone below the desk or a helper on a second silent
+   machine — no passive layer is perfect, and buyers should be told so plainly.
 
 2. **In-session fresh rationale — the async "defense," NO separate call.** (Owner, 2026-07-12:
    a mandatory ShieldSync-run "defend your work" call is REJECTED — it defeats the purpose of an
@@ -143,9 +145,10 @@ funnel; the fresh in-session rationale is the zero-friction written defense capt
 memory decay; deeper checks are the employer's to run in their own interview, better-equipped.
 
 **India-specific requirements to build with the recording (not blockers — just do them right):**
-- **DPDP consent + notice.** Recording a candidate's video = collecting personal data; India's
-  DPDP Act requires clear, itemized, purpose-specific consent BEFORE the first real candidate:
-  *what* is recorded, *who* sees it (the employer's recruiter), *how long* it's kept, and the
+- **DPDP consent + notice.** Recording a candidate's **video and audio** = collecting personal
+  data; India's DPDP Act requires clear, itemized, purpose-specific consent BEFORE the first real
+  candidate: *what* is recorded (explicitly name **webcam snapshots + continuous microphone
+  audio**), *who* sees it (the employer's recruiter), *how long* it's kept, and the
   withdrawal/grievance path. A tick-box gate on the consent screen, not bundled into general ToS.
   (Note: DPDP has no "sensitive data / compelling purpose" tier — that's GDPR/old-2011-rules;
   DPDP's basis here is straightforward consent, which is clean for a recruiter-reviewed recording
@@ -163,6 +166,16 @@ memory decay; deeper checks are the employer's to run in their own interview, be
   pre-flight bandwidth check passing; on a weak link it **auto-degrades to snapshot-only**.
   Recording is buffered/retried and **never blocks or interrupts the assessment** (recording
   failure ≠ session failure).
+- **Audio — continuous, always on with the snapshots.** Unlike video, low-bitrate audio (~16–32
+  kbps) is cheap enough to run **continuously even on weak links**, so it is NOT reduced to
+  snapshots — it is the continuous layer that covers the gaps between video frames and is the
+  single best catch for off-camera voice coaching. **Privacy caveat (real):** continuous home
+  audio is the most intrusive element of the whole design — it captures ambient/background
+  speech (family, others in the room), extremely common in Indian home settings. Handle it
+  accordingly: honest "mic is recorded" consent (below), retention deleted with the video,
+  **human-review-only (no transcription, no AI)**, and a recruiter treats "heard a voice" as a
+  *prompt to review the recording*, never as automated proof. Advise the candidate up front to
+  sit somewhere quiet and private — better for them and for the signal.
 - **Candidate-facing framing + live self-view (PearsonVUE pattern).** State plainly on the
   consent screen; recording is normal for proctored hiring assessments in India and accepted
   when disclosed honestly. In the PiP companion, show a **small live webcam self-view thumbnail
@@ -312,12 +325,13 @@ regardless of any design here. This sits above the design work in priority.
    it defeats the automated screen's purpose and hits candidate memory-decay; deeper authorship
    checks fold into the employer's own interview using the recording + rationale. Remaining
    sub-decision: recording **retention window** (default ~90d post-decision).
-2. **Recording UX + bandwidth — DECIDED:** snapshot-primary (identity burst + ~10–15s cadence),
-   optional employer-selectable low-bitrate continuous for high-value reqs gated on the bandwidth
-   check, auto-degrade to snapshots on weak links, recording failure never fails the session;
-   PearsonVUE-style live self-view + "● Recording" in the companion. Remaining owner to-dos (not
-   decisions): build the DPDP recording-consent copy before the first real candidate; set the
-   retention window (default ~90d post-decision).
+2. **Recording UX + bandwidth — DECIDED:** video = snapshot-primary (identity burst + ~10–15s
+   cadence, optional low-bit continuous upgrade gated on bandwidth check, auto-degrade to
+   snapshots on weak links); **audio = continuous low-bitrate, always on** (cheap even on weak
+   links, and the best catch for off-camera voice coaching); recording failure never fails the
+   session; PearsonVUE-style live self-view + "● Recording" + live-mic indicator in the companion.
+   Remaining owner to-dos (not decisions): DPDP consent copy naming **webcam snapshots + mic
+   audio** before the first real candidate; retention window (default ~90d post-decision).
 3. **Desktop-only** — accepted stated limitation, or is a kiosk/center fallback ever in scope
    for candidates without a personal laptop? (Note: webcam recording assumes a device camera —
    another reason desktop/laptop, and a factor for any kiosk fallback.)
