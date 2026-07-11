@@ -382,6 +382,45 @@ Where it genuinely fits (both cheap, both additive):
 | 4 | **L4 Architect** | Exception surfaces have dual pass-states validated |
 | 5 | **L5 Security Lead** | Ranking-objective ground truth Angoff-rated; pre-start disclosure copy |
 
+## 9b. Azure track evaluation (owner-raised, researched 2026-07-12)
+
+Owner proposed prioritizing Azure ("Azure Cloud Security Engineer/Lead/Manager/Architect")
+on the premise that Azure labs are ready. Premise correction: one B2C Azure learner lab exists,
+`ready:false`, not owner-tested, launch path unbuilt — and B2C content is never reused for
+enterprise anyway. Three-lens research verdict (market, grading parity, isolation):
+
+- **Market (moderate confidence):** AWS-specific security postings lead Azure-specific in India
+  ~1.3–2×, but Azure demand is real and concentrated in **BFSI + Microsoft-shop GCCs — exactly
+  our buyer**. The largest JD category by far is generic/multi-cloud "Cloud Security Engineer"
+  (~7–9× either single cloud on Naukri) → the winning position is **"multi-cloud assessed"**:
+  AWS lead track + Azure second track, not either alone.
+- **Grading parity:** near-parity on live-state inspection (ARM/Resource Graph for storage
+  public access, Key Vault CMK, NSGs, diagnostic settings, Defender plans, Policy assignments),
+  canary via Functions invoke, Activity Log as audit trail (3–20 min latency; no native
+  tamper-evidence — needs immutable export). **Hard gap:** no equivalent of Access Analyzer's
+  `CheckNoNewAccess`/`CheckAccessNotGranted` for authored-policy grading (Entra Permissions
+  Management was retired Nov 2025 with no replacement) → RBAC-authoring objectives are graded
+  by our own policy-document analysis (we already do this style on AWS), not a provable API.
+- **Isolation (the big one):** RG-per-candidate in a shared subscription is NOT adversarial-
+  grade (subscription is Azure's real boundary; quota DoS blast radius; customers cannot author
+  deny assignments; Microsoft's own sandbox reference architecture is subscription-per-sandbox).
+  Required target: **subscription-per-candidate-session (pool of N subs, wipe-RGs-and-reuse —
+  mirrors our AWS pool; avoids the 5,000-lifetime-cap mint-and-cancel trap) + a dedicated
+  hardened Entra tenant for candidate identities** (guest-enumeration defaults are insecure;
+  RBAC cannot restrict directory reads — the tenant decision already pending for B2C Portal
+  parity is REQUIRED here, not optional). ~1–3 weeks engineering + Entra P1/P2 seats. Note:
+  the current $5k-credit subscription arrangement cannot vend subscriptions (MCA default cap 5,
+  no EA enrollment) — billing-container decision needed.
+
+**Adopted sequencing (pending owner confirm):** Phase 1 stays AWS L2 (platform live, spec done,
+nearest revenue). Azure L2 Engineer becomes **Phase 2**, displacing AWS L3 — "both clouds at the
+flagship level" serves the dominant multi-cloud JD pattern better than five levels on one cloud.
+Prereqs to start Azure Phase 2 (can run in parallel with Phase 1): dedicated Entra tenant
+decision + hardening, subscription pool arrangement, graders ported to ARM/Resource Graph.
+The L1–L5 architecture, scoring, anti-leakage, and compliance sections port unchanged; the §2
+taxonomy maps 1:1 (Entra/RBAC↔IAM, Storage↔S3, Key Vault↔KMS, NSG↔SG, Defender↔GuardDuty,
+Policy↔Config, Activity Log↔CloudTrail).
+
 ## 10. Owner decisions needed
 
 1. **L5 rename + positioning** ("Security Lead — technical prioritization screen", add-on to
