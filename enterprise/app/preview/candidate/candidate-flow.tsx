@@ -285,15 +285,19 @@ function Readiness({ go }: { go: (s: Step) => void }) {
     set("scr", bigEnough ? "pass" : "warn", bigEnough ? "OK" : "Small screen");
 
     (async () => {
+      // Measure against a real 1 MB asset (a small file finishes so fast on a
+      // quick link that latency dominates and the number reads absurdly low).
+      // Warm the connection first, then time the 1 MB transfer.
       try {
+        await fetch(`/og/enterprise-og.png?cb=${Date.now()}`, { cache: "no-store" }).then((r) => r.arrayBuffer()).catch(() => {});
         const t0 = performance.now();
-        const res = await fetch(`/og/enterprise-og.png?cb=${Date.now()}`, { cache: "no-store" });
+        const res = await fetch(`/preview/speedtest.bin?cb=${Date.now()}`, { cache: "no-store" });
         const buf = await res.arrayBuffer();
         const secs = (performance.now() - t0) / 1000;
         const mbps = (buf.byteLength * 8) / secs / 1e6;
-        if (mbps >= 4) set("spd", "pass", `${mbps.toFixed(0)} Mbps`);
-        else if (mbps >= 1) set("spd", "warn", `${mbps.toFixed(1)} Mbps — snapshots only`);
-        else set("spd", "warn", "Slow — try a better connection");
+        if (secs < 0.1) set("spd", "pass", "Fast connection");
+        else if (mbps >= 1.5) set("spd", "pass", `${mbps.toFixed(mbps >= 10 ? 0 : 1)} Mbps`);
+        else set("spd", "warn", `${mbps.toFixed(1)} Mbps — slow, but the assessment still runs`);
       } catch { set("spd", "warn", "Could not measure"); }
     })();
 
