@@ -95,7 +95,7 @@ function HowItWorksTour() {
           eyebrow="SEE IT WORK"
           title="A full hiring assessment, end to end."
         />
-        <div className="mt-10">
+        <div className="mt-6">
           <ProductTour />
         </div>
       </div>

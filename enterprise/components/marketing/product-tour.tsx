@@ -124,7 +124,10 @@ export function ProductTour() {
   return (
     // pt-root/pt-playing: globals.css scopes its reduced-motion kill-switch to
     // .pt-root:not(.pt-playing) so an explicit Play always animates.
-    <div className={`pt-root mx-auto w-full max-w-4xl ${paused ? "" : "pt-playing"}`}>
+    // max-w-3xl + 16:9 on desktop (owner call 2026-07-11): the player must fit
+    // in one viewport WITH its caption below — no scrolling to read the scene
+    // title. Mobile keeps 16:10 so dense scenes (AWS console) don't clip.
+    <div className={`pt-root mx-auto w-full max-w-3xl ${paused ? "" : "pt-playing"}`}>
       {/* --------------------------------------------------- CONTROL ROW */}
       {/* Above the player (owner call 2026-07-11): the stage tabs + play
           control are the affordance — they must be seen before the frame,
@@ -187,7 +190,7 @@ export function ProductTour() {
       </div>
 
       {/* progress bar (amber fill), reset per scene entry */}
-      <div className="mb-4 h-1 w-full overflow-hidden rounded-full bg-line" aria-hidden="true">
+      <div className="mb-3 h-1 w-full overflow-hidden rounded-full bg-line" aria-hidden="true">
         <div
           key={cycle}
           className={
@@ -234,7 +237,7 @@ export function ProductTour() {
           id="pt-panel"
           role="tabpanel"
           aria-labelledby={`pt-tab-${active}`}
-          className="relative aspect-[16/10] w-full overflow-hidden bg-canvas"
+          className="relative aspect-[16/10] w-full overflow-hidden bg-canvas sm:aspect-[16/9]"
         >
           <div key={cycle} className="pt-scene absolute inset-0">
             {active === 0 && <SceneInvite animate={animate} />}
@@ -247,7 +250,7 @@ export function ProductTour() {
       </div>
 
       {/* caption */}
-      <div className="mt-4 text-center">
+      <div className="mt-3 text-center">
         <p className="text-sm font-semibold text-ink">{scene.title}</p>
         <p className="mx-auto mt-1 max-w-xl text-sm leading-relaxed text-ink-soft">
           {scene.caption}
