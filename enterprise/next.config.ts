@@ -21,7 +21,9 @@ const csp = [
   "style-src-elem 'self' 'unsafe-inline'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "script-src-elem 'self' 'unsafe-inline'",
-  `connect-src 'self'${isDev ? " ws:" : ""}`,
+  // Azure Portal added so the candidate readiness-check can ping it for
+  // reachability (Azure-first assessments). Same-origin otherwise.
+  `connect-src 'self' https://portal.azure.com${isDev ? " ws:" : ""}`,
   "frame-src 'self'",
   "upgrade-insecure-requests",
 ].join("; ");
@@ -31,7 +33,14 @@ const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), browsing-topics=()" },
+  // camera/microphone = (self): the candidate assessment records webcam
+  // snapshots + mic audio, so our OWN origin must be allowed to request them
+  // (this still blocks cross-origin/iframe camera+mic use — it is the correct
+  // policy for a product that uses the camera, not a relaxation). A fully
+  // empty allowlist `camera=()` blocks getUserMedia at the document level, so
+  // no permission prompt ever appears — which is what broke camera/mic
+  // detection. geolocation + browsing-topics stay fully off.
+  { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(), browsing-topics=()" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
 ];
 
