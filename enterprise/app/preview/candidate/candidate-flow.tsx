@@ -134,17 +134,16 @@ function Invite({ go }: { go: (s: Step) => void }) {
         </p>
         <ul className="mt-4 space-y-2 text-[14px] text-ink-soft">
           <li>• Runs in your browser — nothing to install.</li>
-          <li>• Do it whenever you&apos;re ready; book a slot that suits you.</li>
-          <li>• Check your setup in 60 seconds before you start.</li>
+          <li>• Take it any time in the next <b>7 days</b> — no scheduling needed.</li>
+          <li>• We&apos;ll check your camera, mic &amp; connection before you start.</li>
         </ul>
-        <div className="mt-6 flex flex-wrap gap-3">
+        <div className="mt-6">
           <button className={BTN} onClick={() => go("consent")}>Start my assessment →</button>
-          <button className={BTN_GHOST} onClick={() => go("readiness")}>Check my setup first</button>
         </div>
         <p className="mt-5 text-xs text-muted">This link is personal to you — please don&apos;t share it. Expires in 7 days.</p>
       </Device>
       <p className="mt-4 text-center text-xs text-muted">
-        The buttons are the &ldquo;magic link.&rdquo; The real link signs the candidate in and lands here.
+        One path, in order — the button is the &ldquo;magic link&rdquo;; the real link signs the candidate in and lands here.
       </p>
     </>
   );
