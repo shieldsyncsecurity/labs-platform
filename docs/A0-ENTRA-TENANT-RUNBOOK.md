@@ -45,17 +45,16 @@ Two clean options — **recommend A for the pilot:**
 **→ Decision 1: PAYG-in-Enterprise-Labs-tenant now (A), and optionally file the entitlement-transfer
 ticket (B) in parallel to fund it from the $5k long-term.** (I'll draft the ticket text if you want B.)
 
-**→ Decision 2: tenant name + TWO domains.** There are two, only one candidate-facing:
+**→ Decision 2: names — LOCKED (owner, 2026-07-12):**
 - **Org (display) name:** `ShieldSync Enterprise Labs`.
-- **`.onmicrosoft.com` initial domain (PERMANENT, mostly-hidden fallback — can't rename later):**
-  proposed `shieldsyncassess` → `shieldsyncassess.onmicrosoft.com`. Doesn't need to be pretty;
-  candidates don't live on it once the custom domain (below) is primary.
-- **Custom domain (candidate-facing — THIS is what matters):** proposed
-  **`assess.shieldsyncsecurity.com`** → candidates sign into the Azure Portal as
-  `candidate-a1b2@assess.shieldsyncsecurity.com`. Added *after* tenant creation (Part 2c): Entra
-  gives a TXT record → add it on Cloudflare → verify → **Make primary** so all minted candidate
-  identities default to it. (B2C's "ShieldSync Labs" tenant later gets `lab.shieldsyncsecurity.com`.)
-  Not required for a first pilot (onmicrosoft works), but a high-polish, easy add.
+- **`.onmicrosoft.com` initial domain:** ✅ **CREATED** — `shieldsyncenterprise.onmicrosoft.com`
+  (B2B tenant). (B2C tenant `shieldsynclabs.onmicrosoft.com` also created — for the B2C chat.)
+- **Custom login domain (candidate-facing):** ✅ **LOCKED — `assess.shieldsyncsecurity.com`** →
+  candidates sign into the Azure Portal as `candidate-a1b2@assess.shieldsyncsecurity.com`. Added
+  *after* tenant creation (Part 2c): Entra gives a TXT record → add on Cloudflare → verify →
+  **Make primary**. (B2C reserves `learn.shieldsyncsecurity.com` — built in the separate B2C
+  chat, NOT here.) **Do NOT reuse `enterprise.` / `labs.` — those are the LIVE web apps, a
+  collision.** Custom domain is polish, not a pilot blocker (onmicrosoft works meanwhile).
 
 **→ Decision 3 (checked during creation): licensing.** Microsoft now restricts creating
 *additional* tenants to paid Entra customers, and Conditional Access needs **Entra ID P1**
@@ -64,14 +63,14 @@ one P1 seat. (Baseline admin MFA is free via Security Defaults even without P1 �
 
 ---
 
-## Part 1 — Create the tenant (~5 min)
+## Part 1 — Create the tenant (~5 min) — ✅ DONE (owner, 2026-07-12: `shieldsyncenterprise.onmicrosoft.com` created)
 
 1. Azure Portal → search **"Microsoft Entra ID"** → left nav **"Manage tenants"** → **+ Create**.
 2. Choose **"Microsoft Entra ID"** (NOT "Azure AD B2C" — B2C is a different product for consumer
    apps; we want a standard workforce tenant for candidate member accounts).
 3. **Configuration:**
    - Organization name: `ShieldSync Enterprise Labs`
-   - Initial domain name: `shieldsyncassess`
+   - Initial domain name: `shieldsyncenterprise`
    - Country/region: pick your data-residency preference (India, if you want candidate data in-region).
 4. **Review + Create.** (If blocked with a licensing message → Decision 3: add a P1 seat, retry.)
 5. When done, switch into it: top-right **Directory switcher** → select **ShieldSync Enterprise Labs**.
@@ -82,7 +81,7 @@ one P1 seat. (Baseline admin MFA is free via Security Defaults even without P1 �
 its one assessment RG.)*
 
 1. **Break-glass admin FIRST** (so you can never lock yourself out): Entra ID → Users → **New
-   user** → a cloud-only admin, e.g. `labadmin@shieldsyncassess.onmicrosoft.com`, Global
+   user** → a cloud-only admin, e.g. `labadmin@shieldsyncenterprise.onmicrosoft.com`, Global
    Administrator, strong unique password (store in your password manager). Exclude this account
    from any Conditional Access you create.
 2. **External collaboration settings** (Entra ID → External Identities → External collaboration
@@ -110,7 +109,7 @@ its one assessment RG.)*
 ## Part 2c — Custom domain (optional but high-polish, ~10 min incl. DNS wait)
 
 So candidates sign in as `candidate-x@assess.shieldsyncsecurity.com` instead of the ugly
-`@shieldsyncassess.onmicrosoft.com`:
+`@shieldsyncenterprise.onmicrosoft.com`:
 1. Entra ID → **Custom domain names** → **+ Add custom domain** → `assess.shieldsyncsecurity.com`.
 2. Entra shows a **TXT** (or MX) record. Add it on **Cloudflare** (the shieldsyncsecurity.com DNS)
    as a DNS-only (grey-cloud) TXT record — I can do this DNS step or hand you the exact values.
@@ -140,7 +139,7 @@ supported for this offer type and risks the credit.)*
 Give me these three values from the new tenant and I take it from here:
 - **Tenant ID** (Entra ID → Overview → Tenant ID)
 - **Subscription ID** (the moved sub)
-- Confirmation the **domain** is `shieldsyncassess.onmicrosoft.com` (or the one you chose)
+- Confirmation the **domain** is `shieldsyncenterprise.onmicrosoft.com` (or the one you chose)
 
 Then I build:
 - An **app registration** (`shieldsync-ent-identity`) with Microsoft Graph *application*
