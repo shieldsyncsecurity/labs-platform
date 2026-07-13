@@ -15,24 +15,28 @@ that unblocks the whole Azure backend build. Also unblocks the B2C Azure Portal 
 
 ---
 
-## ⚠️ THE UPSTREAM DECISION (decide before creating anything)
+## ⚠️ THE UPSTREAM DECISION — the subscription (CORRECTED 2026-07-12)
 
-Candidates must reach *resources* (storage accounts, etc.) in a **subscription**, and a
-subscription belongs to exactly **one** tenant. So the labs tenant is only useful for Portal work
-if a subscription is associated with it. Two options:
+Candidates must reach *resources* (storage, etc.) in a **subscription**, and a subscription
+belongs to exactly **one** tenant. So the Labs tenant needs a subscription of its own.
 
-- **✅ Recommended — Portal-parity: move the $5k-credit subscription into the new Labs tenant.**
-  Azure's "Change directory" transfers the subscription (and its Microsoft-for-Startups credit,
-  which stays intact) to the Labs tenant. Then candidates + their resources live in one clean
-  tenant. **Caveat:** existing RBAC role assignments on that subscription reset on the move —
-  you re-add your own admin access after (2 min). Reversible (you can move it back).
-- Alternative — CLI-only: keep the subscription in the corp tenant, give candidates CLI-only
-  service-principal creds (no Portal sign-in). Weaker experience; the design chose Portal-parity.
+**IMPORTANT correction:** the $5k credit is an Azure **Sponsorship** subscription (Founders Hub,
+offer MS-AZR-0036P). **It CANNOT be self-service "Change directory"'d** into another tenant —
+sponsorship subs require an **entitlement transfer via a Microsoft for Startups support ticket**
+(days, not a click; resets RBAC + breaks Key Vault). So do NOT plan the pilot around moving it.
 
-**→ Decision 1: confirm we move the $5k subscription into the Labs tenant** (recommended). If
-you'd rather not move that exact subscription, the fallback is to spin a *fresh* subscription in
-the Labs tenant — but it won't carry the $5k credit, so moving the credit-subscription is the
-right call for a pilot.
+Two clean options — **recommend A for the pilot:**
+
+- **✅ A (pilot, immediate): a fresh Pay-As-You-Go subscription in the Labs tenant.** Candidate
+  resources cost ~pennies/session (a storage account + a function for 1 hour is negligible), so
+  real spend for a whole pilot is a few dollars. Needs a card on the new sub. The **$5k credit
+  stays untouched** on the corp side. No ticket, no wait, no risk to the credit.
+- B (fund from the credit, slower): file a **Microsoft for Startups entitlement-transfer ticket**
+  to move the sponsorship subscription into the Labs tenant. Takes days; can run **in parallel** —
+  pilot on PAYG now, switch to the credit-sub once the transfer completes.
+
+**→ Decision 1: PAYG-in-Labs-tenant now (A), and optionally file the entitlement-transfer ticket
+(B) in parallel to fund labs from the $5k long-term.** (I'll draft the ticket text if you want B.)
 
 **→ Decision 2: tenant name + initial domain.** Proposed: **"ShieldSync Labs"**, initial domain
 `shieldsynclabs` → `shieldsynclabs.onmicrosoft.com` (you can add a custom domain later). OK, or
@@ -88,13 +92,21 @@ its one assessment RG.)*
 5. **No standing candidate access:** confirm there are no leftover users/groups. Candidate users
    are minted per-session by the engine and deleted on submit — nothing persistent lives here.
 
-## Part 3 — Move the subscription (Decision 1, ~3 min) — if Portal-parity
+## Part 3 — Give the Labs tenant a subscription (Decision 1)
 
-1. Switch back to the corp directory → **Subscriptions** → the Microsoft-for-Startups subscription
-   → **Change directory** → choose **ShieldSync Labs** → confirm.
-2. After the move, switch into ShieldSync Labs → Subscriptions → the moved sub → **Access control
-   (IAM)** → add yourself (or `labadmin`) as **Owner** (RBAC reset on the move — this re-grants you).
-3. The $5k credit rides with the subscription — verify it still shows under the moved sub.
+**Path A (recommended, immediate):** inside the ShieldSync Labs tenant → **Subscriptions** →
+**+ Add** → **Pay-As-You-Go** → complete the billing sign-up (card). This creates a Microsoft
+Customer Agreement billing account in the Labs tenant with a subscription candidates' resources
+live in. Real cost for a pilot ≈ a few dollars total (per-session resources are pennies).
+
+**Path B (optional, parallel, to use the $5k credit):** open a **Microsoft for Startups support
+ticket** requesting an *entitlement transfer* of the Founders Hub sponsorship subscription
+(MS-AZR-0036P) to the ShieldSync Labs tenant. Do NOT try "Change directory" — it's not supported
+for sponsorship subs. Once transferred, re-add your admin RBAC (reset on move) and fix any Key
+Vaults. Switch the engine to this sub when it lands.
+
+*(Do NOT move the corp Microsoft-for-Startups subscription via self-service — it is not
+supported for this offer type and risks the credit.)*
 
 ## Part 4 — (MY work, once A0 exists) wire it to the engine
 
