@@ -1,23 +1,23 @@
-# A0 — Dedicated Enterprise-Assessments Entra Tenant: setup + hardening runbook
+# A0 — `ShieldSync Enterprise Labs` (B2B) Entra Tenant: setup + hardening runbook
 
 **Goal:** a separate Entra (Azure AD) tenant that hosts *throwaway candidate identities* for the
 **B2B** Azure-first hiring assessment, fully isolated from the corp directory. This is the single
 gate that unblocks the whole Azure backend build. ~15 minutes of owner clicks + 3 decisions.
 
 **⚡ SEGREGATION DECISION (owner, 2026-07-12): B2C and B2B get SEPARATE tenants.**
-This tenant (**"ShieldSync Assessments"**) is for **B2B hiring-assessment candidate identities
+This tenant (**"ShieldSync Enterprise Labs"**) is for **B2B hiring-assessment candidate identities
 only**. The **B2C** learner Azure-Portal track will get its **own** separate tenant
 (**"ShieldSync Labs"**) when that track launches — mirroring the existing B2C/B2B blast-radius
 isolation (separate engine Lambdas, tables, Cognito pools). A *shared* identity tenant would let
 public learners enumerate hiring candidates and blur the data/retention regimes — keep them apart.
-Only the B2B "Assessments" tenant is built now; "ShieldSync Labs" is a future, separate build.
+Only the B2B "Enterprise Labs" tenant is built now; "ShieldSync Labs" is a future, separate build.
 
 **Why a separate tenant (not the corp Default Directory):**
 - Candidates sign into the *real Azure Portal* to do the assessment — they need a real identity.
 - The corp Default Directory (`shieldsyncsecurity.com`) **cannot** safely host stranger
   identities: even hardened, a guest/member in it can enumerate parts of the company directory,
   and you can't apply candidate-hostile directory settings to your whole company. A dedicated
-  "ShieldSync Assessments" tenant walls candidates off completely — mint a per-session user,
+  "ShieldSync Enterprise Labs" tenant walls candidates off completely — mint a per-session user,
   delete it after, nothing touches the corporate directory.
 
 ---
@@ -25,7 +25,7 @@ Only the B2B "Assessments" tenant is built now; "ShieldSync Labs" is a future, s
 ## ⚠️ THE UPSTREAM DECISION — the subscription (CORRECTED 2026-07-12)
 
 Candidates must reach *resources* (storage, etc.) in a **subscription**, and a subscription
-belongs to exactly **one** tenant. So the Assessments tenant needs a subscription of its own.
+belongs to exactly **one** tenant. So the Enterprise Labs tenant needs a subscription of its own.
 
 **IMPORTANT correction:** the $5k credit is an Azure **Sponsorship** subscription (Founders Hub,
 offer MS-AZR-0036P). **It CANNOT be self-service "Change directory"'d** into another tenant —
@@ -34,19 +34,19 @@ sponsorship subs require an **entitlement transfer via a Microsoft for Startups 
 
 Two clean options — **recommend A for the pilot:**
 
-- **✅ A (pilot, immediate): a fresh Pay-As-You-Go subscription in the Assessments tenant.** Candidate
+- **✅ A (pilot, immediate): a fresh Pay-As-You-Go subscription in the Enterprise Labs tenant.** Candidate
   resources cost ~pennies/session (a storage account + a function for 1 hour is negligible), so
   real spend for a whole pilot is a few dollars. Needs a card on the new sub. The **$5k credit
   stays untouched** on the corp side. No ticket, no wait, no risk to the credit.
 - B (fund from the credit, slower): file a **Microsoft for Startups entitlement-transfer ticket**
-  to move the sponsorship subscription into the Assessments tenant. Takes days; can run **in parallel** —
+  to move the sponsorship subscription into the Enterprise Labs tenant. Takes days; can run **in parallel** —
   pilot on PAYG now, switch to the credit-sub once the transfer completes.
 
-**→ Decision 1: PAYG-in-Assessments-tenant now (A), and optionally file the entitlement-transfer
+**→ Decision 1: PAYG-in-Enterprise-Labs-tenant now (A), and optionally file the entitlement-transfer
 ticket (B) in parallel to fund it from the $5k long-term.** (I'll draft the ticket text if you want B.)
 
-**→ Decision 2: tenant name + initial domain.** Proposed: **"ShieldSync Assessments"**, initial domain
-`shieldsyncassess` → `shieldsyncassess.onmicrosoft.com` (you can add a custom domain later). OK, or
+**→ Decision 2: tenant name + initial domain.** Proposed: **"ShieldSync Enterprise Labs"**, initial domain
+`shieldsyncentlabs` → `shieldsyncentlabs.onmicrosoft.com` (you can add a custom domain later). OK, or
 pick another.
 
 **→ Decision 3 (checked during creation): licensing.** Microsoft now restricts creating
@@ -62,19 +62,19 @@ one P1 seat. (Baseline admin MFA is free via Security Defaults even without P1 �
 2. Choose **"Microsoft Entra ID"** (NOT "Azure AD B2C" — B2C is a different product for consumer
    apps; we want a standard workforce tenant for candidate member accounts).
 3. **Configuration:**
-   - Organization name: `ShieldSync Assessments`
-   - Initial domain name: `shieldsyncassess`
+   - Organization name: `ShieldSync Enterprise Labs`
+   - Initial domain name: `shieldsyncentlabs`
    - Country/region: pick your data-residency preference (India, if you want candidate data in-region).
 4. **Review + Create.** (If blocked with a licensing message → Decision 3: add a P1 seat, retry.)
-5. When done, switch into it: top-right **Directory switcher** → select **ShieldSync Assessments**.
+5. When done, switch into it: top-right **Directory switcher** → select **ShieldSync Enterprise Labs**.
 
 ## Part 2 — Harden the tenant (~10 min) — the important part
 
-*(All inside the new ShieldSync Assessments tenant. These make a candidate account near-useless beyond
+*(All inside the new ShieldSync Enterprise Labs tenant. These make a candidate account near-useless beyond
 its one assessment RG.)*
 
 1. **Break-glass admin FIRST** (so you can never lock yourself out): Entra ID → Users → **New
-   user** → a cloud-only admin, e.g. `labadmin@shieldsyncassess.onmicrosoft.com`, Global
+   user** → a cloud-only admin, e.g. `labadmin@shieldsyncentlabs.onmicrosoft.com`, Global
    Administrator, strong unique password (store in your password manager). Exclude this account
    from any Conditional Access you create.
 2. **External collaboration settings** (Entra ID → External Identities → External collaboration
@@ -99,16 +99,16 @@ its one assessment RG.)*
 5. **No standing candidate access:** confirm there are no leftover users/groups. Candidate users
    are minted per-session by the engine and deleted on submit — nothing persistent lives here.
 
-## Part 3 — Give the Assessments tenant a subscription (Decision 1)
+## Part 3 — Give the Enterprise Labs tenant a subscription (Decision 1)
 
-**Path A (recommended, immediate):** inside the ShieldSync Assessments tenant → **Subscriptions** →
+**Path A (recommended, immediate):** inside the ShieldSync Enterprise Labs tenant → **Subscriptions** →
 **+ Add** → **Pay-As-You-Go** → complete the billing sign-up (card). This creates a Microsoft
-Customer Agreement billing account in the Assessments tenant with a subscription candidates' resources
+Customer Agreement billing account in the Enterprise Labs tenant with a subscription candidates' resources
 live in. Real cost for a pilot ≈ a few dollars total (per-session resources are pennies).
 
 **Path B (optional, parallel, to use the $5k credit):** open a **Microsoft for Startups support
 ticket** requesting an *entitlement transfer* of the Founders Hub sponsorship subscription
-(MS-AZR-0036P) to the ShieldSync Assessments tenant. Do NOT try "Change directory" — it's not supported
+(MS-AZR-0036P) to the ShieldSync Enterprise Labs tenant. Do NOT try "Change directory" — it's not supported
 for sponsorship subs. Once transferred, re-add your admin RBAC (reset on move) and fix any Key
 Vaults. Switch the engine to this sub when it lands.
 
@@ -120,10 +120,10 @@ supported for this offer type and risks the credit.)*
 Give me these three values from the new tenant and I take it from here:
 - **Tenant ID** (Entra ID → Overview → Tenant ID)
 - **Subscription ID** (the moved sub)
-- Confirmation the **domain** is `shieldsyncassess.onmicrosoft.com` (or the one you chose)
+- Confirmation the **domain** is `shieldsyncentlabs.onmicrosoft.com` (or the one you chose)
 
 Then I build:
-- An **app registration** (`shieldsync-assess-identity`) with Microsoft Graph *application*
+- An **app registration** (`shieldsync-ent-identity`) with Microsoft Graph *application*
   permissions to mint + delete per-session candidate users (least-privilege: `User.ReadWrite.All`
   or a scoped custom directory role) — the ent-engine calls this to create/destroy candidate
   identities.
