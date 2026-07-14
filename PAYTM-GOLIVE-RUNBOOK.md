@@ -51,6 +51,12 @@ Goal: **same-day go-live**. Everything below is pre-staged; the day Paytm approv
 - [ ] Deploy: `npm run build` (webpack) must pass locally first, then push → CI deploy.
 
 ## 4. E2E verification (task #32) (~45 min)
+> **UPI QR blocker RESOLVED 2026-07-14:** the "Scan with any UPI App" QR spun forever because
+> our CSP `connect-src` allowed Paytm only over `https://` — the QR's `wss://` WebSocket
+> (`wss://secure.paytmpayments.com/websocket/...`) was blocked (cards/UPI-collect over https
+> worked). Fixed by allowlisting `wss://*.paytmpayments.com` in `connect-src` (commit `5e861f2`,
+> deployed). QR now renders — verified end-to-end. Full write-up: `PAYTM-UPI-QR-DEBUG.md`.
+
 Real money, smallest amount — the cheapest purchasable lab is the IAM lab at ₹249
 (current price authority: `app/lib/payments/pricing.ts`); refund from the dashboard if desired.
 - [ ] **Happy path**: sign in with the test account (`himanshujain0901@gmail.com`) → locked paid lab → "Get this lab" → Paytm popup → pay ₹249 (UPI) → sheet shows "Payment confirmed" → "Start the lab" launches. Verify entitlement row (type PAY_PER_LAB, maxLaunches 30, launchCount 1 after launch).
