@@ -14,6 +14,13 @@ const isDev = process.env.NODE_ENV !== "production";
 // and make its own XHR — without these the live checkout silently fails the moment
 // PAYMENTS_LIVE is on. Harmless when payments are off (nothing loads from them).
 const PAYTM = "https://securestage.paytmpayments.com https://secure.paytmpayments.com https://*.paytmpayments.com https://paytm.com https://*.paytm.com https://paytmcdn.co.in https://*.paytmcdn.co.in https://pguat.paytm.in https://*.paytm.in";
+// Paytm's UPI-QR widget ("Scan with any UPI App") opens a WebSocket to stream the QR
+// payload and await the scan: wss://secure.paytmpayments.com/websocket/?...&ID=<MID>_<orderId>.
+// wss:// is a DISTINCT scheme in CSP — the https:// hosts above do NOT cover it (only
+// http→https and ws→wss upgrades are implicit), so without this the QR spins forever
+// while cards / UPI-collect (plain https) work. connect-src ONLY. (Root-caused 2026-07-14
+// from a `Refused to connect ... wss://...` console violation; see PAYTM-UPI-QR-DEBUG.md.)
+const PAYTM_WSS = "wss://secure.paytmpayments.com wss://securestage.paytmpayments.com wss://*.paytmpayments.com";
 // Cognito (sign-in is server-side redirects, but allow its XHR/endpoints defensively).
 const COGNITO = "https://cognito-idp.us-east-1.amazonaws.com https://*.auth.us-east-1.amazoncognito.com";
 
@@ -29,7 +36,7 @@ const csp = [
   `style-src-elem 'self' 'unsafe-inline' ${PAYTM}`,
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} ${PAYTM}`,
   `script-src-elem 'self' 'unsafe-inline' ${PAYTM}`,
-  `connect-src 'self' ${PAYTM} ${COGNITO}${isDev ? " ws:" : ""}`,
+  `connect-src 'self' ${PAYTM} ${PAYTM_WSS} ${COGNITO}${isDev ? " ws:" : ""}`,
   `frame-src 'self' ${PAYTM}`,
   "upgrade-insecure-requests",
 ].join("; ");
