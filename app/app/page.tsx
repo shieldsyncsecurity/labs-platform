@@ -5,6 +5,7 @@ import { LABS } from "@/lib/labs";
 import { LabCard } from "@/components/lab-card";
 import { LabRequest } from "@/components/lab-request";
 import { AutoCheckout } from "@/components/auto-checkout";
+import { HideOnCheckout } from "@/components/hide-on-checkout";
 import { priceFor, formatMoney } from "@/lib/payments/pricing";
 
 const FREE_SLUG = "s3-misconfiguration-audit";
@@ -90,7 +91,11 @@ export default function CatalogPage() {
         </p>
       </section>
 
-      {/* Plan picker — 3-up, mirrors the marketing wizard */}
+      {/* Plan picker — 3-up, mirrors the marketing wizard. Hidden when the page is
+          opened with a ?checkout= intent (buyer already chose a plan; re-showing the
+          menu behind the sheet — esp. the free card — undercut the sale). */}
+      <Suspense>
+        <HideOnCheckout>
       <section className="mb-10">
         <div className="mb-3 flex items-end justify-between gap-3">
           <h2 className="text-lg font-bold text-ink">Pick how you want to learn</h2>
@@ -118,7 +123,7 @@ export default function CatalogPage() {
           </Link>
 
           <a
-            href={MARKETING_WIZARD}
+            href="#labs"
             className="flex flex-col rounded-2xl border border-line bg-canvas p-5 transition hover:border-brand"
           >
             <div className="flex items-start justify-between gap-3">
@@ -135,8 +140,8 @@ export default function CatalogPage() {
             </span>
           </a>
 
-          <a
-            href={`${MARKETING_WIZARD}?plan=monthly`}
+          <Link
+            href="/?checkout=monthly"
             className="relative flex flex-col rounded-2xl border-2 border-brand bg-canvas p-5 transition hover:brightness-105"
           >
             <span className="absolute -top-3 right-5 rounded-full bg-brand px-3 py-0.5 text-[11px] font-bold text-white shadow-sm">
@@ -154,12 +159,14 @@ export default function CatalogPage() {
             <span className="mt-auto pt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-brand">
               Get started →
             </span>
-          </a>
+          </Link>
         </div>
       </section>
+        </HideOnCheckout>
+      </Suspense>
 
       {/* Catalog */}
-      <section>
+      <section id="labs" className="scroll-mt-24">
         <h2 className="mb-4 text-lg font-bold text-ink">All labs</h2>
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {LABS.map((lab) => (
