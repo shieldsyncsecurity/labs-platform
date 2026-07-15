@@ -63,6 +63,15 @@ import {
   listLeads,
   updateLeadStatus,
   LEAD_STATUSES,
+  createDoc,
+  getDoc,
+  listDocs,
+  setDocOtp,
+  acceptDoc,
+  revokeDoc,
+  stampDocResend,
+  sha256HexBytes,
+  platformCredentials,
 } from "./entinfra.mjs";
 import {
   leaseEnt,
@@ -78,7 +87,7 @@ import {
 import { gradeLab } from "./graders.mjs";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { createWriteStream } from "node:fs";
 import { chmod } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
@@ -240,6 +249,155 @@ async function sendInviteLinkEmail({ candidateEmail, candidateName, inviteToken 
     console.error("[ent/invites] invite email send failed:", e.name, e.message);
     return false;
   }
+}
+
+// -- Documents (doc-signing portal) -------------------------------------------
+//
+// PDF bytes live in a dedicated PRIVATE S3 bucket in the platform account
+// (created by engine/create-ent-docs-infra.mjs: versioning ON, BPA on, SSE-S3).
+// Transport is base64 inside the JSON body BOTH ways -- a deliberate trade: no
+// presigned URLs to leak, no extra SDK packages, and the Lambda 6MB sync payload
+// ceiling caps the PDF at 4MB (4MB * 4/3 base64 = ~5.4MB), which is plenty for
+// business proposals/SOWs. The 4MB limit is enforced here AND surfaced in the
+// admin upload UI.
+const DOCS_BUCKET = "shieldsync-ent-docs-750294427884";
+const MAX_DOC_PDF_BYTES = 4 * 1024 * 1024;
+const DOC_EXPIRES_DAYS_DEFAULT = 30;
+const DOC_EXPIRES_DAYS_MAX = 180;
+const DOC_RESEND_COOLDOWN_SEC = 45;
+// All doc-portal audit rows share one synthetic partition in ShieldSyncEntAudit
+// (documents belong to ShieldSync itself, not to an employer org).
+const DOCS_AUDIT_ORG = "shieldsync:docs";
+
+// Docs S3 client: in Lambda the execution role is the identity; locally, bridge
+// through the same STS role entinfra's DynamoDB client uses so dev/tests can
+// reach the platform-account bucket.
+let _docsS3;
+function docsS3() {
+  if (_docsS3) return _docsS3;
+  _docsS3 = process.env.AWS_LAMBDA_FUNCTION_NAME
+    ? new S3Client({ region: "us-east-1" })
+    : new S3Client({ region: "us-east-1", credentials: platformCredentials });
+  return _docsS3;
+}
+
+// maskEmail(): display-safe form of the signer email for the PUBLIC signing
+// page ("k***@gmail.com") -- the full address never leaves the engine on a
+// public route; the OTP is only ever SENT to the registered address.
+function maskEmail(email) {
+  const s = String(email ?? "");
+  const at = s.indexOf("@");
+  if (at < 1) return "***";
+  return s[0] + "***@" + s.slice(at + 1);
+}
+
+// sanitizeDocPublic(): the ONLY doc shape public routes may return. Never
+// includes docToken (the caller already holds it), raw signerEmail, otp*
+// fields, s3Key, or internal note.
+function sanitizeDocPublic(doc) {
+  return {
+    status: doc.status,
+    title: doc.title,
+    fileName: doc.fileName,
+    sizeBytes: doc.sizeBytes,
+    sha256: doc.sha256,
+    signerName: doc.signerName,
+    signerEmailMasked: maskEmail(doc.signerEmail),
+    expiresAt: doc.expiresAt,
+    createdAt: doc.createdAt,
+    otpLocked: doc.otpLocked,
+    // Acceptance record fields -- only present once signed.
+    acceptedAt: doc.acceptedAt,
+    acceptedName: doc.acceptedName,
+    acceptedEmail: doc.status === "signed" ? doc.acceptedEmail : undefined,
+    acceptIp: doc.status === "signed" ? doc.acceptIp : undefined,
+    acceptUa: doc.status === "signed" ? doc.acceptUa : undefined,
+    docHash: doc.docHash,
+  };
+}
+
+// sendDocSignLinkEmail(): email the signer their personal signing link. Same
+// anti-phishing contract as sendInviteLinkEmail: the link host is ALWAYS our
+// own pinned origin, and the recipient is ALWAYS the REGISTERED signerEmail --
+// caller input never controls either. Best-effort; returns whether it sent.
+async function sendDocSignLinkEmail({ signerEmail, signerName, title, docToken }) {
+  const from = process.env.ENT_OTP_FROM;
+  if (!from || !signerEmail) return false;
+  const appOrigin = (process.env.ENT_APP_URL || "https://enterprise.shieldsyncsecurity.com").replace(/\/+$/, "");
+  const link = `${appOrigin}/sign/${docToken}`;
+  const rawWho = typeof signerName === "string" && signerName.trim() ? signerName.trim() : "there";
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const who = esc(rawWho);
+  const safeTitle = esc(title ?? "Document");
+  try {
+    await ses.send(
+      new SendEmailCommand({
+        Source: from,
+        Destination: { ToAddresses: [signerEmail] },
+        Message: {
+          Subject: { Data: `Document for your review and acceptance: ${String(title ?? "Document").slice(0, 120)}` },
+          Body: {
+            Text: {
+              Data: `Hi ${rawWho},\n\nShieldSync has shared a document with you for review and electronic acceptance:\n\n  ${title}\n\nReview and accept it here:\n${link}\n\nHow it works: open the link, read the document, then confirm a one-time code sent to this email address and type your full name to accept. You'll receive a copy of the executed document and its acceptance record by email.\n\nThis link is personal to you -- please don't share it. If you weren't expecting this, you can safely ignore this email.\n\nRegards,\nShieldSync\nshieldsyncsecurity.com`,
+            },
+            Html: {
+              Data: `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#0f172a;max-width:560px;margin:0 auto;padding:8px"><div style="font-size:15px;font-weight:800;letter-spacing:-0.01em;color:#0a1020;padding:4px 0 18px">Shield<span style="color:#d97706">Sync</span></div><p style="font-size:15px;line-height:1.55;margin:0 0 14px">Hi ${who},</p><p style="font-size:15px;line-height:1.55;margin:0 0 16px">ShieldSync has shared a document with you for review and <strong>electronic acceptance</strong>:</p><p style="font-size:15px;font-weight:700;margin:0 0 20px">${safeTitle}</p><a href="${link}" style="display:inline-block;background:#d97706;color:#ffffff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Review &amp; accept</a><p style="font-size:12px;line-height:1.5;color:#64748b;margin:18px 0 0">Or paste this link into your browser:<br/><span style="color:#475569">${link}</span></p><p style="font-size:12px;line-height:1.5;color:#64748b;margin:14px 0 0">How it works: open the link, read the document, then confirm a one-time code sent to this email address and type your full name to accept. You'll receive a copy of the executed document and its acceptance record by email.</p><p style="font-size:12px;line-height:1.5;color:#94a3b8;margin:14px 0 0">This link is personal to you -- please don't share it. If you weren't expecting this, you can safely ignore this email.</p></div>`,
+            },
+          },
+        },
+      })
+    );
+    return true;
+  } catch (e) {
+    console.error("[ent/docs] sign-link email send failed:", e.name, e.message);
+    return false;
+  }
+}
+
+// sendDocAcceptedEmails(): acknowledgment to BOTH parties after an accept
+// commits -- the signer gets their copy/record link, ops gets the executed
+// notice. Both best-effort and independent: one failing never blocks the other,
+// and neither can fail the accept itself (the record is already durable).
+// WORDING RULE: "electronically accepted" -- never "digitally signed" (this is
+// click-accept evidence, not an IT Act section 3 signature).
+async function sendDocAcceptedEmails(doc, docToken) {
+  const from = process.env.ENT_OTP_FROM;
+  const appOrigin = (process.env.ENT_APP_URL || "https://enterprise.shieldsyncsecurity.com").replace(/\/+$/, "");
+  const certLink = `${appOrigin}/sign/${docToken}/certificate`;
+  const summary =
+    `Document: ${doc.title}\n` +
+    `File: ${doc.fileName}\n` +
+    `SHA-256: ${doc.docHash}\n` +
+    `Electronically accepted by: ${doc.acceptedName} (${doc.acceptedEmail}, verified by one-time code)\n` +
+    `Accepted at: ${doc.acceptedAt} (UTC)\n` +
+    `IP address: ${doc.acceptIp}`;
+  let signerEmailed = false;
+  if (from && doc.acceptedEmail) {
+    try {
+      await ses.send(
+        new SendEmailCommand({
+          Source: from,
+          Destination: { ToAddresses: [doc.acceptedEmail] },
+          Message: {
+            Subject: { Data: `Accepted: ${String(doc.title ?? "Document").slice(0, 120)}` },
+            Body: {
+              Text: {
+                Data: `Hi ${doc.acceptedName || "there"},\n\nThis confirms you electronically accepted the following document:\n\n${summary}\n\nYour copy of the document and the acceptance certificate stay available here:\n${certLink}\n\nPlease keep this email for your records.\n\nRegards,\nShieldSync\nshieldsyncsecurity.com`,
+              },
+            },
+          },
+        })
+      );
+      signerEmailed = true;
+    } catch (e) {
+      console.error("[ent/docs] signer ack email failed:", e.name, e.message);
+    }
+  }
+  const opsEmailed = await sendOpsEmail(
+    `ShieldSync: document electronically accepted -- ${String(doc.title ?? "").slice(0, 100)}`,
+    `${summary}\nUser agent: ${doc.acceptUa}\n\nCertificate: ${certLink}\nAdmin list: ${appOrigin}/admin/documents`
+  );
+  return { signerEmailed, opsEmailed };
 }
 
 // -- Agreements (W3-2) input hygiene ------------------------------------------
@@ -1223,6 +1381,306 @@ export async function handler(event) {
       const agreement = await getAgreement(qs.agreementId);
       if (!agreement) return resp(404, { error: "not found" });
       return resp(200, agreement);
+    }
+
+    // ── documents (doc-signing portal: e-accept SOWs/proposals/agreements) ──
+    //
+    // ONE universal flow for any PDF + named signer -- zero per-company
+    // customization by design. Register (staff) -> /sign/<token> (public view +
+    // email OTP + typed-name accept) -> immutable acceptance record + emails to
+    // both parties. Lifecycle status codes mirror the invite flow: 404 unknown
+    // OR revoked (oracle-free, the report-link precedent), 410 expired link,
+    // 409 wrong state.
+
+    // Staff registers a document. The app enforces its admin gate BEFORE calling
+    // this and mints docToken once (idempotent retry contract, like invites).
+    if (method === "POST" && path === "/ent/docs") {
+      const actor = cleanActor(parsed.actor);
+      const docToken = parsed.docToken;
+      if (!docToken || typeof docToken !== "string" || !/^[0-9a-f]{32,64}$/.test(docToken)) {
+        return resp(400, { error: "DOC_TOKEN_REQUIRED" });
+      }
+      const title = typeof parsed.title === "string" ? parsed.title.trim().slice(0, 200) : "";
+      if (!title) return resp(400, { error: "TITLE_REQUIRED" });
+      const signerEmail = typeof parsed.signerEmail === "string" ? parsed.signerEmail.trim().slice(0, 254) : "";
+      if (!/^[^\s@]{1,64}@[^\s@]+\.[^\s@]{2,}$/.test(signerEmail)) {
+        return resp(400, { error: "SIGNER_EMAIL_INVALID" });
+      }
+      const signerName = typeof parsed.signerName === "string" ? parsed.signerName.trim().slice(0, 120) : "";
+      const note = typeof parsed.note === "string" ? parsed.note.trim().slice(0, 500) : "";
+      // fileName: display-only -- strip any path, clamp, force a .pdf suffix.
+      let fileName = typeof parsed.fileName === "string" ? parsed.fileName.trim() : "";
+      fileName = fileName.split(/[\\/]/).pop().replace(/[^\w. ()-]/g, "").slice(0, 140) || "document.pdf";
+      if (!fileName.toLowerCase().endsWith(".pdf")) fileName += ".pdf";
+      const expiresDays = Math.min(
+        DOC_EXPIRES_DAYS_MAX,
+        Math.max(1, Number.isFinite(Number(parsed.expiresDays)) ? Math.round(Number(parsed.expiresDays)) : DOC_EXPIRES_DAYS_DEFAULT)
+      );
+      const expiresAt = new Date(Date.now() + expiresDays * 24 * 3600 * 1000).toISOString();
+
+      if (typeof parsed.pdfBase64 !== "string" || !parsed.pdfBase64) {
+        return resp(400, { error: "PDF_REQUIRED" });
+      }
+      let pdfBytes;
+      try {
+        pdfBytes = Buffer.from(parsed.pdfBase64, "base64");
+      } catch {
+        return resp(400, { error: "PDF_INVALID" });
+      }
+      if (pdfBytes.length === 0) return resp(400, { error: "PDF_INVALID" });
+      if (pdfBytes.length > MAX_DOC_PDF_BYTES) {
+        return resp(400, { error: "PDF_TOO_LARGE", maxBytes: MAX_DOC_PDF_BYTES });
+      }
+      // Magic check: must actually BE a PDF (the viewer serves these bytes back
+      // with content-type application/pdf; never store something else there).
+      if (pdfBytes.subarray(0, 5).toString("latin1") !== "%PDF-") {
+        return resp(400, { error: "PDF_INVALID" });
+      }
+
+      const sha256 = sha256HexBytes(pdfBytes);
+      const s3Key = `docs/${docToken}.pdf`;
+      // Existing row? Resolve WITHOUT touching S3 -- a reuse attempt with new
+      // content must never overwrite the object a LIVE signing link serves
+      // (caught by the harness: the old order S3-put-then-row-put clobbered the
+      // stored bytes before the 409). Same-content retry stays a benign no-op.
+      const existing = await getDoc(docToken);
+      if (existing) {
+        if (existing.sha256 === sha256) {
+          const clean = { ...existing };
+          delete clean.otpHash;
+          return resp(200, { ...clean, already: true, emailed: false });
+        }
+        return resp(409, { error: "DOC_TOKEN_REUSED" });
+      }
+      // S3 put BEFORE the row: a row must never point at a missing object. An
+      // orphan object from a failed row write is harmless -- the retry
+      // overwrites the same key with identical bytes (and versioning keeps
+      // history). The truly-concurrent same-token-different-content race stays
+      // theoretical (tokens are app-minted CSPRNG per upload) and is backstopped
+      // by the serve-time hash check in GET /ent/doc/pdf, which fails CLOSED.
+      await docsS3().send(
+        new PutObjectCommand({
+          Bucket: DOCS_BUCKET,
+          Key: s3Key,
+          Body: pdfBytes,
+          ContentType: "application/pdf",
+        })
+      );
+
+      const created = await createDoc({
+        docToken, title, fileName, signerName, signerEmail, note, s3Key,
+        sizeBytes: pdfBytes.length, sha256, expiresAt, actor,
+      });
+      if (created.already) {
+        // Benign only when the SAME content was re-registered under the same
+        // app-minted token (a retried POST). A different hash means the caller
+        // reused a token for new content -- refuse, that would silently rebind
+        // a live signing link to a different document.
+        if (created.doc?.sha256 === sha256) {
+          const clean = { ...created.doc };
+          delete clean.otpHash;
+          return resp(200, { ...clean, already: true, emailed: false });
+        }
+        return resp(409, { error: "DOC_TOKEN_REUSED" });
+      }
+
+      console.log(
+        JSON.stringify({ audit: true, action: "doc.register", actor, doc: docToken.slice(0, 8), sha256, at: Date.now() })
+      );
+      await audit({ orgId: DOCS_AUDIT_ORG, actor, action: "doc.register", target: docToken.slice(0, 8), detail: { title, fileName, sha256, signerEmail } });
+
+      // Optionally email the signer their link (best-effort, first create only).
+      let emailed = false;
+      if (parsed.sendLink) {
+        emailed = await sendDocSignLinkEmail({ signerEmail, signerName, title, docToken });
+      }
+      return resp(200, { ...created.doc, already: false, emailed });
+    }
+
+    // Staff list -- rows include docToken for app-server-side actions; the app
+    // renders 8-char display ids ONLY (never raw tokens in lists).
+    if (method === "GET" && path === "/ent/docs") {
+      const docs = await listDocs();
+      return resp(200, { docs });
+    }
+
+    // Public signing-page fetch (the app proxies /sign/<token> through this).
+    // Revoked is indistinguishable from never-existed; an expired PENDING link
+    // is a 410; a signed doc stays viewable forever (it's the signer's copy).
+    if (method === "GET" && path === "/ent/doc") {
+      const doc = await getDoc(qs.docToken);
+      if (!doc || doc.status === "revoked") return resp(404, { error: "not found" });
+      if (doc.status === "pending" && doc.expiresAt && new Date(doc.expiresAt) < new Date()) {
+        return resp(410, { error: "LINK_EXPIRED" });
+      }
+      return resp(200, sanitizeDocPublic(doc));
+    }
+
+    // Public PDF bytes (base64) -- same lifecycle gates as GET /ent/doc.
+    if (method === "GET" && path === "/ent/doc/pdf") {
+      const doc = await getDoc(qs.docToken);
+      if (!doc || doc.status === "revoked") return resp(404, { error: "not found" });
+      if (doc.status === "pending" && doc.expiresAt && new Date(doc.expiresAt) < new Date()) {
+        return resp(410, { error: "LINK_EXPIRED" });
+      }
+      const obj = await docsS3().send(new GetObjectCommand({ Bucket: DOCS_BUCKET, Key: doc.s3Key }));
+      const bytes = Buffer.from(await obj.Body.transformToByteArray());
+      // Integrity self-check on EVERY serve: what we hand out must be exactly
+      // what was registered (the hash the acceptance record freezes). A
+      // mismatch means bucket tampering/corruption -- refuse to serve.
+      if (sha256HexBytes(bytes) !== doc.sha256) {
+        console.error("[ent/doc/pdf] stored-object hash mismatch for", qs.docToken?.slice(0, 8));
+        return resp(500, { error: "INTERNAL" });
+      }
+      return resp(200, { fileName: doc.fileName, sha256: doc.sha256, pdfBase64: bytes.toString("base64") });
+    }
+
+    // Send/resend the acceptance OTP to the REGISTERED signer email (never a
+    // caller-supplied address -- that binding is the identity check). Same
+    // cooldown + rolling daily cap as the invite OTP flow.
+    if (method === "POST" && path === "/ent/docs/otp/send") {
+      const { docToken } = parsed;
+      const doc = await getDoc(docToken);
+      if (!doc || doc.status === "revoked") return resp(404, { error: "not found" });
+      if (doc.status === "signed") return resp(409, { error: "ALREADY_SIGNED" });
+      if (doc.expiresAt && new Date(doc.expiresAt) < new Date()) {
+        return resp(410, { error: "LINK_EXPIRED" });
+      }
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (doc.otpLastSentAt && nowSec - doc.otpLastSentAt < OTP_SEND_COOLDOWN_SEC) {
+        return resp(429, { error: "OTP_COOLDOWN", retryAfter: OTP_SEND_COOLDOWN_SEC - (nowSec - doc.otpLastSentAt) });
+      }
+      const windowStart = doc.otpSendWindowStart ?? 0;
+      const inWindow = nowSec - windowStart < 24 * 3600;
+      const priorCount = inWindow ? doc.otpSendCount ?? 0 : 0;
+      if (priorCount >= OTP_SEND_DAILY_CAP) {
+        return resp(429, { error: "OTP_DAILY_CAP" });
+      }
+      const code = String(randomInt(0, 1000000)).padStart(6, "0");
+      await setDocOtp(docToken, code, {
+        lastSentAt: nowSec,
+        windowStart: inWindow ? windowStart : nowSec,
+        sendCount: priorCount + 1,
+      });
+      const from = process.env.ENT_OTP_FROM;
+      let emailed = false;
+      if (from && doc.signerEmail) {
+        try {
+          await ses.send(
+            new SendEmailCommand({
+              Source: from,
+              Destination: { ToAddresses: [doc.signerEmail] },
+              Message: {
+                Subject: { Data: "Your ShieldSync document acceptance code" },
+                Body: {
+                  Text: { Data: `Your one-time code to accept "${doc.title}" is ${code}. It expires in 10 minutes. If you did not expect this, you can ignore it.` },
+                  Html: {
+                    Data: `<div style="font-family:system-ui,sans-serif;color:#0f172a"><p>Your one-time code to accept the document:</p><p style="font-size:30px;font-weight:800;letter-spacing:6px;color:#d97706">${code}</p><p style="color:#64748b">It expires in 10 minutes. If you did not expect this, you can ignore it.</p></div>`,
+                  },
+                },
+              },
+            })
+          );
+          emailed = true;
+        } catch (e) {
+          console.error("[ent/docs/otp/send] SES send failed:", e.name, e.message);
+        }
+      }
+      const out = { ok: true, emailed, signerEmailMasked: maskEmail(doc.signerEmail) };
+      // Plaintext code ONLY in local dev -- never in the Lambda runtime.
+      if (!IN_LAMBDA) out.devCode = code;
+      return resp(200, out);
+    }
+
+    // Accept: OTP verify + CAS pending->signed in ONE engine call (no verified-
+    // but-unaccepted limbo). ip/userAgent are injected by the APP from request
+    // headers server-side -- body values from the browser are never trusted.
+    if (method === "POST" && path === "/ent/docs/accept") {
+      const { docToken, code } = parsed;
+      if (!docToken) return resp(400, { error: "DOC_TOKEN_REQUIRED" });
+      const typedName = typeof parsed.typedName === "string" ? parsed.typedName.trim().slice(0, 120) : "";
+      if (typedName.length < 2) return resp(400, { error: "NAME_REQUIRED" });
+      if (typeof code !== "string" || !code.trim()) return resp(400, { error: "CODE_REQUIRED" });
+      const ip = typeof parsed.ip === "string" ? parsed.ip.trim().slice(0, 64) : "";
+      const userAgent = typeof parsed.userAgent === "string" ? parsed.userAgent.trim().slice(0, 400) : "";
+
+      const r = await acceptDoc(docToken, code.trim(), { typedName, ip, userAgent });
+      if (r.notFound) return resp(404, { error: "not found" });
+      if (r.notAcceptable) {
+        // Revoked (or raced into a non-pending, non-signed state): same
+        // oracle-free 404 as every other route on this surface.
+        return resp(404, { error: "not found" });
+      }
+      if (r.linkExpired) return resp(410, { error: "LINK_EXPIRED" });
+      if (r.already) return resp(200, { ok: true, already: true, doc: sanitizeDocPublic(r.doc) });
+      if (!r.ok) {
+        // locked / expired (code TTL) / wrong code -- 200 + flags, the invite
+        // OTP-verify contract the app UIs already know how to render.
+        return resp(200, r);
+      }
+
+      console.log(
+        JSON.stringify({ audit: true, action: "doc.accept", doc: docToken.slice(0, 8), acceptedName: r.doc.acceptedName, acceptedEmail: r.doc.acceptedEmail, sha256: r.doc.docHash, at: Date.now() })
+      );
+      await audit({
+        orgId: DOCS_AUDIT_ORG,
+        actor: r.doc.acceptedEmail,
+        action: "doc.accept",
+        target: docToken.slice(0, 8),
+        detail: { title: r.doc.title, acceptedName: r.doc.acceptedName, sha256: r.doc.docHash, ip },
+      });
+      const { signerEmailed, opsEmailed } = await sendDocAcceptedEmails(r.doc, docToken);
+      return resp(200, { ok: true, doc: sanitizeDocPublic(r.doc), signerEmailed, opsEmailed });
+    }
+
+    // Staff: kill a pending link (mistake / lost / renegotiated). A SIGNED
+    // record is permanent and can never be revoked (409).
+    if (method === "POST" && path === "/ent/docs/revoke") {
+      const { docToken } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (!docToken) return resp(400, { error: "DOC_TOKEN_REQUIRED" });
+      try {
+        const doc = await revokeDoc(docToken);
+        if (!doc) return resp(404, { error: "not found" });
+        console.log(
+          JSON.stringify({ audit: true, action: "doc.revoke", actor, doc: docToken.slice(0, 8), at: Date.now() })
+        );
+        await audit({ orgId: DOCS_AUDIT_ORG, actor, action: "doc.revoke", target: docToken.slice(0, 8), detail: { title: doc.title } });
+        return resp(200, { ok: true, revokedAt: doc.revokedAt });
+      } catch (e) {
+        if (e.code === "NOT_REVOCABLE") return resp(409, { error: "NOT_REVOCABLE", status: e.status });
+        throw e;
+      }
+    }
+
+    // Staff: re-send the signing-link email to the registered signer (pending
+    // docs only; per-doc cooldown; never reveals the token to the admin UI).
+    if (method === "POST" && path === "/ent/docs/resend") {
+      const { docToken } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (!docToken) return resp(400, { error: "DOC_TOKEN_REQUIRED" });
+      const doc = await getDoc(docToken);
+      if (!doc || doc.status === "revoked") return resp(404, { error: "not found" });
+      if (doc.status === "signed") return resp(409, { error: "ALREADY_SIGNED" });
+      if (doc.expiresAt && new Date(doc.expiresAt) < new Date()) {
+        return resp(410, { error: "LINK_EXPIRED" });
+      }
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (doc.resendLastAt && nowSec - doc.resendLastAt < DOC_RESEND_COOLDOWN_SEC) {
+        return resp(429, { error: "RESEND_COOLDOWN", retryAfter: DOC_RESEND_COOLDOWN_SEC - (nowSec - doc.resendLastAt) });
+      }
+      // Stamp BEFORE the send (setOtp precedent) so a failed send still throttles.
+      await stampDocResend(docToken);
+      const emailed = await sendDocSignLinkEmail({
+        signerEmail: doc.signerEmail,
+        signerName: doc.signerName,
+        title: doc.title,
+        docToken,
+      });
+      console.log(
+        JSON.stringify({ audit: true, action: "doc.resend", actor, doc: docToken.slice(0, 8), emailed, at: Date.now() })
+      );
+      return resp(200, { ok: true, emailed });
     }
 
     // ── lab-leasing: reserved-capacity slot booking + timed assessment run ──

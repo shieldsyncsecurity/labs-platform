@@ -33,8 +33,15 @@
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAgreements/index/*",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAudit",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAudit/index/*",
-        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntLeads"
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntLeads",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntDocs"
       ]
+    },
+    {
+      "Sid": "S3DocsBucket",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject"],
+      "Resource": "arn:aws:s3:::shieldsync-ent-docs-750294427884/*"
     },
     {
       "Sid": "DynamoDBSharedPool",

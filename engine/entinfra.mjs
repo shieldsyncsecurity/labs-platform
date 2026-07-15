@@ -72,6 +72,14 @@ async function platformCreds() {
   return _pc.creds;
 }
 
+/** platformCredentials(): the same local-dev STS bridge as this module's own
+ *  DynamoDB client, exported so ent-handler's docs S3 client can reach the
+ *  platform account's bucket when running OUTSIDE Lambda (local dev/tests).
+ *  In Lambda, callers must NOT use this -- the execution role is the identity. */
+export async function platformCredentials() {
+  return platformCreds();
+}
+
 let _ddb;
 async function ddb() {
   if (_ddb) return _ddb;
@@ -1699,4 +1707,273 @@ export async function updateLeadStatus(leadId, status) {
     if (e.name === "ConditionalCheckFailedException") return null;
     throw e;
   }
+}
+
+// -- DOCUMENTS (doc-signing portal: e-accept SOWs/proposals/agreements) --------
+//
+// One row per uploaded PDF a named recipient is asked to electronically accept
+// via /sign/<docToken>. The PDF bytes live in S3 (ent-handler owns that side);
+// this table holds the metadata + the sha256 of the EXACT stored bytes (the
+// agreements-table precedent: hash frozen at registration, copied into the
+// acceptance record at accept time so the executed record is self-contained).
+//
+// Status machine -- every transition is a ConditionExpression CAS, never a
+// read-then-write (same discipline as the agreements lifecycle):
+//   pending -> signed   (acceptDoc; TERMINAL -- the acceptance record fields are
+//                        written in the SAME conditional update, so a signed row
+//                        is immutable-by-construction: no update path exists.)
+//   pending -> revoked  (revokeDoc; a signed record can NEVER be revoked.)
+//
+// NO TTL: documents + acceptance records are permanent business/legal records,
+// like Orders and Agreements. PITR is enabled by create-ent-docs-infra.mjs.
+//
+// LEGAL NOTE (read before editing any wording that reaches a signer): this flow
+// produces click-accept evidence ("electronically accepted") -- it is NOT an
+// Aadhaar eSign / DSC digital signature under IT Act section 3, and no string
+// in this module or its callers may ever say "digitally signed".
+
+const DOCS_TABLE = "ShieldSyncEntDocs";
+
+/** sha256HexBytes(): the agreements sha256Hex precedent, but over raw bytes
+ *  (Buffer) rather than text -- used to hash the exact stored PDF bytes. */
+export function sha256HexBytes(buf) {
+  return createHash("sha256").update(buf).digest("hex");
+}
+
+/**
+ * createDoc(): register a document row. docToken MUST be caller-supplied (the
+ * app mints it once and reuses it on retry -- same idempotency contract as
+ * createInvite) and doubles as the /sign/<docToken> bearer credential, so it is
+ * never returned by any public endpoint. The conditional put makes a retried
+ * register a no-op: on collision the existing row is returned with
+ * { already: true } and the HANDLER decides whether the retry is benign
+ * (same sha256) or a token-reuse bug (different content -> 409).
+ */
+export async function createDoc({ docToken, title, fileName, signerName, signerEmail, note, s3Key, sizeBytes, sha256, expiresAt, actor }) {
+  const db = await ddb();
+  const item = {
+    docToken: S(docToken),
+    title: S(title),
+    fileName: S(fileName),
+    signerName: S(signerName ?? ""),
+    signerEmail: S(signerEmail),
+    note: S(note ?? ""),
+    s3Key: S(s3Key),
+    sizeBytes: N(sizeBytes),
+    sha256: S(sha256),
+    status: S("pending"),
+    expiresAt: S(expiresAt),
+    createdAt: S(nowIso()),
+    createdBy: S(actor ?? ""),
+  };
+  try {
+    await db.send(
+      new PutItemCommand({
+        TableName: DOCS_TABLE,
+        Item: item,
+        ConditionExpression: "attribute_not_exists(docToken)",
+      })
+    );
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") {
+      const existing = await getDoc(docToken);
+      return { already: true, doc: existing };
+    }
+    throw e;
+  }
+  return { already: false, doc: itemToObject(item) };
+}
+
+/** getDoc(): fetch one document row by its token, or null. Full row -- callers
+ *  that face the public (GET /ent/doc) must sanitize before returning. */
+export async function getDoc(docToken) {
+  if (!docToken) return null;
+  const db = await ddb();
+  const r = await db.send(new GetItemCommand({ TableName: DOCS_TABLE, Key: { docToken: S(docToken) } }));
+  return itemToObject(r.Item);
+}
+
+/**
+ * listDocs(): every document, newest-first. A Scan is deliberate (same as
+ * listLeads): document volume is human-scale and the table has no GSI to pay
+ * for. otpHash is stripped here so a stored code hash can never reach the app
+ * layer at all; docToken stays IN the rows because the admin app needs it
+ * server-side to drive actions -- the app renders only 8-char display ids.
+ */
+export async function listDocs() {
+  const db = await ddb();
+  const r = await db.send(new ScanCommand({ TableName: DOCS_TABLE }));
+  const docs = (r.Items ?? []).map((it) => {
+    const o = itemToObject(it);
+    delete o.otpHash;
+    return o;
+  });
+  docs.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  return docs;
+}
+
+/** setDocOtp(): store a fresh OTP hash on a document row. Same contract as the
+ *  invite setOtp: resets attempts for the NEW code, never touches otpLocked
+ *  (sticky lock) and only WRITES the send-throttle counters the caller computed
+ *  (cooldown + daily cap survive a resend). */
+export async function setDocOtp(docToken, code, meta = {}) {
+  const db = await ddb();
+  const sets = ["otpHash = :h", "otpExpiresAt = :exp", "otpAttempts = :zero"];
+  const values = {
+    ":h": S(hashOtp(code)),
+    ":exp": N(now() + OTP_TTL_SECONDS),
+    ":zero": N(0),
+  };
+  if (meta.lastSentAt !== undefined) {
+    sets.push("otpLastSentAt = :ls");
+    values[":ls"] = N(meta.lastSentAt);
+  }
+  if (meta.windowStart !== undefined) {
+    sets.push("otpSendWindowStart = :ws");
+    values[":ws"] = N(meta.windowStart);
+  }
+  if (meta.sendCount !== undefined) {
+    sets.push("otpSendCount = :sc");
+    values[":sc"] = N(meta.sendCount);
+  }
+  await db.send(
+    new UpdateItemCommand({
+      TableName: DOCS_TABLE,
+      Key: { docToken: S(docToken) },
+      UpdateExpression: "SET " + sets.join(", "),
+      ExpressionAttributeValues: values,
+    })
+  );
+}
+
+/**
+ * acceptDoc(): the whole verify-then-accept in ONE call, so the OTP check and
+ * the pending->signed transition can never be split across requests (there is
+ * no "verified but not yet accepted" limbo state to attack or to leak).
+ * Outcome flags mirror verifyOtp:
+ *   - notFound / linkExpired / locked / expired (code TTL) / attemptsLeft (mismatch)
+ *   - already: true      -> row is ALREADY signed (idempotent double-click)
+ *   - notAcceptable      -> revoked (or other non-pending) row
+ *   - ok: true, doc      -> CAS pending->signed committed with the acceptance
+ *     record: acceptedAt/acceptedName/acceptedEmail (the OTP-verified address,
+ *     copied from the ROW -- never caller input), acceptIp/acceptUa (handler
+ *     injects from request headers), docHash (sha256 frozen at registration).
+ * The mismatch path burns an attempt and locks at OTP_MAX_ATTEMPTS, exactly
+ * like the invite flow -- and the lock is sticky across resends.
+ */
+export async function acceptDoc(docToken, code, { typedName, ip, userAgent } = {}) {
+  const doc = await getDoc(docToken);
+  if (!doc) return { ok: false, notFound: true };
+  if (doc.status === "signed") return { ok: false, already: true, doc };
+  if (doc.status !== "pending") return { ok: false, notAcceptable: true, status: doc.status };
+  if (doc.expiresAt && new Date(doc.expiresAt) < new Date()) return { ok: false, linkExpired: true };
+  if (doc.otpLocked) return { ok: false, locked: true };
+  if (!doc.otpExpiresAt || now() > doc.otpExpiresAt) return { ok: false, expired: true };
+
+  const candidateHash = Buffer.from(hashOtp(code), "hex");
+  const storedHash = Buffer.from(doc.otpHash ?? "", "hex");
+  const match = candidateHash.length === storedHash.length && timingSafeEqual(candidateHash, storedHash);
+
+  const db = await ddb();
+  if (match) {
+    try {
+      const r = await db.send(
+        new UpdateItemCommand({
+          TableName: DOCS_TABLE,
+          Key: { docToken: S(docToken) },
+          UpdateExpression:
+            "REMOVE otpHash, otpExpiresAt SET #s = :signed, acceptedAt = :at, acceptedName = :nm, acceptedEmail = :em, acceptIp = :ip, acceptUa = :ua, docHash = :h, otpAttempts = :zero",
+          ConditionExpression: "#s = :pending",
+          ExpressionAttributeNames: { "#s": "status" },
+          ExpressionAttributeValues: {
+            ":signed": S("signed"),
+            ":pending": S("pending"),
+            ":at": S(nowIso()),
+            ":nm": S(typedName ?? ""),
+            ":em": S(doc.signerEmail ?? ""),
+            ":ip": S(ip ?? ""),
+            ":ua": S(userAgent ?? ""),
+            ":h": S(doc.sha256 ?? ""),
+            ":zero": N(0),
+          },
+          ReturnValues: "ALL_NEW",
+        })
+      );
+      const updated = itemToObject(r.Attributes);
+      delete updated.otpHash;
+      return { ok: true, doc: updated };
+    } catch (e) {
+      if (e.name === "ConditionalCheckFailedException") {
+        // Raced by another accept (double-click) or a revoke. Re-read to tell
+        // the two apart -- a signed row is the friendly idempotent case.
+        const current = await getDoc(docToken);
+        if (current?.status === "signed") return { ok: false, already: true, doc: current };
+        return { ok: false, notAcceptable: true, status: current?.status };
+      }
+      throw e;
+    }
+  }
+
+  const attempts = (doc.otpAttempts ?? 0) + 1;
+  const lockingNow = attempts >= OTP_MAX_ATTEMPTS;
+  await db.send(
+    new UpdateItemCommand({
+      TableName: DOCS_TABLE,
+      Key: { docToken: S(docToken) },
+      UpdateExpression: "ADD otpAttempts :one" + (lockingNow ? " SET otpLocked = :true" : ""),
+      ExpressionAttributeValues: lockingNow ? { ":one": N(1), ":true": BOOL(true) } : { ":one": N(1) },
+    })
+  );
+  return { ok: false, attemptsLeft: Math.max(0, OTP_MAX_ATTEMPTS - attempts) };
+}
+
+/**
+ * revokeDoc(): CAS pending->revoked (admin kills a mistaken/lost link). A
+ * signed row can NEVER be revoked -- the acceptance record is permanent; a
+ * revoke attempt on it throws NOT_REVOCABLE (handler -> 409). Returns null for
+ * an unknown token.
+ */
+export async function revokeDoc(docToken) {
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: DOCS_TABLE,
+        Key: { docToken: S(docToken) },
+        UpdateExpression: "SET #s = :revoked, revokedAt = :at",
+        ConditionExpression: "#s = :pending",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":revoked": S("revoked"), ":pending": S("pending"), ":at": S(nowIso()) },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    const updated = itemToObject(r.Attributes);
+    delete updated.otpHash;
+    return updated;
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") {
+      const existing = await getDoc(docToken);
+      if (!existing) return null;
+      const err = new Error("NOT_REVOCABLE");
+      err.code = "NOT_REVOCABLE";
+      err.status = existing.status;
+      throw err;
+    }
+    throw e;
+  }
+}
+
+/** stampDocResend(): cooldown stamp for the signing-link re-send (mirrors
+ *  stampInviteResend -- stamped BEFORE the SES send so a failed send still
+ *  throttles the next attempt). */
+export async function stampDocResend(docToken) {
+  const db = await ddb();
+  await db.send(
+    new UpdateItemCommand({
+      TableName: DOCS_TABLE,
+      Key: { docToken: S(docToken) },
+      UpdateExpression: "SET resendLastAt = :ls",
+      ExpressionAttributeValues: { ":ls": N(now()) },
+    })
+  );
 }

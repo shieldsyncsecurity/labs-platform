@@ -54,6 +54,12 @@ export default function AdminNav() {
             Agreements
           </Link>
           <Link
+            href="/admin/documents"
+            className="rounded text-sm text-ink-soft hover:text-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+          >
+            Documents
+          </Link>
+          <Link
             href="/admin/forensics"
             className="rounded text-sm text-ink-soft hover:text-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
           >
