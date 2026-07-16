@@ -21,11 +21,23 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await entFetch("/ent/otp/send", {
+    const result = await entFetch<{ ok?: boolean; emailed?: boolean; devCode?: string }>("/ent/otp/send", {
       method: "POST",
       body: { inviteToken },
     });
-    return NextResponse.json(result);
+    // Return ONLY the fields the candidate UI needs. `devCode` is a local-dev
+    // convenience the engine emits outside Lambda; NEVER forward it in
+    // production even if the engine were misconfigured to include it —
+    // surfacing the OTP in the browser would bypass the identity check.
+    // (Defense-in-depth: don't trust the upstream to withhold it.)
+    const safe: { ok: boolean; emailed: boolean; devCode?: string } = {
+      ok: result?.ok === true,
+      emailed: result?.emailed === true,
+    };
+    if (process.env.NODE_ENV !== "production" && typeof result?.devCode === "string") {
+      safe.devCode = result.devCode;
+    }
+    return NextResponse.json(safe);
   } catch (err) {
     if (err instanceof EntEngineError) {
       console.error("[api/otp/send] engine error", err.status, err.body);

@@ -2,9 +2,10 @@
 // labs-platform/app engine client at lib/server/engine.ts).
 //
 // IMPORTANT: this module must NEVER be imported into client code — it would
-// leak ENT_ENGINE_SECRET into the browser bundle. Always import from server
-// components / Route Handlers only (this file has no "use client", and does
-// not export anything that reads well from a client bundle).
+// leak ENT_ENGINE_SECRET into the browser bundle. The `server-only` import
+// below turns any accidental client import into a hard BUILD error (belt to
+// the comment's braces); always import from server components / Route Handlers.
+import "server-only";
 
 const ENT_ENGINE_URL = process.env.ENT_ENGINE_URL ?? "http://localhost:4001";
 

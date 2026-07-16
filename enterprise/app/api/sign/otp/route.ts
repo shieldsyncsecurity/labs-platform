@@ -22,11 +22,23 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await entFetch("/ent/docs/otp/send", {
-      method: "POST",
-      body: { docToken: token },
-    });
-    return NextResponse.json(result);
+    const result = await entFetch<{ ok?: boolean; emailed?: boolean; signerEmailMasked?: string; devCode?: string }>(
+      "/ent/docs/otp/send",
+      { method: "POST", body: { docToken: token } },
+    );
+    // Forward only what the signing UI needs; `devCode` is a local-dev-only
+    // field the engine emits outside Lambda — never surface it in production
+    // even if the engine were misconfigured to send it (it would bypass the
+    // acceptance identity check). Defense-in-depth against upstream leakage.
+    const safe: { ok: boolean; emailed: boolean; signerEmailMasked?: string; devCode?: string } = {
+      ok: result?.ok === true,
+      emailed: result?.emailed === true,
+      signerEmailMasked: result?.signerEmailMasked,
+    };
+    if (process.env.NODE_ENV !== "production" && typeof result?.devCode === "string") {
+      safe.devCode = result.devCode;
+    }
+    return NextResponse.json(safe);
   } catch (err) {
     if (err instanceof EntEngineError) {
       console.error("[api/sign/otp] engine error", err.status, err.body);
