@@ -86,7 +86,10 @@ import {
 } from "./labinfra.mjs";
 import { gradeLab } from "./graders.mjs";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
-import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+// Transactional email no longer uses SES (prod-access request was denied for
+// this account). Sends go out via the Resend HTTP API through a drop-in
+// ses.send() shim + local SendEmailCommand class defined below (~line 137), so
+// the six existing SendEmailCommand call sites stay byte-for-byte unchanged.
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { createWriteStream } from "node:fs";
 import { chmod } from "node:fs/promises";
@@ -134,7 +137,49 @@ const REFLECTION_MAX_CHARS = 8000;
 const INVITE_RESEND_COOLDOWN_SEC = 45;
 
 const entLambda = new LambdaClient({ region: "us-east-1" });
-const ses = new SESClient({ region: "us-east-1" });
+// --- Email transport: Resend HTTP API (drop-in for the two @aws-sdk/client-ses
+// symbols this file used) -----------------------------------------------------
+// SES prod access was denied for this account, so email now goes via Resend.
+// SendEmailCommand just captures its params; ses.send() translates the SES
+// SendEmail shape to a single Resend POST. It THROWS on any failure (missing
+// key, non-2xx from Resend) so every caller's existing try/catch keeps its
+// best-effort contract -- a send failure is logged and swallowed, never failing
+// the parent op. RESEND_API_KEY is a Lambda secret (never in source); the
+// from-address stays ENT_OTP_FROM, which MUST be an address on a
+// Resend-verified domain (e.g. "ShieldSync <no-reply@shieldsyncsecurity.com>").
+// Uses the native global fetch (Lambda nodejs22.x) -- no email SDK dependency.
+class SendEmailCommand {
+  constructor(input) {
+    this.input = input;
+  }
+}
+const RESEND_ENDPOINT = "https://api.resend.com/emails";
+const ses = {
+  async send(command) {
+    const key = process.env.RESEND_API_KEY;
+    if (!key) throw new Error("RESEND_API_KEY not set");
+    const m = command.input ?? {};
+    const body = {
+      from: m.Source,
+      to: m.Destination?.ToAddresses ?? [],
+      subject: m.Message?.Subject?.Data ?? "",
+    };
+    const text = m.Message?.Body?.Text?.Data;
+    const html = m.Message?.Body?.Html?.Data;
+    if (text != null) body.text = text;
+    if (html != null) body.html = html;
+    const res = await fetch(RESEND_ENDPOINT, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`Resend ${res.status}: ${detail.slice(0, 300)}`);
+    }
+    return res.json().catch(() => ({}));
+  },
+};
 
 // Shared-secret guard for the public HTTP surface (set via Lambda env). The
 // enterprise app sends this in the X-Engine-Token header; without it the
