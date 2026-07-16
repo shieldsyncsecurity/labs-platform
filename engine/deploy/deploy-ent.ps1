@@ -140,8 +140,8 @@ if ($LASTEXITCODE -ne 0) {
 # -- Step 5: environment (MERGE, never replace) --------------------------------
 # The ent engine's HTTP auth FAILS CLOSED: an empty ENT_ENGINE_SECRET makes the
 # engine refuse every non-health request. This step MERGES local env overrides
-# (ENT_ENGINE_SECRET / ENT_OTP_FROM / ENT_APP_URL / GEMINI_API_KEY, when set in
-# the shell) into the Lambda's CURRENT variables. It must never write a
+# (ENT_ENGINE_SECRET / ENT_OTP_FROM / ENT_APP_URL / GEMINI_API_KEY /
+# RESEND_API_KEY, when set in the shell) into the Lambda's CURRENT variables. It must never write a
 # replacement map: the old Variables={ONLY_ONE_KEY} form silently WIPED every
 # other var (would have killed OTP email via ENT_OTP_FROM). A code-only deploy
 # with no local overrides is fine as long as the Lambda already holds a secret.
@@ -155,7 +155,7 @@ $current = $currentJson | ConvertFrom-Json
 if ($null -ne $current) {
     $current.PSObject.Properties | ForEach-Object { $vars[$_.Name] = $_.Value }
 }
-foreach ($k in @("ENT_ENGINE_SECRET", "ENT_OTP_FROM", "ENT_APP_URL", "GEMINI_API_KEY")) {
+foreach ($k in @("ENT_ENGINE_SECRET", "ENT_OTP_FROM", "ENT_APP_URL", "GEMINI_API_KEY", "RESEND_API_KEY")) {
     $v = [Environment]::GetEnvironmentVariable($k)
     if (-not [string]::IsNullOrWhiteSpace($v)) { $vars[$k] = $v }
 }
