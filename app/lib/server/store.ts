@@ -58,7 +58,7 @@ export async function grantPayPerLab(
   labSlug: string,
   opts: { maxLaunches?: number; orderId?: string | null } = {}
 ): Promise<boolean> {
-  const maxLaunches = opts.maxLaunches ?? 30;
+  const maxLaunches = opts.maxLaunches ?? 3;
   return grantEntitlement(userId, {
     labSlug,
     kind: "per-lab",

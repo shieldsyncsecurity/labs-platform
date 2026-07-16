@@ -18,7 +18,7 @@ export function EntitlementStatus({ entitlement, labSlug }: Props) {
   const type = entitlementTypeOf(entitlement);
 
   if (type === "PAY_PER_LAB") {
-    const max = entitlement.maxLaunches ?? 30;
+    const max = entitlement.maxLaunches ?? 3;
     const used = entitlement.launchCount ?? 0;
     const remaining = Math.max(0, max - used);
     const expiresAt = entitlement.windowExpiresAt ?? null;

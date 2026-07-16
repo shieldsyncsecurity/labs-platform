@@ -386,9 +386,9 @@ export async function handler(event) {
       // (FREE_RULE = 2 runs / 24h) and needs a rolling abuse cap. PAID labs are no
       // longer capped here: their launch budget lives on the entitlement row and
       // is enforced by the app (it calls reserveLaunch — an atomic CAS on the
-      // ShieldSyncLabEntitlements row — BEFORE this /launch). Applying the old
-      // 2/48h level cap to paid labs would silently override the pay-per-lab
-      // budget (30 launches / 7-day window). Session length still comes from the
+      // ShieldSyncLabEntitlements row — BEFORE this /launch). Applying a tighter
+      // level cap to paid labs would silently override the pay-per-lab budget
+      // (3 launches / 7-day window). Session length still comes from the
       // per-level rule regardless; the one-live-session lock + per-IP rate cap
       // remain the engine-side backstops for paid launches.
       if (rules.free) {

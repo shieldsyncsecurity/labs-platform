@@ -264,7 +264,9 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   // Launch policy (per-lab, from the single source the engine mirrors) — shown
   // up front so the cap isn't a surprise only when you hit it.
   const rule = lab ? rulesForLab(lab.level, lab.free) : null;
-  const launchPolicy = rule ? `${rule.maxLaunches} launch${rule.maxLaunches === 1 ? "" : "es"} every ${rule.windowHours}h` : "";
+  const launchPolicy = rule
+    ? `${rule.maxLaunches} launch${rule.maxLaunches === 1 ? "" : "es"} over a ${rule.windowHours % 24 === 0 && rule.windowHours >= 48 ? `${rule.windowHours / 24}-day` : `${rule.windowHours}h`} window`
+    : "";
 
   function clearSession() {
     setSessionId(null);
@@ -844,7 +846,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     return (
       <div className={card}>
         <p className="text-base font-extrabold text-ink">Get this lab</p>
-        <p className="mt-1 text-base text-ink-soft">One-time purchase — up to 30 launches over a 7-day access window.</p>
+        <p className="mt-1 text-base text-ink-soft">One-time purchase — up to 3 launches over a 7-day access window.</p>
         <button onClick={() => setShowCheckout(true)} className={`mt-4 ${btnPrimary}`}>Get this lab</button>
         {showCheckout && (
           <CheckoutSheet labSlug={slug} labTitle={lab?.title ?? "Lab"} plan="per-lab" onClose={() => setShowCheckout(false)} onPaid={async () => { await refreshEntitlements(); setShowCheckout(false); }} />

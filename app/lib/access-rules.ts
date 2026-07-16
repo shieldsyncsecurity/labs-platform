@@ -6,12 +6,14 @@ import type { LabLevel } from "@/lib/labs";
 //  - maxLaunches / windowHours: how many runs a user gets in a rolling window.
 export type AccessRule = { sessionMinutes: number; maxLaunches: number; windowHours: number };
 
+// Paid labs: 3 launches within a 7-day (168h) window (owner 2026-07-14) — windowHours
+// matches the PAY_PER_LAB 7-day entitlement window. sessionMinutes stays per-level.
 export const ACCESS_RULES: Record<LabLevel, AccessRule> = {
-  Beginner: { sessionMinutes: 30, maxLaunches: 3, windowHours: 72 },
+  Beginner: { sessionMinutes: 30, maxLaunches: 3, windowHours: 168 },
   // sessionMinutes MUST be >= the lab's estimatedActiveMinutes or learners get torn
   // down mid-task. The IAM lab (Intermediate) is ~75 min → 90 gives a buffer.
-  Intermediate: { sessionMinutes: 90, maxLaunches: 2, windowHours: 48 },
-  Advanced: { sessionMinutes: 120, maxLaunches: 2, windowHours: 48 },
+  Intermediate: { sessionMinutes: 90, maxLaunches: 3, windowHours: 168 },
+  Advanced: { sessionMinutes: 120, maxLaunches: 3, windowHours: 168 },
 };
 
 // The FREE lab is a lead magnet: TWO runs per user every 24h (temporarily bumped from 1).
@@ -27,10 +29,11 @@ export function rulesForLab(level: LabLevel, free: boolean): AccessRule {
   return free ? FREE_RULE : ACCESS_RULES[level];
 }
 
-// Human-readable, e.g. "3 launches over 72h · 30 min each" / "1 launch over 48h · 30 min each".
+// Human-readable, e.g. "3 launches over a 7-day window · 30 min each" / "2 launches over a 24h window · 30 min each".
 export function rulesSummary(level: LabLevel, free: boolean): string {
   const r = rulesForLab(level, free);
   const dur = r.sessionMinutes >= 60 ? `${r.sessionMinutes / 60} h` : `${r.sessionMinutes} min`;
   const runs = `${r.maxLaunches} launch${r.maxLaunches === 1 ? "" : "es"}`;
-  return `${runs} over ${r.windowHours}h · ${dur} each`;
+  const win = r.windowHours % 24 === 0 && r.windowHours >= 48 ? `${r.windowHours / 24}-day` : `${r.windowHours}h`;
+  return `${runs} over a ${win} window · ${dur} each`;
 }

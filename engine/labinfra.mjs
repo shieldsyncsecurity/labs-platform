@@ -59,11 +59,14 @@ const execFileAsync = promisify(execFile);
 //   sessionMinutes: how long ONE live run lasts before the reaper tears it down.
 //   maxLaunches / windowHours: how many runs a user gets in a rolling window.
 const LEVEL_RULES = {
-  Beginner: { sessionMinutes: 30, maxLaunches: 3, windowHours: 72 },
+  // Paid labs: 3 launches within a 7-day (168h) window (owner 2026-07-14). windowHours
+  // matches the PAY_PER_LAB 7-day entitlement window so the /launch rolling check and
+  // the entitlement cap agree. sessionMinutes stays per-level (>= the lab's active time).
+  Beginner: { sessionMinutes: 30, maxLaunches: 3, windowHours: 168 },
   // sessionMinutes MUST be >= the lab's estimatedActiveMinutes (IAM ~75 → 90). Keep
   // in sync with app/lib/access-rules.ts.
-  Intermediate: { sessionMinutes: 90, maxLaunches: 2, windowHours: 48 },
-  Advanced: { sessionMinutes: 120, maxLaunches: 2, windowHours: 48 },
+  Intermediate: { sessionMinutes: 90, maxLaunches: 3, windowHours: 168 },
+  Advanced: { sessionMinutes: 120, maxLaunches: 3, windowHours: 168 },
 };
 
 // The FREE lab is a lead magnet: TWO runs per user / 24h (temporarily bumped from 1).
@@ -1547,7 +1550,7 @@ export async function healPool() {
 // PAYPERLAB_WINDOW_DAYS window that STARTS ON FIRST LAUNCH (stamped lazily by
 // reserveLaunch). accessUntil is just a generous backstop so an UNUSED purchase
 // doesn't live forever — the real cap is maxLaunches + the on-first-launch window.
-export const PAYPERLAB_MAX_LAUNCHES = 30;
+export const PAYPERLAB_MAX_LAUNCHES = 3;
 export const PAYPERLAB_WINDOW_DAYS = 7;
 export const PAYPERLAB_BACKSTOP_DAYS = 90;
 
