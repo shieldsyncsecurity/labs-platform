@@ -854,6 +854,42 @@ export async function consentInvite(inviteToken, consentVersion) {
   }
 }
 
+/**
+ * claimStartLease(): atomically reserve THIS invite for a SINGLE fresh sandbox
+ * lease, so two concurrent /ent/start calls can't each call leaseEnt() and grab
+ * (then orphan) a different account — which, with a tiny account pool, is a
+ * trivial whole-product DoS. Only ONE concurrent caller wins: succeeds from
+ * "booked" with no sessionId and no live claim; a crashed claim self-frees after
+ * START_CLAIM_TTL_MS. Returns true if THIS caller won (proceed to leaseEnt),
+ * false otherwise (caller re-reads → reconnects or asks the app to retry).
+ */
+const START_CLAIM_TTL_MS = 2 * 60 * 1000;
+export async function claimStartLease(inviteToken) {
+  const db = await ddb();
+  const staleBefore = new Date(Date.now() - START_CLAIM_TTL_MS).toISOString();
+  try {
+    await db.send(
+      new UpdateItemCommand({
+        TableName: INVITES_TABLE,
+        Key: { inviteToken: S(inviteToken) },
+        UpdateExpression: "SET leaseClaimAt = :now",
+        ConditionExpression:
+          "attribute_not_exists(sessionId) AND #s = :booked AND (attribute_not_exists(leaseClaimAt) OR leaseClaimAt < :stale)",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: {
+          ":now": S(nowIso()),
+          ":booked": S("booked"),
+          ":stale": S(staleBefore),
+        },
+      })
+    );
+    return true;
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return false;
+    throw e;
+  }
+}
+
 // ── OTP (Fix H — brute-force resistant) ─────────────────────────────────────
 
 const OTP_TTL_SECONDS = 10 * 60;
@@ -899,6 +935,50 @@ export async function setOtp(inviteToken, code, meta = {}) {
 }
 
 /**
+ * claimOtpAttempt(): atomically reserve ONE verification attempt against the OTP
+ * cap BEFORE the submitted code is compared. This is the real brute-force bound:
+ * a burst of concurrent guesses would otherwise each read a stale otpAttempts and
+ * slip past the 5-try lock (TOCTOU). DynamoDB evaluates the ConditionExpression
+ * against the CURRENT stored counter, so at most OTP_MAX_ATTEMPTS increments ever
+ * succeed; every excess concurrent guess fails the condition and is treated as
+ * locked. Returns { attempts } (the post-increment count) on success, or
+ * { locked:true } when the cap is already reached or the code was consumed.
+ * Shared by the invite (verifyOtp) and doc-signing (acceptDoc) OTP paths.
+ */
+async function claimOtpAttempt(table, keyName, keyVal) {
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: table,
+        Key: { [keyName]: S(keyVal) },
+        UpdateExpression: "ADD otpAttempts :one",
+        ConditionExpression: "attribute_exists(otpHash) AND (attribute_not_exists(otpAttempts) OR otpAttempts < :max)",
+        ExpressionAttributeValues: { ":one": N(1), ":max": N(OTP_MAX_ATTEMPTS) },
+        ReturnValues: "UPDATED_NEW",
+      })
+    );
+    return { attempts: Number(r.Attributes?.otpAttempts?.N ?? OTP_MAX_ATTEMPTS) };
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") {
+      // At the cap (or the code was already consumed) — make the lock sticky.
+      await db
+        .send(
+          new UpdateItemCommand({
+            TableName: table,
+            Key: { [keyName]: S(keyVal) },
+            UpdateExpression: "SET otpLocked = :true",
+            ExpressionAttributeValues: { ":true": BOOL(true) },
+          })
+        )
+        .catch(() => {});
+      return { locked: true };
+    }
+    throw e;
+  }
+}
+
+/**
  * verifyOtp(): check a candidate-submitted code against the stored hash.
  *   - notFound    -> {ok:false, notFound:true}
  *   - linkExpired -> {ok:false, linkExpired:true} (the 7-day invite link is dead)
@@ -918,6 +998,12 @@ export async function verifyOtp(inviteToken, code) {
   if (invite.expiresAt && new Date(invite.expiresAt) < new Date()) return { ok: false, linkExpired: true };
   if (invite.otpLocked) return { ok: false, locked: true };
   if (!invite.otpExpiresAt || now() > invite.otpExpiresAt) return { ok: false, expired: true };
+
+  // Atomically CLAIM an attempt slot BEFORE comparing (TOCTOU guard — the early
+  // otpLocked check above is only a fast path, not the real bound).
+  const slot = await claimOtpAttempt(INVITES_TABLE, "inviteToken", inviteToken);
+  if (slot.locked) return { ok: false, locked: true };
+  const attempts = slot.attempts;
 
   const candidateHash = Buffer.from(hashOtp(code), "hex");
   const storedHash = Buffer.from(invite.otpHash ?? "", "hex");
@@ -959,17 +1045,21 @@ export async function verifyOtp(inviteToken, code) {
     return { ok: true };
   }
 
-  const attempts = (invite.otpAttempts ?? 0) + 1;
-  const lockingNow = attempts >= OTP_MAX_ATTEMPTS;
-  const db = await ddb();
-  await db.send(
-    new UpdateItemCommand({
-      TableName: INVITES_TABLE,
-      Key: { inviteToken: S(inviteToken) },
-      UpdateExpression: "ADD otpAttempts :one" + (lockingNow ? " SET otpLocked = :true" : ""),
-      ExpressionAttributeValues: lockingNow ? { ":one": N(1), ":true": BOOL(true) } : { ":one": N(1) },
-    })
-  );
+  // Mismatch: the attempt was already consumed by the atomic claim above. Make the
+  // lock sticky once the cap is reached (idempotent, best-effort).
+  if (attempts >= OTP_MAX_ATTEMPTS) {
+    const db = await ddb();
+    await db
+      .send(
+        new UpdateItemCommand({
+          TableName: INVITES_TABLE,
+          Key: { inviteToken: S(inviteToken) },
+          UpdateExpression: "SET otpLocked = :true",
+          ExpressionAttributeValues: { ":true": BOOL(true) },
+        })
+      )
+      .catch(() => {});
+  }
   return { ok: false, attemptsLeft: Math.max(0, OTP_MAX_ATTEMPTS - attempts) };
 }
 
@@ -1870,6 +1960,12 @@ export async function acceptDoc(docToken, code, { typedName, ip, userAgent } = {
   if (doc.otpLocked) return { ok: false, locked: true };
   if (!doc.otpExpiresAt || now() > doc.otpExpiresAt) return { ok: false, expired: true };
 
+  // Atomically CLAIM an attempt slot BEFORE comparing (same TOCTOU guard as the
+  // invite OTP path — bounds concurrent guesses to OTP_MAX_ATTEMPTS).
+  const slot = await claimOtpAttempt(DOCS_TABLE, "docToken", docToken);
+  if (slot.locked) return { ok: false, locked: true };
+  const attempts = slot.attempts;
+
   const candidateHash = Buffer.from(hashOtp(code), "hex");
   const storedHash = Buffer.from(doc.otpHash ?? "", "hex");
   const match = candidateHash.length === storedHash.length && timingSafeEqual(candidateHash, storedHash);
@@ -1914,16 +2010,20 @@ export async function acceptDoc(docToken, code, { typedName, ip, userAgent } = {
     }
   }
 
-  const attempts = (doc.otpAttempts ?? 0) + 1;
-  const lockingNow = attempts >= OTP_MAX_ATTEMPTS;
-  await db.send(
-    new UpdateItemCommand({
-      TableName: DOCS_TABLE,
-      Key: { docToken: S(docToken) },
-      UpdateExpression: "ADD otpAttempts :one" + (lockingNow ? " SET otpLocked = :true" : ""),
-      ExpressionAttributeValues: lockingNow ? { ":one": N(1), ":true": BOOL(true) } : { ":one": N(1) },
-    })
-  );
+  // Mismatch: the attempt was already consumed by the atomic claim above. Sticky-
+  // lock at the cap (idempotent, best-effort).
+  if (attempts >= OTP_MAX_ATTEMPTS) {
+    await db
+      .send(
+        new UpdateItemCommand({
+          TableName: DOCS_TABLE,
+          Key: { docToken: S(docToken) },
+          UpdateExpression: "SET otpLocked = :true",
+          ExpressionAttributeValues: { ":true": BOOL(true) },
+        })
+      )
+      .catch(() => {});
+  }
   return { ok: false, attemptsLeft: Math.max(0, OTP_MAX_ATTEMPTS - attempts) };
 }
 

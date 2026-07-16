@@ -26,6 +26,7 @@ import {
   getInviteByCandidateReportToken,
   listInvites,
   setInviteStatus,
+  claimStartLease,
   consentInvite,
   refundInvite,
   revokeInvite,
@@ -1831,6 +1832,26 @@ export async function handler(event) {
             reconnected: true,
           });
         }
+      }
+
+      // ── Serialize the fresh lease ON THE INVITE (not just per-account) so two
+      // concurrent starts can't each leaseEnt() a different sandbox account and
+      // orphan one — a tiny-pool DoS. Exactly one concurrent start wins the claim.
+      const claimed = await claimStartLease(inviteToken);
+      if (!claimed) {
+        // Another concurrent start is already leasing this invite. Re-read: if it
+        // now holds a live session, reconnect the candidate to it; otherwise ask
+        // the app to retry in a moment (it will land on the reconnect path above).
+        const fresh = await getInvite(inviteToken);
+        if (fresh?.sessionId) {
+          const s2 = await getSession(fresh.sessionId);
+          if (s2 && ["leasing", "active"].includes(s2.status) && new Date(s2.expiresAt) > new Date()) {
+            const a2 = await getAssessment(fresh.assessmentId);
+            const consoleUrl2 = await mintConsoleUrl({ accountId: s2.accountId, labSlug: a2?.labSlug, durationSeconds: 3600 });
+            return resp(200, { sessionId: s2.sessionId, status: s2.status, consoleUrl: consoleUrl2, expiresAt: s2.expiresAt, reconnected: true });
+          }
+        }
+        return resp(409, { error: "START_IN_PROGRESS", retry: true });
       }
 
       // ── Fresh start ──────────────────────────────────────────────────

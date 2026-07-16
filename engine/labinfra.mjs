@@ -1237,11 +1237,24 @@ export async function mintConsoleUrl({ accountId, labSlug, destination, duration
   // LEAST PRIVILEGE: scope the federated console session to exactly what THIS lab
   // needs (effective perms = LabUser(admin) ∩ policy ∩ SCP). No declared policy →
   // mint UNSCOPED (admin∩SCP) + warn; build-lab-content fails a READY lab missing one.
-  const policy = labLearnerPolicy(labSlug, accountId);
+  let policy = labLearnerPolicy(labSlug, accountId);
   if (!policy) {
-    console.warn(`[mintConsoleUrl] ${labSlug || "(no slug)"}: no learnerPolicy — minting UNSCOPED admin console (still SCP-fenced). Add learnerPolicy to lab.json.`);
+    console.warn(`[mintConsoleUrl] ${labSlug || "(no slug)"}: no learnerPolicy — minting broad sandbox admin (SCP + control-plane guardrail still enforced). Add learnerPolicy to lab.json.`);
+    // FAIL CLOSED on the control plane even when a lab declares no learnerPolicy:
+    // a broad Allow (preserves the intended unscoped-admin sandbox) INTERSECTED
+    // with the always-on guardrail Denies, so a policy-less lab can never edit the
+    // control roles' trust policies or touch org/account governance. (A session
+    // policy of only Denies would grant nothing, so the Allow:* is required — and
+    // previously the guardrail was dropped entirely in this branch.)
+    policy = JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [
+        { Sid: "ssUnscopedSandbox", Effect: "Allow", Action: "*", Resource: "*" },
+        ...guardrailDeny(accountId),
+      ],
+    });
   }
-  const c = await assumeInSandbox(learnerRoleArn, "lab-learner", durationSeconds, policy ? { policy } : {});
+  const c = await assumeInSandbox(learnerRoleArn, "lab-learner", durationSeconds, { policy });
   const session = JSON.stringify({
     sessionId: c.AccessKeyId,
     sessionKey: c.SecretAccessKey,
