@@ -99,12 +99,12 @@ try {
   check("assessment has reportToken", !!reportToken);
 
   inviteToken = "e2e" + sha(STAMP + Date.now()).slice(0, 24);
-  r = await call("POST", "/ent/invites", { assessmentId, orgId, candidateName: "Test Candidate", candidateEmail: "cand@example.com", inviteToken, actor: "e2e@shieldsync" });
+  r = await call("POST", "/ent/invites", { assessmentId, orgId, candidateName: "Test Candidate", candidateEmail: "delivered@resend.dev", inviteToken, actor: "e2e@shieldsync" });
   check("invite create 200", r.status === 200, `status ${r.status}`);
   check("credit consumed", r.json?.creditConsumed === true);
   candidateReportToken = r.json?.candidateReportToken || null;
   // retry same inviteToken = idempotent, no 2nd charge
-  r = await call("POST", "/ent/invites", { assessmentId, orgId, candidateName: "Test Candidate", candidateEmail: "cand@example.com", inviteToken, actor: "e2e@shieldsync" });
+  r = await call("POST", "/ent/invites", { assessmentId, orgId, candidateName: "Test Candidate", candidateEmail: "delivered@resend.dev", inviteToken, actor: "e2e@shieldsync" });
   check("invite retry idempotent (no 2nd charge)", r.status === 200 && r.json?.creditConsumed !== true, `creditConsumed=${r.json?.creditConsumed}`);
   r = await call("GET", `/ent/orgs?orgId=${orgId}`);
   check("org creditsUsed == 1 after 2 identical invite calls", r.json?.creditsUsed === 1, `creditsUsed=${r.json?.creditsUsed}`);

@@ -23,7 +23,7 @@ const orgId = r.j.orgId; ok("org create", r.status === 200);
 r = await call("POST", "/ent/assessments", { orgId, name: "FullLoop", labSlug: "s3-misconfiguration-audit", actor: "fullloop" });
 const assessmentId = r.j.assessmentId; ok("assessment create", r.status === 200);
 const inviteToken = "fl" + Date.now().toString(36) + Math.floor(Math.random()*1e9).toString(36);
-r = await call("POST", "/ent/invites", { assessmentId, orgId, candidateName: "Loop Cand", candidateEmail: "loop@example.com", inviteToken, actor: "fullloop" });
+r = await call("POST", "/ent/invites", { assessmentId, orgId, candidateName: "Loop Cand", candidateEmail: "delivered@resend.dev", inviteToken, actor: "fullloop" });
 ok("invite create + credit", r.status === 200 && r.j.creditConsumed === true, `status ${r.status}`);
 r = await call("POST", "/ent/consent", { inviteToken, consentVersion: "v1" });
 ok("consent", r.status === 200, `status ${r.status}`);
