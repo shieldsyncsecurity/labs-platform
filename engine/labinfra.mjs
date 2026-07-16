@@ -389,11 +389,12 @@ export async function lease(userId, labSlug, windowMinutes = 30, ipHash = null) 
       status: { S: warm ? "active" : "leasing" },
       startedAt: { S: new Date(now).toISOString() },
       expiresAt: { S: expiresAt },
-      // DynamoDB TTL: auto-delete the row 7 days after it expires. Keeps the table
+      // DynamoDB TTL: auto-delete the row 37 days after it expires. Keeps the table
       // (and every Scan over it — launchCount/findActiveSession/reap) bounded to a
-      // rolling week instead of growing forever. 7d > the max launch window (72h) so
+      // rolling ~5 weeks instead of growing forever. 37d > the 30-day lookback of the
+      // per-user monthly launch cap (userLaunchCounts) and > every launch window, so
       // it never deletes a row a rolling-window count still needs.
-      ttl: { N: String(Math.floor(new Date(expiresAt).getTime() / 1000) + 7 * 24 * 3600) },
+      ttl: { N: String(Math.floor(new Date(expiresAt).getTime() / 1000) + 37 * 24 * 3600) },
       ...(ipHash ? { ipHash: { S: ipHash } } : {}),
     };
     if (warm && acct.warmStackName?.S) item.stackName = { S: acct.warmStackName.S };
@@ -459,7 +460,7 @@ export async function leaseEnt(entUserId, labSlug, windowMinutes = 90) {
       client: { S: "ent" }, // enterprise session marker — excluded from all B2C-only logic
       startedAt: { S: new Date(now).toISOString() },
       expiresAt: { S: expiresAt },
-      ttl: { N: String(Math.floor(new Date(expiresAt).getTime() / 1000) + 7 * 24 * 3600) },
+      ttl: { N: String(Math.floor(new Date(expiresAt).getTime() / 1000) + 37 * 24 * 3600) },
     };
     if (warm && acct.warmStackName?.S) item.stackName = { S: acct.warmStackName.S };
     await db.send(new PutItemCommand({ TableName: SESSIONS_TABLE, Item: item }));
@@ -558,6 +559,36 @@ export async function launchCount(userId, labSlug, windowHours) {
   return (scan.Items ?? []).filter(
     (s) => new Date(s.startedAt.S).getTime() >= sinceMs && s.status?.S !== "error"
   ).length;
+}
+
+// Global per-user launch caps — abuse protection for the otherwise-unbounded
+// monthly subscription (owner 2026-07-16): 5 launches/day + 100 per 30 days,
+// counted across ALL labs. Free (≤4/day possible) and pay-per-lab (3 per lab /
+// 7 days) users rarely reach these, so in practice they bound subscribers.
+// Enforced in handler /launch. Requires session rows to outlive the 30-day
+// lookback — see the lease TTL (37 days) below.
+export const USER_DAILY_MAX_LAUNCHES = 5;
+export const USER_MONTHLY_MAX_LAUNCHES = 100;
+
+/** userLaunchCounts(): this user's launches across ALL labs in the trailing 24h
+ *  and 30 days — one scan (the sessions table stays small; rows TTL out). */
+export async function userLaunchCounts(userId) {
+  const db = await ddb();
+  const now = Date.now();
+  const scan = await db.send(
+    new ScanCommand({
+      TableName: SESSIONS_TABLE,
+      FilterExpression: "userId = :u AND attribute_exists(startedAt)",
+      ExpressionAttributeValues: { ":u": { S: userId } },
+    })
+  );
+  const times = (scan.Items ?? [])
+    .filter((s) => s.status?.S !== "error")
+    .map((s) => new Date(s.startedAt.S).getTime());
+  return {
+    day: times.filter((t) => t >= now - 24 * 3600 * 1000).length,
+    month: times.filter((t) => t >= now - 30 * 24 * 3600 * 1000).length,
+  };
 }
 
 /**

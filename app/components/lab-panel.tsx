@@ -765,13 +765,17 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
     return (
       <div className={card} role="alert">
         <p className="text-base font-extrabold text-ink">
-          {limitReason === "RATE_LIMITED" ? "Too many launches just now" : limitReason === "FREE_IP_LIMIT" ? "Free lab limit reached for your network" : "You've used all your launches"}
+          {limitReason === "RATE_LIMITED" ? "Too many launches just now" : limitReason === "FREE_IP_LIMIT" ? "Free lab limit reached for your network" : limitReason === "USER_DAILY_LIMIT" ? "Daily launch limit reached" : limitReason === "USER_MONTHLY_LIMIT" ? "Monthly launch limit reached" : "You've used all your launches"}
         </p>
         <p className="mt-1 text-base text-ink-soft">
           {limitReason === "RATE_LIMITED"
             ? "We saw a burst of launches from your network. Give it a couple of minutes, then try again. Monthly members skip these limits."
             : limitReason === "FREE_IP_LIMIT"
-            ? "The free lab is one run per person — and it's been used several times from your network already. Try again later, or unlock a paid lab for instant, unlimited access. Monthly members skip these limits."
+            ? "The free lab is one run per person — and it's been used several times from your network already. Try again later, or unlock a paid lab for instant access. Monthly members skip these limits."
+            : limitReason === "USER_DAILY_LIMIT"
+            ? "To keep labs fast and fair for everyone, each account can launch up to 5 labs a day. Your next launch frees up within 24 hours of your earliest one today."
+            : limitReason === "USER_MONTHLY_LIMIT"
+            ? "To keep labs fast and fair for everyone, each account can launch up to 100 labs a month. Your allowance frees up as launches from the last 30 days age out."
             : (() => {
                 const retry = fmtRetry(limitRetryAt);
                 const base = lab?.free

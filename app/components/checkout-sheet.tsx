@@ -192,7 +192,7 @@ export function CheckoutSheet({
         </h2>
         <p className="mt-1 text-base text-ink-soft">
           {plan === "monthly"
-            ? "Unlimited launches while subscribed."
+            ? "Launch any lab while subscribed — fair use: up to 5 launches/day."
             : labSlug
               ? rulesSummary(getLab(labSlug)?.level ?? "Beginner", getLab(labSlug)?.free ?? false)
               : "One-time access."}

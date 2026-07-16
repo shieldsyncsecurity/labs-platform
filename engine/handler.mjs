@@ -122,6 +122,9 @@ import {
   findExpiredSessions,
   rulesFor,
   launchCount,
+  userLaunchCounts,
+  USER_DAILY_MAX_LAUNCHES,
+  USER_MONTHLY_MAX_LAUNCHES,
   nextLaunchAt,
   freeCapacity,
   recordRating,
@@ -380,6 +383,28 @@ export async function handler(event) {
         }
         console.log(`[launch] ALREADY_ACTIVE ${uid} wants ${labSlug}, holds ${lock.labSlug}`);
         return resp(409, { error: "ALREADY_ACTIVE", labSlug: lock.labSlug });
+      }
+
+      // Global per-user launch caps (owner 2026-07-16): 5/day + 100/30-days across
+      // ALL labs — the abuse backstop for the otherwise-unbounded monthly
+      // subscription. Free (≤4/day possible) and pay-per-lab (3 per lab / 7 days)
+      // caps bind first for everyone else, so this effectively governs subscribers.
+      {
+        const uc = await userLaunchCounts(uid);
+        if (uc.day >= USER_DAILY_MAX_LAUNCHES || uc.month >= USER_MONTHLY_MAX_LAUNCHES) {
+          await releaseUserLock(uid);
+          const daily = uc.day >= USER_DAILY_MAX_LAUNCHES;
+          metric({ Launch: 1 }, { Outcome: daily ? "userdaily" : "usermonthly" });
+          console.log(
+            `[launch] ${daily ? "USER_DAILY_LIMIT" : "USER_MONTHLY_LIMIT"} ${uid}: day ${uc.day}/${USER_DAILY_MAX_LAUNCHES}, month ${uc.month}/${USER_MONTHLY_MAX_LAUNCHES}`,
+          );
+          return resp(429, {
+            error: daily ? "USER_DAILY_LIMIT" : "USER_MONTHLY_LIMIT",
+            maxLaunches: daily ? USER_DAILY_MAX_LAUNCHES : USER_MONTHLY_MAX_LAUNCHES,
+            windowHours: daily ? 24 : 720,
+            used: daily ? uc.day : uc.month,
+          });
+        }
       }
 
       // Per-level launch limit — FREE labs only. The free lab is a lead magnet
