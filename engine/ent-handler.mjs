@@ -175,6 +175,16 @@ const ses = {
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
+      // 429 = Resend rate limit (~per-second) OR the free-plan daily cap
+      // (100/day). Log a DISTINCT, stable marker before throwing so a CloudWatch
+      // metric-filter alarm can catch quota-blocked delivery -- otherwise a
+      // candidate's OTP/invite (on the critical path) is silently dropped as a
+      // generic send failure. Still throws: callers log + swallow (never block).
+      if (res.status === 429) {
+        console.error(
+          `[ent][EMAIL_QUOTA] Resend 429 rate/quota limit -- email dropped; retry-after=${res.headers.get("retry-after") ?? "?"}`
+        );
+      }
       throw new Error(`Resend ${res.status}: ${detail.slice(0, 300)}`);
     }
     return res.json().catch(() => ({}));
