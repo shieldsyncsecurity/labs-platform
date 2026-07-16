@@ -23,9 +23,11 @@
     "ENT_ENGINE_URL": "https://bdkdcbhzme.execute-api.us-east-1.amazonaws.com",
     // Public origin of THIS app.
     "APP_URL": "https://enterprise.shieldsyncsecurity.com",
-    // Enables the temporary employer dev-login (paste-an-orgId). Turn OFF (remove)
-    // once Cognito sign-in is verified live. orgIds are 128-bit unguessable.
-    "PORTAL_DEV_LOGIN": "1",
+    // NOTE: PORTAL_DEV_LOGIN is intentionally ABSENT in production. The passwordless
+    // dev-login route (/api/portal/dev-login) is doubly-gated: it 404s unless
+    // PORTAL_DEV_LOGIN is set AND Cognito is disabled. Leaving the var out means the
+    // route stays dead even if COGNITO_CLIENT_SECRET is ever dropped on a redeploy.
+    // Set it only in local .dev.vars for build-out.
     // Amazon Cognito enterprise user pool (Hosted-UI Authorization-Code flow).
     // Non-secret identifiers only; COGNITO_CLIENT_SECRET is a Worker SECRET.
     "COGNITO_REGION": "us-east-1",

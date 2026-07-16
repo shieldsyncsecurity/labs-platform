@@ -59,17 +59,18 @@ export async function GET(req: Request) {
   let email = "";
   let sub: string | undefined;
   let orgId = "";
-  // Admin escalation must not trust an UNVERIFIED email claim. We reject only an
-  // explicit email_verified === false (so an owner whose IdP leaves the claim
-  // unmapped/undefined is not locked out), which closes the "confirmed account
-  // carrying an admin email but with email_verified=false" path.
+  // Admin escalation requires an EXPLICITLY verified email. We require
+  // email_verified === true (not merely "not false"), so a future federated IdP
+  // that leaves the claim undefined can never satisfy the staff gate with an
+  // attacker-asserted email. The native enterprise pool always emits
+  // email_verified=true, so provisioned staff are never locked out.
   let emailVerifiedOk = false;
   try {
     const payload = await verifyIdToken(idToken);
     email = typeof payload.email === "string" ? payload.email.toLowerCase() : "";
     sub = typeof payload.sub === "string" ? payload.sub : undefined;
     const ev = payload["email_verified"];
-    emailVerifiedOk = ev !== false && ev !== "false";
+    emailVerifiedOk = ev === true || ev === "true";
     orgId =
       typeof payload["custom:orgId"] === "string"
         ? (payload["custom:orgId"] as string).trim()
