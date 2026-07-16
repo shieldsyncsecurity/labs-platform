@@ -16,6 +16,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { ShieldMark } from "@/components/brand";
 
 type Step =
   | "invite" | "consent" | "readiness" | "otp" | "prebrief"
@@ -80,15 +82,18 @@ export default function CandidateFlow() {
       </div>
 
       <div className="mx-auto max-w-5xl px-4 py-6 pb-24">
-        {step === "invite" && <Invite go={go} />}
-        {step === "consent" && <Consent go={go} />}
-        {step === "readiness" && <Readiness go={go} />}
-        {step === "otp" && <Otp go={go} />}
-        {step === "prebrief" && <PreBrief go={go} />}
-        {step === "lobby" && <Lobby go={go} />}
-        {step === "room" && <Room go={go} />}
-        {step === "reflection" && <Reflection go={go} />}
-        {step === "done" && <Done go={go} />}
+        {/* keyed on step: one-time entrance per screen (reduced-motion safe) */}
+        <div key={step} className="cf-step">
+          {step === "invite" && <Invite go={go} />}
+          {step === "consent" && <Consent go={go} />}
+          {step === "readiness" && <Readiness go={go} />}
+          {step === "otp" && <Otp go={go} />}
+          {step === "prebrief" && <PreBrief go={go} />}
+          {step === "lobby" && <Lobby go={go} />}
+          {step === "room" && <Room go={go} />}
+          {step === "reflection" && <Reflection go={go} />}
+          {step === "done" && <Done go={go} />}
+        </div>
       </div>
     </div>
   );
@@ -96,20 +101,117 @@ export default function CandidateFlow() {
 
 /* ---------------------------------------------------------------- shells */
 
-function Device({ title, children }: { title: string; children: React.ReactNode }) {
+// The pre-assessment setup journey a candidate walks, in order. Drives the
+// slim progress strip in the Device header; the assessment phase itself
+// (room/reflection/done) deliberately shows no strip — the timer is the only
+// progress that matters there.
+const SETUP_TRACK: Step[] = ["invite", "consent", "readiness", "otp", "prebrief", "lobby"];
+
+function Device({ title, step, children }: { title: string; step?: Step; children: React.ReactNode }) {
+  const at = step ? SETUP_TRACK.indexOf(step) : -1;
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-canvas shadow-[0_20px_50px_-28px_rgba(15,23,42,0.4)]">
-      <div className="flex items-center justify-between border-b border-line bg-surface px-5 py-3">
-        <span className="text-[15px] font-extrabold tracking-tight text-ink">
-          Shield<span className="text-brand">Sync</span>
-          <span className="ml-2 rounded-full border border-brand/40 px-1.5 py-0.5 align-[2px] text-[9px] font-bold uppercase tracking-[0.16em] text-brand">
-            Enterprise
+      <div className="border-b border-line bg-surface">
+        <div className="flex items-center justify-between gap-3 px-5 py-3">
+          <span className="inline-flex items-center gap-2">
+            <ShieldMark size={20} />
+            <span className="text-[15px] font-extrabold leading-none tracking-tight text-ink">
+              Shield<span className="text-brand">Sync</span>
+            </span>
           </span>
-        </span>
-        <span className="text-xs text-muted">{title}</span>
+          <span className="flex items-center gap-3 text-xs text-muted">
+            {at >= 0 && (
+              <span aria-hidden="true" className="hidden font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-brand-strong sm:inline">
+                Step {at + 1} of {SETUP_TRACK.length}
+              </span>
+            )}
+            <span>{title}</span>
+          </span>
+        </div>
+        {at >= 0 && (
+          <div
+            className="flex gap-1 px-5 pb-2.5"
+            role="progressbar"
+            aria-valuemin={1}
+            aria-valuemax={SETUP_TRACK.length}
+            aria-valuenow={at + 1}
+            aria-valuetext={`Step ${at + 1} of ${SETUP_TRACK.length}`}
+            aria-label={`Setup: step ${at + 1} of ${SETUP_TRACK.length}`}
+          >
+            {SETUP_TRACK.map((s, i) => (
+              <span key={s} className={`h-1 flex-1 rounded-full transition-colors ${i <= at ? "bg-brand" : "bg-line"}`} />
+            ))}
+          </div>
+        )}
       </div>
       <div className="px-6 py-7 sm:px-8">{children}</div>
     </div>
+  );
+}
+
+// Accessible confirm dialog shared by the two irreversible moments (start /
+// submit). Rendered through a portal to document.body so no transformed
+// ancestor can ever capture its position:fixed overlay (the cf-step entrance
+// animation made the step wrapper a containing block — review finding).
+// Focus contract per the WAI-ARIA modal pattern: initial focus lands on the
+// SAFE action (cancel), Tab/Shift+Tab cycle inside the dialog, Escape and
+// backdrop click close, and focus returns to the opener on unmount.
+function Confirm({
+  title,
+  body,
+  actionLabel,
+  cancelLabel,
+  onAction,
+  onClose,
+}: {
+  title: string;
+  body: React.ReactNode;
+  actionLabel: string;
+  cancelLabel: string;
+  onAction: () => void;
+  onClose: () => void;
+}) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    cancelRef.current?.focus();
+    const h = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "Tab") {
+        const f = boxRef.current?.querySelectorAll<HTMLElement>("button");
+        if (!f?.length) return;
+        const first = f[0];
+        const last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => {
+      window.removeEventListener("keydown", h);
+      opener?.focus?.();
+    };
+  }, [onClose]);
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/55 p-5" onClick={onClose}>
+      <div
+        ref={boxRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-[17px] font-bold text-ink">{title}</h2>
+        <div className="mt-2 text-sm leading-relaxed text-muted">{body}</div>
+        <div className="mt-4 flex gap-2.5">
+          <button className={BTN} onClick={onAction}>{actionLabel}</button>
+          <button ref={cancelRef} className={BTN_GHOST} onClick={onClose}>{cancelLabel}</button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -122,7 +224,7 @@ const Eyebrow = ({ children }: { children: React.ReactNode }) => (
 function Invite({ go }: { go: (s: Step) => void }) {
   return (
     <>
-      <Device title="📧 Inbox">
+      <Device title="📧 Inbox" step="invite">
         <p className="text-xs text-muted">
           From <b className="font-mono text-ink">no-reply@shieldsyncsecurity.com</b>
         </p>
@@ -169,7 +271,7 @@ function Consent({ go }: { go: (s: Step) => void }) {
   const all = ticks.every(Boolean);
   return (
     <>
-      <Device title="Acme Corp">
+      <Device title="Acme Corp" step="consent">
         <Eyebrow>Cloud Security Engineer — hands-on assessment</Eyebrow>
         <h1 className="mt-1.5 text-xl font-bold text-ink">Before you begin</h1>
         <p className="mt-3 max-w-[60ch] text-[15px] leading-relaxed text-ink-soft">
@@ -183,7 +285,7 @@ function Consent({ go }: { go: (s: Step) => void }) {
                 type="checkbox"
                 checked={ticks[i]}
                 onChange={(e) => setTicks((t) => t.map((v, n) => (n === i ? e.target.checked : v)))}
-                className="mt-0.5 h-4 w-4 flex-none accent-[#d97706]"
+                className="mt-0.5 h-4 w-4 flex-none accent-brand"
               />
               <span>{c}</span>
             </label>
@@ -338,12 +440,12 @@ function Readiness({ go }: { go: (s: Step) => void }) {
 
   return (
     <>
-      <Device title="Readiness check">
+      <Device title="Readiness check" step="readiness">
         <Eyebrow>60-second setup test</Eyebrow>
         <h1 className="mt-1.5 text-xl font-bold text-ink">Let&apos;s check your camera, mic &amp; connection</h1>
         <p className="mt-3 max-w-[60ch] text-[15px] leading-relaxed text-ink-soft">
           Just like a proctored exam — we test everything now so nothing surprises you once the clock
-          starts. Run it any time before your slot.
+          starts. You can run this as many times as you like before you begin.
         </p>
         <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-[1.1fr_1fr]">
           <div>
@@ -383,10 +485,13 @@ function Readiness({ go }: { go: (s: Step) => void }) {
             {rows.map(([k, label]) => {
               const c = checks[k];
               const color = c.state === "pass" ? "text-green-600" : c.state === "fail" ? "text-red-600" : c.state === "warn" ? "text-amber-700" : "text-muted";
+              const dot =
+                c.state === "pass" ? "bg-green-500" : c.state === "fail" ? "bg-red-500" : c.state === "warn" ? "bg-amber-500" : "animate-pulse bg-line-strong";
               return (
                 <div key={k} className="flex items-center justify-between gap-3 border-b border-line py-2.5 text-[13.5px] last:border-b-0">
                   <span className="text-ink-soft">{label}</span>
-                  <span className={`text-[12px] font-bold ${color}`}>
+                  <span className={`flex items-center gap-1.5 text-right text-[12px] font-bold ${color}`}>
+                    <span aria-hidden="true" className={`h-1.5 w-1.5 flex-none rounded-full ${dot}`} />
                     {c.state === "run" ? "checking…" : c.note}
                   </span>
                 </div>
@@ -415,24 +520,44 @@ function Otp({ go }: { go: (s: Step) => void }) {
   const [vals, setVals] = useState(["", "", "", "", "", ""]);
   return (
     <>
-      <Device title="Verify it's you">
+      <Device title="Verify it's you" step="otp">
         <div className="text-center">
           <Eyebrow>Check your email</Eyebrow>
           <h1 className="mt-1.5 text-xl font-bold text-ink">Enter your 6-digit code</h1>
           <p className="mx-auto mt-3 max-w-[46ch] text-[15px] leading-relaxed text-ink-soft">
             We sent a code to <b>priya@examplemail.com</b>. It expires in 10 minutes.
           </p>
-          <div className="mt-4 flex justify-center gap-2">
+          <div
+            className="mt-4 flex justify-center gap-2"
+            onPaste={(e) => {
+              // Paste the whole code into any box — every real user tries this.
+              e.preventDefault();
+              const ds = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6).split("");
+              if (!ds.length) return;
+              setVals((a) => a.map((x, n) => ds[n] ?? x));
+              // Move focus past the last filled digit so typing keeps working.
+              const boxes = e.currentTarget.querySelectorAll("input");
+              (boxes[Math.min(ds.length, 5)] as HTMLInputElement | undefined)?.focus();
+            }}
+          >
             {vals.map((v, i) => (
               <input
                 key={i}
                 value={v}
                 inputMode="numeric"
+                autoComplete="one-time-code"
                 maxLength={1}
+                aria-label={`Code digit ${i + 1} of 6`}
+                autoFocus={i === 0}
                 onChange={(e) => {
                   const d = e.target.value.replace(/\D/g, "").slice(0, 1);
                   setVals((a) => a.map((x, n) => (n === i ? d : x)));
                   if (d && e.target.nextElementSibling) (e.target.nextElementSibling as HTMLInputElement).focus();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Backspace" && !vals[i] && e.currentTarget.previousElementSibling) {
+                    (e.currentTarget.previousElementSibling as HTMLInputElement).focus();
+                  }
                 }}
                 className="h-13 w-11 rounded-lg border border-line-strong bg-canvas py-3 text-center text-xl font-bold text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
               />
@@ -459,7 +584,7 @@ function PreBrief({ go }: { go: (s: Step) => void }) {
   ];
   return (
     <>
-      <Device title="What to expect">
+      <Device title="What to expect" step="prebrief">
         <Eyebrow>Read this once — 1 minute</Eyebrow>
         <h1 className="mt-1.5 text-xl font-bold text-ink">How the assessment works</h1>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -512,7 +637,7 @@ function Lobby({ go }: { go: (s: Step) => void }) {
     return () => clearInterval(t);
   }, []);
   return (
-    <Device title="Preparing…">
+    <Device title="Preparing…" step="lobby">
       <div className="text-center">
         <Eyebrow>Almost there</Eyebrow>
         <h1 className="mt-1.5 text-xl font-bold text-ink">{ready ? "Your environment is ready" : "Building your private cloud environment"}</h1>
@@ -531,18 +656,14 @@ function Lobby({ go }: { go: (s: Step) => void }) {
         )}
       </div>
       {confirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/55 p-5" onClick={() => setConfirm(false)}>
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-[17px] font-bold text-ink">Ready to start?</h2>
-            <p className="mt-2 text-sm text-muted">
-              The 60-minute timer begins immediately and can&apos;t be paused. Your Azure Portal opens in a new tab and the floating companion appears.
-            </p>
-            <div className="mt-4 flex gap-2.5">
-              <button className={BTN} onClick={() => go("room")}>Yes, start now</button>
-              <button className={BTN_GHOST} onClick={() => setConfirm(false)}>Wait</button>
-            </div>
-          </div>
-        </div>
+        <Confirm
+          title="Ready to start?"
+          body="The 60-minute timer begins immediately and can't be paused. Your Azure Portal opens in a new tab and the floating companion appears."
+          actionLabel="Yes, start now"
+          cancelLabel="Wait"
+          onAction={() => go("room")}
+          onClose={() => setConfirm(false)}
+        />
       )}
     </Device>
   );
@@ -603,15 +724,18 @@ function Room({ go }: { go: (s: Step) => void }) {
         </div>
         <ol className="mt-2.5 space-y-1.5">
           {OBJECTIVES.map((o, i) => (
-            <li
-              key={i}
-              onClick={() => setDone((d) => d.map((v, n) => (n === i ? !v : v)))}
-              className={`flex cursor-pointer items-baseline gap-2 text-[12px] ${done[i] ? "text-muted line-through" : "text-ink-soft"}`}
-            >
-              <span className={`mt-0.5 flex h-3.5 w-3.5 flex-none items-center justify-center rounded border text-[9px] ${done[i] ? "border-green-600 bg-green-600 text-white" : "border-line-strong text-muted"}`}>
-                {done[i] ? "✓" : i + 1}
-              </span>
-              {o}
+            <li key={i}>
+              <button
+                type="button"
+                aria-pressed={done[i]}
+                onClick={() => setDone((d) => d.map((v, n) => (n === i ? !v : v)))}
+                className={`flex w-full cursor-pointer items-baseline gap-2 rounded text-left text-[12px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand ${done[i] ? "text-muted line-through" : "text-ink-soft"}`}
+              >
+                <span className={`mt-0.5 flex h-3.5 w-3.5 flex-none items-center justify-center rounded border text-[9px] ${done[i] ? "border-green-600 bg-green-600 text-white" : "border-line-strong text-muted"}`}>
+                  {done[i] ? "✓" : i + 1}
+                </span>
+                {o}
+              </button>
             </li>
           ))}
         </ol>
@@ -686,16 +810,14 @@ function Room({ go }: { go: (s: Step) => void }) {
         </div>
       </div>
       {confirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/55 p-5" onClick={() => setConfirm(false)}>
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-[17px] font-bold text-ink">Submit your assessment?</h2>
-            <p className="mt-2 text-sm text-muted">You have <b>{mm}:{ss}</b> left. You can keep working, or submit now — your work is graded either way.</p>
-            <div className="mt-4 flex gap-2.5">
-              <button className={BTN} onClick={() => go("reflection")}>Submit now</button>
-              <button className={BTN_GHOST} onClick={() => setConfirm(false)}>Keep working</button>
-            </div>
-          </div>
-        </div>
+        <Confirm
+          title="Submit your assessment?"
+          body={<>You have <b>{mm}:{ss}</b> left. You can keep working, or submit now — your work is graded either way.</>}
+          actionLabel="Submit now"
+          cancelLabel="Keep working"
+          onAction={() => go("reflection")}
+          onClose={() => setConfirm(false)}
+        />
       )}
     </>
   );

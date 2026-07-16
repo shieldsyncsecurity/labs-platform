@@ -847,6 +847,39 @@ a {
   }
 }
 
+/* ==================================================================
+ * CANDIDATE FLOW - one-time screen entrance (class prefix: cf-)
+ * A single subtle fade-up when the candidate moves between steps.
+ * ASCII-only, longhand (Turbopack / LightningCSS gotcha, top of file).
+ * ================================================================== */
+
+/* fill-mode MUST be backwards, not both: a forwards fill would retain the
+ * 100% keyframe's transform forever, making this wrapper the containing
+ * block for position:fixed descendants (broke the Confirm dialogs). */
+.cf-step {
+  animation-name: cf-step-in;
+  animation-duration: 0.35s;
+  animation-timing-function: ease-out;
+  animation-fill-mode: backwards;
+}
+
+@keyframes cf-step-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-step {
+    animation: none;
+  }
+}
+
 /* Product tour: reduced motion - static stills BY DEFAULT, but only while
  * the tour is not playing. React puts .pt-playing on the tour root when the
  * user presses Play; that explicit click is opt-in, so the animations must
