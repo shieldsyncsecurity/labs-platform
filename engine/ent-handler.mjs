@@ -27,6 +27,7 @@ import {
   listInvites,
   setInviteStatus,
   claimStartLease,
+  releaseStartClaim,
   consentInvite,
   refundInvite,
   revokeInvite,
@@ -1863,7 +1864,12 @@ export async function handler(event) {
       try {
         lease = await leaseEnt(entUserId, labSlug, ENT_TIMEBOX_MIN + ENT_GRACE_MIN);
       } catch (e) {
-        if (e.message === "NO_CAPACITY") return resp(503, { error: "NO_CAPACITY", retry: true });
+        if (e.message === "NO_CAPACITY") {
+          // Nothing leased — free the claim so the candidate's next poll retries
+          // the lease immediately instead of eating 409s for START_CLAIM_TTL.
+          await releaseStartClaim(inviteToken);
+          return resp(503, { error: "NO_CAPACITY", retry: true });
+        }
         throw e;
       }
 

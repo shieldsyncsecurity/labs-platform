@@ -890,6 +890,27 @@ export async function claimStartLease(inviteToken) {
   }
 }
 
+/**
+ * releaseStartClaim(): free a lease claim taken by claimStartLease when the start
+ * attempt did NOT actually lease an account (e.g. leaseEnt threw NO_CAPACITY on a
+ * cold/empty pool). Without this, the claim would block the candidate's own retries
+ * for the full START_CLAIM_TTL (~2 min) with 409s instead of retrying the lease.
+ * Guarded on no session so a real in-flight lease is never cleared. Best-effort.
+ */
+export async function releaseStartClaim(inviteToken) {
+  const db = await ddb();
+  await db
+    .send(
+      new UpdateItemCommand({
+        TableName: INVITES_TABLE,
+        Key: { inviteToken: S(inviteToken) },
+        UpdateExpression: "REMOVE leaseClaimAt",
+        ConditionExpression: "attribute_not_exists(sessionId)",
+      })
+    )
+    .catch(() => {});
+}
+
 // ── OTP (Fix H — brute-force resistant) ─────────────────────────────────────
 
 const OTP_TTL_SECONDS = 10 * 60;
