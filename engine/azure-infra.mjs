@@ -257,7 +257,11 @@ async function loadBicepAsArm(labSlug) {
   const { dirname, join } = await import("node:path");
   const { fileURLToPath } = await import("node:url");
   const here = dirname(fileURLToPath(import.meta.url));
-  const labDir = join(here, "labs", labSlug);
+  // Prod (Lambda) bundles the labs/ tree next to this module (here/labs); locally
+  // it lives at the repo root (here/../labs). Try both so the same code path works
+  // in the deployed function AND in a local `node try-azure-lab.mjs` run.
+  const candidates = [join(here, "labs", labSlug), join(here, "..", "labs", labSlug)];
+  const labDir = candidates.find((d) => existsSync(join(d, "main.json"))) ?? candidates[0];
   const jsonPath = join(labDir, "main.json");
   const bicepPath = join(labDir, "main.bicep");
   if (existsSync(jsonPath)) {
