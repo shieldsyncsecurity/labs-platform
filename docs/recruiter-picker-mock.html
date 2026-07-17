@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- ShieldSync Enterprise recruiter-picker mock (v2 design reference). Open in a browser. -->
+</head>
+<body>
+<title>ShieldSync — Send an assessment</title>
+<style>
+  :root {
+    --brand:#d97706; --brand-strong:#b45309; --brand-soft:#fdf1e0;
+    --ink:#0f172a; --ink-soft:#33415a; --muted:#647089;
+    --line:#e7eaf1; --line-strong:#d3d9e4;
+    --surface:#ffffff; --canvas:#f5f6f9; --raise:#ffffff;
+    --good:#16a34a; --good-soft:#e9f8ef; --warn:#b45309; --warn-soft:#fdf1e0;
+    --crit:#dc2626; --crit-soft:#fdecec;
+    --focus:#2563eb;
+    --shadow:0 1px 2px rgba(15,23,42,.04), 0 8px 24px -16px rgba(15,23,42,.25);
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Inter,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --brand:#f59e0b; --brand-strong:#d97706; --brand-soft:rgba(245,158,11,.13);
+      --ink:#e9eef7; --ink-soft:#c2cbdb; --muted:#8b97ad;
+      --line:#243044; --line-strong:#37455f;
+      --surface:#101828; --canvas:#0a0f1c; --raise:#141d30;
+      --good:#4ade80; --good-soft:rgba(74,222,128,.12); --warn:#f59e0b; --warn-soft:rgba(245,158,11,.12);
+      --crit:#f87171; --crit-soft:rgba(248,113,113,.13);
+      --focus:#60a5fa;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px -18px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="light"]{
+    --brand:#d97706; --brand-strong:#b45309; --brand-soft:#fdf1e0;
+    --ink:#0f172a; --ink-soft:#33415a; --muted:#647089;
+    --line:#e7eaf1; --line-strong:#d3d9e4; --surface:#ffffff; --canvas:#f5f6f9; --raise:#ffffff;
+    --good:#16a34a; --good-soft:#e9f8ef; --warn:#b45309; --warn-soft:#fdf1e0; --crit:#dc2626; --crit-soft:#fdecec; --focus:#2563eb;
+    --shadow:0 1px 2px rgba(15,23,42,.04), 0 8px 24px -16px rgba(15,23,42,.25);
+  }
+  :root[data-theme="dark"]{
+    --brand:#f59e0b; --brand-strong:#d97706; --brand-soft:rgba(245,158,11,.13);
+    --ink:#e9eef7; --ink-soft:#c2cbdb; --muted:#8b97ad;
+    --line:#243044; --line-strong:#37455f; --surface:#101828; --canvas:#0a0f1c; --raise:#141d30;
+    --good:#4ade80; --good-soft:rgba(74,222,128,.12); --warn:#f59e0b; --warn-soft:rgba(245,158,11,.12); --crit:#f87171; --crit-soft:rgba(248,113,113,.13); --focus:#60a5fa;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px -18px rgba(0,0,0,.7);
+  }
+
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--canvas);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 20px 64px;}
+  a{color:inherit;}
+  button{font-family:inherit;}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+
+  /* top bar */
+  header.bar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);}
+  .bar-in{max-width:1000px;margin:0 auto;display:flex;align-items:center;gap:14px;padding:12px 20px;}
+  .logo{display:inline-flex;align-items:center;gap:9px;font-weight:800;letter-spacing:-.01em;font-size:15px;}
+  .logo .mk{width:22px;height:22px;border-radius:6px;background:linear-gradient(150deg,var(--brand),var(--brand-strong));display:grid;place-items:center;color:#fff;font-weight:800;font-size:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.35);}
+  .logo b{color:var(--brand);}
+  .tag{font-size:9.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--brand);border:1px solid color-mix(in srgb,var(--brand) 45%,transparent);border-radius:999px;padding:2px 7px;}
+  .bar-sp{flex:1;}
+  .who{font-size:12px;color:var(--muted);}
+  .theme{margin-left:4px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink-soft);border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:14px;}
+
+  /* stepper */
+  .steps{display:flex;flex-wrap:wrap;gap:6px;padding:16px 0 6px;}
+  .step{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:6px 11px;border-radius:999px;border:1px solid transparent;}
+  .step .n{width:19px;height:19px;border-radius:999px;border:1.5px solid var(--line-strong);display:grid;place-items:center;font-size:11px;font-weight:700;color:var(--muted);flex:none;}
+  .step.on{color:var(--ink);background:var(--brand-soft);border-color:color-mix(in srgb,var(--brand) 30%,transparent);}
+  .step.on .n{background:var(--brand);border-color:var(--brand);color:#fff;}
+  .step.done .n{background:var(--good);border-color:var(--good);color:#fff;}
+  .step.done{color:var(--ink-soft);cursor:pointer;}
+
+  h1{font-size:22px;line-height:1.2;font-weight:800;letter-spacing:-.015em;margin:18px 0 4px;text-wrap:balance;}
+  .sub{color:var(--muted);margin:0 0 18px;max-width:60ch;}
+  .eyebrow{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--brand-strong);}
+
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);}
+  .screen{display:none;animation:fade .28s ease both;}
+  .screen.active{display:block;}
+  @keyframes fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+  @media (prefers-reduced-motion:reduce){.screen{animation:none;}}
+
+  label.fld{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin:0 0 6px;}
+  input[type=text],input[type=email]{width:100%;border:1px solid var(--line-strong);background:var(--canvas);color:var(--ink);border-radius:10px;padding:11px 13px;font-size:14px;outline:none;}
+  input:focus{border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent);}
+
+  /* level rows */
+  .rows{display:flex;flex-direction:column;gap:8px;margin-top:6px;}
+  .row{display:flex;align-items:center;gap:14px;text-align:left;width:100%;cursor:pointer;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 15px;transition:border-color .12s,background .12s;}
+  .row:hover{border-color:var(--line-strong);}
+  .row.sel{border-color:var(--brand);background:var(--brand-soft);box-shadow:0 0 0 1px var(--brand) inset;}
+  .row .lv{font-family:var(--mono);font-size:11px;font-weight:700;color:#fff;background:var(--ink-soft);border-radius:6px;padding:3px 7px;flex:none;}
+  .row.sel .lv{background:var(--brand);}
+  .row .role{font-weight:700;font-size:14.5px;}
+  .row .desc{color:var(--muted);font-size:12.5px;}
+  .row .tick{margin-left:auto;width:18px;height:18px;border-radius:999px;border:1.5px solid var(--line-strong);flex:none;display:grid;place-items:center;color:#fff;font-size:11px;}
+  .row.sel .tick{background:var(--brand);border-color:var(--brand);}
+
+  .helper{margin-top:12px;border:1px dashed var(--line-strong);border-radius:12px;padding:0;overflow:hidden;}
+  .helper > button{width:100%;text-align:left;background:none;border:0;color:var(--brand-strong);font-weight:600;font-size:13px;padding:12px 15px;cursor:pointer;display:flex;gap:8px;align-items:center;}
+  .helper .body{display:none;padding:2px 15px 16px;border-top:1px solid var(--line);}
+  .helper.open .body{display:block;}
+  .qopts{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 4px;}
+  .chip{border:1px solid var(--line-strong);background:var(--surface);color:var(--ink-soft);border-radius:999px;padding:7px 13px;font-size:12.5px;cursor:pointer;}
+  .chip.sel{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-strong);font-weight:600;}
+  .qlabel{font-size:12.5px;color:var(--ink-soft);font-weight:600;margin-top:10px;}
+  .rec{margin-top:12px;font-size:13px;background:var(--good-soft);border:1px solid color-mix(in srgb,var(--good) 30%,transparent);color:var(--ink);border-radius:10px;padding:10px 13px;display:none;}
+  .rec.show{display:block;}
+  .rec b{color:var(--good);}
+
+  /* coverage layout */
+  .cov{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start;}
+  @media (max-width:820px){.cov{grid-template-columns:1fr;}}
+  .tracks{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  @media (max-width:560px){.tracks{grid-template-columns:1fr;}}
+  .trk{position:relative;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:13px 14px;cursor:pointer;transition:border-color .12s,background .12s;}
+  .trk:hover{border-color:var(--line-strong);}
+  .trk.sel{border-color:var(--brand);background:var(--brand-soft);}
+  .trk .tt{font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px;}
+  .trk .box{width:17px;height:17px;border-radius:5px;border:1.5px solid var(--line-strong);display:grid;place-items:center;color:#fff;font-size:11px;flex:none;}
+  .trk.sel .box{background:var(--brand);border-color:var(--brand);}
+  .trk .gl{color:var(--muted);font-size:12px;margin-top:3px;}
+  .trk .prim{margin-top:10px;display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);opacity:0;pointer-events:none;transition:opacity .12s;}
+  .trk.sel .prim{opacity:1;pointer-events:auto;}
+  .primbtn{border:1px solid var(--line-strong);background:var(--surface);color:var(--ink-soft);border-radius:999px;padding:3px 9px;font-size:11px;cursor:pointer;font-weight:600;}
+  .primbtn.on{background:var(--brand-strong);border-color:var(--brand-strong);color:#fff;}
+  .pbadge{position:absolute;top:-9px;right:12px;font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;background:var(--brand-strong);color:#fff;border-radius:999px;padding:2px 8px;display:none;}
+  .trk.primary .pbadge{display:block;}
+
+  .side{position:sticky;top:74px;}
+  .compose{background:var(--raise);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;}
+  .compose h3{margin:0;padding:13px 16px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;}
+  .compose h3 .dur{color:var(--brand-strong);font-family:var(--mono);font-weight:700;letter-spacing:0;text-transform:none;font-size:13px;}
+  .mods{list-style:none;margin:0;padding:6px;}
+  .mod{display:flex;gap:10px;padding:9px 10px;border-radius:9px;}
+  .mod + .mod{border-top:1px solid var(--line);}
+  .mod .mt{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.04em;padding:2px 6px;border-radius:5px;height:fit-content;white-space:nowrap;}
+  .mt.aws{background:#fff2df;color:#b45309;} .mt.azure{background:#e2edfb;color:#1e5fae;}
+  .mt.soc{background:#e7f6ee;color:#12855a;} .mt.ai{background:#f0e9fb;color:#6d3fc0;} .mt.gen{background:var(--line);color:var(--ink-soft);}
+  :root[data-theme="dark"] .mt.aws{background:rgba(245,158,11,.18);color:#f7b155;} :root[data-theme="dark"] .mt.azure{background:rgba(59,130,246,.2);color:#7db2f5;}
+  :root[data-theme="dark"] .mt.soc{background:rgba(34,197,94,.18);color:#5ed699;} :root[data-theme="dark"] .mt.ai{background:rgba(139,92,246,.22);color:#b99cf3;}
+  @media (prefers-color-scheme:dark){.mt.aws{background:rgba(245,158,11,.18);color:#f7b155;}.mt.azure{background:rgba(59,130,246,.2);color:#7db2f5;}.mt.soc{background:rgba(34,197,94,.18);color:#5ed699;}.mt.ai{background:rgba(139,92,246,.22);color:#b99cf3;}}
+  .mod .mn{font-size:12.5px;font-weight:600;line-height:1.35;}
+  .mod .md{font-size:11px;color:var(--muted);}
+  .mod .mm{margin-left:auto;font-size:11px;color:var(--muted);font-family:var(--mono);white-space:nowrap;}
+  .empty{padding:24px 16px;text-align:center;color:var(--muted);font-size:12.5px;}
+  .noterow{font-size:11.5px;color:var(--muted);padding:10px 16px;border-top:1px solid var(--line);background:var(--canvas);}
+
+  /* deterministic role-fit meter */
+  .fit{padding:12px 16px;border-bottom:1px solid var(--line);}
+  .fit .ft{display:flex;justify-content:space-between;align-items:baseline;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);}
+  .fit .fv{font-weight:700;letter-spacing:0;text-transform:none;font-size:12.5px;color:var(--ink);}
+  .fit .fbar{height:7px;border-radius:999px;background:var(--line);margin:7px 0 6px;overflow:hidden;}
+  .fit .fbar > i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--brand),var(--brand-strong));transition:width .4s cubic-bezier(.22,1,.36,1);}
+  .fit .fh{font-size:11.5px;color:var(--muted);line-height:1.4;}
+  @media (prefers-reduced-motion:reduce){.fit .fbar>i{transition:none;}}
+
+  /* results stat strip + shortlist */
+  .statstrip{display:flex;gap:12px;flex-wrap:wrap;margin:2px 0 16px;}
+  .stat{flex:1;min-width:200px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 15px;box-shadow:var(--shadow);display:flex;gap:12px;align-items:center;}
+  .stat .si{width:34px;height:34px;border-radius:9px;background:var(--brand-soft);display:grid;place-items:center;font-size:16px;flex:none;}
+  .stat .sv{font-size:18px;font-weight:800;letter-spacing:-.01em;font-family:var(--mono);}
+  .stat .sl{font-size:11.5px;color:var(--muted);}
+  .topchip{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#fff;background:var(--brand-strong);border-radius:999px;padding:2px 7px;margin-left:8px;vertical-align:2px;}
+  tr.cand-row.short td:first-child{box-shadow:inset 3px 0 0 var(--good);}
+
+  /* preview */
+  .plist{display:flex;flex-direction:column;gap:0;margin:6px 0 4px;}
+  .pit{display:flex;gap:13px;align-items:baseline;padding:13px 4px;border-bottom:1px solid var(--line);}
+  .pit:last-child{border-bottom:0;}
+  .pit .pn{width:22px;height:22px;border-radius:7px;background:var(--brand-soft);color:var(--brand-strong);display:grid;place-items:center;font-size:12px;font-weight:700;flex:none;font-family:var(--mono);}
+  .pit .pt{font-weight:650;}
+  .pit .pd{color:var(--muted);font-size:12.5px;}
+  .fixed{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;margin-top:6px;}
+  @media (max-width:560px){.fixed{grid-template-columns:1fr;}}
+  .fx{display:flex;gap:9px;font-size:12.5px;color:var(--ink-soft);align-items:flex-start;}
+  .fx .fi{color:var(--brand-strong);font-weight:800;}
+  .banner{margin-top:16px;background:var(--warn-soft);border:1px solid color-mix(in srgb,var(--brand) 30%,transparent);border-radius:11px;padding:12px 15px;font-size:12.5px;color:var(--ink-soft);display:flex;gap:10px;}
+  .banner b{color:var(--brand-strong);}
+
+  /* send */
+  .cand{display:flex;gap:10px;margin-bottom:8px;}
+  .cand input{flex:1;}
+  .cand .rm{border:1px solid var(--line-strong);background:var(--surface);color:var(--muted);border-radius:9px;width:42px;cursor:pointer;font-size:15px;flex:none;}
+  .addc{border:1px dashed var(--line-strong);background:none;color:var(--brand-strong);font-weight:600;font-size:13px;border-radius:10px;padding:9px;cursor:pointer;width:100%;}
+
+  /* results */
+  .roster{width:100%;border-collapse:collapse;font-size:13px;}
+  .roster th{text-align:left;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:0 12px 9px;border-bottom:1px solid var(--line);}
+  .roster th.num,.roster td.num{text-align:right;}
+  .roster td{padding:12px;border-bottom:1px solid var(--line);vertical-align:middle;}
+  .roster tr.cand-row{cursor:pointer;}
+  .roster tr.cand-row:hover td{background:var(--canvas);}
+  .cn{font-weight:650;}
+  .ce{font-size:11.5px;color:var(--muted);}
+  .score{font-family:var(--mono);font-weight:700;font-variant-numeric:tabular-nums;}
+  .bar{position:relative;height:6px;border-radius:999px;background:var(--line);overflow:hidden;min-width:52px;}
+  .bar > i{position:absolute;inset:0 auto 0 0;border-radius:999px;}
+  .cell{display:flex;flex-direction:column;gap:5px;align-items:flex-end;}
+  .cell .v{font-family:var(--mono);font-size:12px;font-weight:600;}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;}
+  .pill.done{background:var(--good-soft);color:var(--good);} .pill.prog{background:var(--warn-soft);color:var(--warn);}
+  .dot{width:6px;height:6px;border-radius:999px;background:currentColor;}
+  .detail{background:var(--canvas);}
+  .detail td{padding:0;}
+  .detail .inner{padding:14px 16px 18px;display:none;}
+  tr.detail.open .inner{display:block;}
+  .obj{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:12.5px;border-bottom:1px dashed var(--line);}
+  .obj:last-child{border-bottom:0;}
+  .oi{width:16px;height:16px;border-radius:5px;display:grid;place-items:center;color:#fff;font-size:10px;flex:none;}
+  .oi.ok{background:var(--good);} .oi.no{background:var(--crit);} .oi.part{background:var(--warn);}
+  .obj .om{margin-left:auto;font-size:11px;color:var(--muted);}
+
+  /* footer nav */
+  .nav{display:flex;gap:10px;align-items:center;margin-top:22px;}
+  .btn{border:0;border-radius:10px;padding:11px 20px;font-size:14px;font-weight:600;cursor:pointer;}
+  .btn.primary{background:var(--brand);color:#fff;box-shadow:0 1px 0 rgba(0,0,0,.04);}
+  .btn.primary:hover{background:var(--brand-strong);}
+  .btn.primary:disabled{opacity:.45;cursor:not-allowed;}
+  .btn.ghost{background:var(--surface);color:var(--ink-soft);border:1px solid var(--line-strong);}
+  .nav .sp{flex:1;}
+  .hint{font-size:12px;color:var(--muted);}
+  .pad{padding:22px 24px;}
+  :focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:6px;}
+  .preview-note{font-size:11px;color:var(--muted);text-align:center;margin-top:18px;}
+</style>
+
+<header class="bar">
+  <div class="bar-in">
+    <span class="logo"><span class="mk">S</span><span>Shield<b>Sync</b></span><span class="tag">Enterprise</span></span>
+    <span class="bar-sp"></span>
+    <span class="who">Acme Corp · Hiring</span>
+    <button class="theme" id="themeBtn" title="Toggle theme" aria-label="Toggle light or dark theme">◐</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="steps" id="steps" aria-label="Steps">
+    <div class="step" data-go="role"><span class="n">1</span>Role</div>
+    <div class="step" data-go="coverage"><span class="n">2</span>Coverage</div>
+    <div class="step" data-go="preview"><span class="n">3</span>Preview</div>
+    <div class="step" data-go="send"><span class="n">4</span>Send</div>
+    <div class="step" data-go="results"><span class="n">✓</span>Results</div>
+  </nav>
+
+  <!-- SCREEN 1: ROLE -->
+  <section class="screen" id="s-role">
+    <p class="eyebrow">Step 1 of 4</p>
+    <h1>Who are you hiring for?</h1>
+    <p class="sub">Name the role and pick its seniority. Seniority isn't a difficulty dial — each level tests a different <em>kind</em> of work, so this is the single most important choice.</p>
+    <div class="card pad">
+      <label class="fld" for="roleName">Role title</label>
+      <input type="text" id="roleName" placeholder="e.g. Cloud Security Engineer" value="Cloud &amp; AI Security Engineer" />
+      <label class="fld" style="margin-top:18px;">Seniority — what is this person hired to do?</label>
+      <div class="rows" id="levelRows"></div>
+
+      <div class="helper" id="helper">
+        <button id="helperToggle" aria-expanded="false">▸ Not sure which level? Answer two questions</button>
+        <div class="body">
+          <div class="qlabel">Years in security</div>
+          <div class="qopts" data-q="yrs">
+            <button class="chip" data-v="1">0–2</button>
+            <button class="chip" data-v="2">2–5</button>
+            <button class="chip" data-v="3">5–8</button>
+            <button class="chip" data-v="4">8+</button>
+          </div>
+          <div class="qlabel">Day-to-day, this role mostly…</div>
+          <div class="qopts" data-q="mode">
+            <button class="chip" data-v="exec">executes given tasks</button>
+            <button class="chip" data-v="own">owns incidents end-to-end</button>
+            <button class="chip" data-v="design">designs controls / architecture</button>
+            <button class="chip" data-v="prio">decides what the team fixes first</button>
+          </div>
+          <div class="rec" id="rec"></div>
+        </div>
+      </div>
+    </div>
+    <div class="nav">
+      <span class="sp"></span>
+      <span class="hint" id="roleHint"></span>
+      <button class="btn primary" id="toCoverage">Continue →</button>
+    </div>
+  </section>
+
+  <!-- SCREEN 2: COVERAGE -->
+  <section class="screen" id="s-coverage">
+    <p class="eyebrow">Step 2 of 4</p>
+    <h1>What does this role work on?</h1>
+    <p class="sub">Pick the security areas the role actually touches, and mark the one it lives in as <strong>primary</strong>. We assemble a standardized set of hands-on modules — one deep in the primary, focused checks in the rest.</p>
+    <div class="cov">
+      <div>
+        <div class="tracks" id="trackGrid"></div>
+        <p class="hint" style="margin-top:12px;">Cap: one primary + up to two supporting areas. Comprehensive means <em>the mix this role needs</em> — not everything.</p>
+      </div>
+      <div class="side">
+        <div class="compose">
+          <h3><span>Composed assessment</span><span class="dur" id="dur">—</span></h3>
+          <div class="fit" id="fit" style="display:none;">
+            <div class="ft"><span>Role fit</span><span class="fv" id="fitLabel"></span></div>
+            <div class="fbar"><i id="fitBar"></i></div>
+            <div class="fh" id="fitHint"></div>
+          </div>
+          <ul class="mods" id="modList"><li class="empty">Pick a primary area to build the assessment.</li></ul>
+          <div class="noterow" id="composeNote"></div>
+        </div>
+      </div>
+    </div>
+    <div class="nav">
+      <button class="btn ghost" data-back="role">← Back</button>
+      <span class="sp"></span>
+      <span class="hint" id="covHint"></span>
+      <button class="btn primary" id="toPreview">Preview →</button>
+    </div>
+  </section>
+
+  <!-- SCREEN 3: PREVIEW -->
+  <section class="screen" id="s-preview">
+    <p class="eyebrow">Step 3 of 4</p>
+    <h1 id="prevTitle">Preview — what the candidate gets</h1>
+    <p class="sub">A real, isolated environment for every module — hands-on, not a quiz. Here's exactly what will be tested and graded.</p>
+    <div class="card pad">
+      <p class="eyebrow" style="color:var(--muted);">The candidate will…</p>
+      <div class="plist" id="prevList"></div>
+      <div style="height:16px;"></div>
+      <p class="eyebrow" style="color:var(--muted);">Fixed for every candidate — so results stay comparable</p>
+      <div class="fixed">
+        <div class="fx"><span class="fi">✓</span><span>Time limit set by level — <b id="prevDur">—</b></span></div>
+        <div class="fx"><span class="fi">✓</span><span>Scenario &amp; variant randomized (anti-cheat)</span></div>
+        <div class="fx"><span class="fi">✓</span><span>Identical grading rubric &amp; pass bar</span></div>
+        <div class="fx"><span class="fi">✓</span><span>AI tools &amp; docs allowed — like the real job</span></div>
+      </div>
+      <div class="banner">
+        <span>🔒</span>
+        <span>Session is <b>recorded for identity</b> (webcam snapshots + mic, human-reviewed, deleted after 30 days). The <b>candidate never sees a score</b> — you get a per-objective report. These aren't configurable: that's what keeps every candidate comparable and the result defensible.</span>
+      </div>
+    </div>
+    <div class="nav">
+      <button class="btn ghost" data-back="coverage">← Back</button>
+      <span class="sp"></span>
+      <button class="btn primary" id="toSend">Looks right — add candidates →</button>
+    </div>
+  </section>
+
+  <!-- SCREEN 4: SEND -->
+  <section class="screen" id="s-send">
+    <p class="eyebrow">Step 4 of 4</p>
+    <h1>Send to candidates</h1>
+    <p class="sub">Each person gets their own private link. Add as many as you like for this role — you'll compare them side-by-side.</p>
+    <div class="card pad">
+      <label class="fld">Candidates</label>
+      <div id="candList">
+        <div class="cand"><input type="text" placeholder="Full name" value="Priya Sharma"><input type="email" placeholder="email@company.com" value="priya@examplemail.com"><button class="rm" title="Remove">×</button></div>
+        <div class="cand"><input type="text" placeholder="Full name" value="Rahul Mehta"><input type="email" placeholder="email@company.com" value="rahul@examplemail.com"><button class="rm" title="Remove">×</button></div>
+      </div>
+      <button class="addc" id="addCand">+ Add another candidate</button>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:20px;">
+        <div style="flex:1;min-width:180px;">
+          <label class="fld">Link expires</label>
+          <div class="qopts" data-q="exp">
+            <button class="chip" data-v="3">3 days</button>
+            <button class="chip sel" data-v="7">7 days</button>
+            <button class="chip" data-v="14">14 days</button>
+          </div>
+        </div>
+        <div style="flex:1;min-width:180px;">
+          <label class="fld">Sending</label>
+          <div class="hint" id="sendSummary" style="padding-top:8px;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="nav">
+      <button class="btn ghost" data-back="preview">← Back</button>
+      <span class="sp"></span>
+      <button class="btn primary" id="doSend">Send assessment →</button>
+    </div>
+  </section>
+
+  <!-- SCREEN 5: RESULTS -->
+  <section class="screen" id="s-results">
+    <p class="eyebrow">Cloud &amp; AI Security Engineer · Senior</p>
+    <h1>Results</h1>
+    <p class="sub">A competency profile per candidate — not one blurred number. Click a row to see per-objective evidence. This is the view a hiring manager actually decides from.</p>
+    <div class="statstrip" id="statstrip"></div>
+    <div class="card" style="padding:16px 8px 4px;overflow-x:auto;">
+      <table class="roster" id="roster">
+        <thead>
+          <tr>
+            <th>Candidate</th>
+            <th class="num">AWS Security</th>
+            <th class="num">AI Security</th>
+            <th class="num">Detection</th>
+            <th class="num">Overall</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="rosterBody"></tbody>
+      </table>
+    </div>
+    <p class="preview-note">Interactive mock · ShieldSync Enterprise recruiter flow · sample data</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  var root=document.documentElement;
+  document.getElementById('themeBtn').addEventListener('click',function(){
+    var cur=root.getAttribute('data-theme');
+    var next = cur==='dark' ? 'light' : (cur==='light' ? 'dark' : (matchMedia('(prefers-color-scheme: dark)').matches?'light':'dark'));
+    root.setAttribute('data-theme',next);
+  });
+
+  var LEVELS=[
+    {id:1,lv:'L1',role:'Analyst',desc:'detect & triage — and not flag the benign'},
+    {id:2,lv:'L2',role:'Engineer',desc:'implement the fixes without breaking the app'},
+    {id:3,lv:'L3',role:'Senior Engineer',desc:'own an ambiguous incident — find all of it'},
+    {id:4,lv:'L4',role:'Architect',desc:'design the guardrail that prevents recurrence'},
+    {id:5,lv:'L5',role:'Lead',desc:"prioritize when they can't fix everything"}
+  ];
+  var TRACKS={
+    aws:{name:'AWS Security',grade:'graded on resource state',cls:'aws'},
+    azure:{name:'Azure Security',grade:'graded on resource state',cls:'azure'},
+    soc:{name:'SOC / Threat Detection',grade:'graded on investigation quality',cls:'soc'},
+    ai:{name:'AI Security',grade:'graded on attack-then-defend',cls:'ai'}
+  };
+  var MODS={
+    aws:[
+      {n:'Triage the finding queue — flag it, don’t fix it',d:'Detection',m:15,lvl:1},
+      {n:'Lock the exposed S3 store — app preserved',d:'Data Protection',m:20,lvl:2},
+      {n:'Right-size the pipeline IAM role',d:'Identity',m:15,lvl:2},
+      {n:'Contain the leaked key — find every copy',d:'Identity / IR',m:25,lvl:3},
+      {n:'Author the guardrail — deny the next exposure',d:'Prevention',m:25,lvl:4}
+    ],
+    azure:[
+      {n:'Triage the finding queue — flag it, don’t fix it',d:'Detection',m:15,lvl:1},
+      {n:'Lock the public Blob container — app preserved',d:'Data Protection',m:20,lvl:2},
+      {n:'Right-size the pipeline Entra RBAC role',d:'Identity',m:15,lvl:2},
+      {n:'Contain the leaked secret — sweep every location',d:'Identity / IR',m:25,lvl:3},
+      {n:'Author the deny-policy — prevent recurrence',d:'Prevention',m:25,lvl:4}
+    ],
+    soc:[
+      {n:'Triage the alert queue — find the true positive',d:'Detection',m:15,lvl:1},
+      {n:'Investigate the intrusion + build the rule',d:'Detection Eng.',m:25,lvl:3}
+    ],
+    ai:[
+      {n:'Spot the prompt-injection in the agent traces',d:'AI Detection',m:15,lvl:1},
+      {n:'Find & fix the injection — agent stays useful',d:'AI Guardrails',m:25,lvl:2},
+      {n:'Design the agent’s deny-by-default tool policy',d:'AI Architecture',m:25,lvl:4}
+    ]
+  };
+  var PRIORITIZE={n:'Twelve findings, one hour — rank and defend',d:'Prioritization',m:30,lvl:5};
+
+  var state={role:'Cloud & AI Security Engineer',level:null,tracks:{aws:false,azure:false,soc:false,ai:false},primary:null,exp:7};
+
+  /* ---- level rows ---- */
+  var lr=document.getElementById('levelRows');
+  LEVELS.forEach(function(L){
+    var b=document.createElement('button');
+    b.className='row';b.type='button';b.dataset.id=L.id;
+    b.innerHTML='<span class="lv">'+L.lv+'</span><span><span class="role">'+L.role+'</span> &nbsp;<span class="desc">'+L.desc+'</span></span><span class="tick">✓</span>';
+    b.addEventListener('click',function(){selectLevel(L.id);});
+    lr.appendChild(b);
+  });
+  function selectLevel(id){
+    state.level=id;
+    Array.prototype.forEach.call(lr.children,function(c){c.classList.toggle('sel',+c.dataset.id===id);});
+    document.getElementById('roleHint').textContent='';
+    updateCompose();
+  }
+
+  /* ---- helper ---- */
+  var helper=document.getElementById('helper'), hq={yrs:null,mode:null};
+  document.getElementById('helperToggle').addEventListener('click',function(){
+    var open=helper.classList.toggle('open');this.setAttribute('aria-expanded',open);this.textContent=(open?'▾':'▸')+' Not sure which level? Answer two questions';
+  });
+  helper.querySelectorAll('.qopts').forEach(function(g){
+    g.addEventListener('click',function(e){
+      var b=e.target.closest('.chip');if(!b)return;
+      Array.prototype.forEach.call(g.children,function(c){c.classList.toggle('sel',c===b);});
+      hq[g.dataset.q]=b.dataset.v;
+      if(hq.yrs&&hq.mode){
+        var lvl=recommend(hq.yrs,hq.mode);
+        var L=LEVELS[lvl-1];
+        var r=document.getElementById('rec');r.classList.add('show');
+        r.innerHTML='Recommended: <b>'+L.lv+' · '+L.role+'</b> — '+L.desc+'. <button class="primbtn on" id="applyRec" style="margin-left:6px;">Use this level</button>';
+        document.getElementById('applyRec').addEventListener('click',function(){selectLevel(lvl);});
+      }
+    });
+  });
+  function recommend(yrs,mode){
+    if(mode==='prio')return 5; if(mode==='design')return 4; if(mode==='own')return 3;
+    if(mode==='exec')return (+yrs<=1)?1:2; return +yrs;
+  }
+
+  /* ---- tracks ---- */
+  var tg=document.getElementById('trackGrid');
+  Object.keys(TRACKS).forEach(function(k){
+    var T=TRACKS[k];
+    var d=document.createElement('div');
+    d.className='trk';d.dataset.k=k;
+    d.innerHTML='<span class="pbadge">Primary</span><div class="tt"><span class="box">✓</span>'+T.name+'</div><div class="gl">'+T.grade+'</div>'+
+      '<div class="prim"><span>Depth:</span><button type="button" class="primbtn" data-prim="'+k+'">Set as primary</button></div>';
+    d.addEventListener('click',function(e){ if(e.target.closest('[data-prim]'))return; toggleTrack(k); });
+    d.querySelector('[data-prim]').addEventListener('click',function(e){e.stopPropagation();setPrimary(k);});
+    tg.appendChild(d);
+  });
+  function toggleTrack(k){
+    var on=!state.tracks[k];
+    var selectedCount=Object.keys(state.tracks).filter(function(x){return state.tracks[x];}).length;
+    if(on && selectedCount>=3){ flash('covHint','Up to three areas — deselect one first.'); return; }
+    state.tracks[k]=on;
+    if(!on && state.primary===k) state.primary=null;
+    if(on && !state.primary) state.primary=k;
+    renderTracks();updateCompose();
+  }
+  function setPrimary(k){ if(!state.tracks[k])state.tracks[k]=true; state.primary=k; renderTracks(); updateCompose(); }
+  function renderTracks(){
+    Array.prototype.forEach.call(tg.children,function(c){
+      var k=c.dataset.k;
+      c.classList.toggle('sel',state.tracks[k]);
+      c.classList.toggle('primary',state.primary===k);
+      var pb=c.querySelector('[data-prim]');
+      pb.classList.toggle('on',state.primary===k);
+      pb.textContent=state.primary===k?'Primary ✓':'Set as primary';
+    });
+  }
+
+  /* ---- compose ---- */
+  function compose(){
+    if(!state.primary||!state.level) return [];
+    var lvl=state.level, out=[], p=state.primary;
+    var pl=MODS[p].filter(function(x){return x.lvl<=lvl;}).sort(function(a,b){return b.lvl-a.lvl;});
+    var take=lvl<=1?1:2;
+    // ensure L2 gets both implement modules
+    var chosen=pl.slice(0,take);
+    if(lvl===2){ chosen=MODS[p].filter(function(x){return x.lvl===2;}); }
+    chosen.forEach(function(m){out.push({m:m,track:p,role:'primary'});});
+    Object.keys(state.tracks).forEach(function(t){
+      if(!state.tracks[t]||t===p)return;
+      var isCloud=(t==='aws'||t==='azure'), pCloud=(p==='aws'||p==='azure');
+      if(isCloud&&pCloud){
+        out.push({m:{n:'Cross-cloud transfer — the same fix in '+TRACKS[t].name.replace(' Security',''),d:'Transfer check',m:10,lvl:lvl},track:t,role:'transfer'});
+      }else{
+        var fl=MODS[t].filter(function(x){return x.lvl<=lvl;}).sort(function(a,b){return b.lvl-a.lvl;})[0]||MODS[t][0];
+        out.push({m:fl,track:t,role:'support'});
+      }
+    });
+    if(lvl===5) out.push({m:PRIORITIZE,track:p,role:'capstone'});
+    return out;
+  }
+  function renderFit(){
+    // Deterministic role-fit: a pure function of (areas selected, level). No luck,
+    // no vanity points — same inputs always yield the same meter.
+    var fit=document.getElementById('fit');
+    var sel=Object.keys(state.tracks).filter(function(x){return state.tracks[x];}).length;
+    if(!state.primary||!state.level||!sel){fit.style.display='none';return;}
+    var pct,label,hint;
+    if(sel>=3){pct=100;label='Comprehensive';hint='Well-rounded for a multi-domain role.';}
+    else if(sel===2){pct=82;label='Solid coverage';hint='Primary depth plus one supporting area.';}
+    else{pct=58;label='Focused';hint='Tests one area deeply — ideal for a specialist screen.';}
+    if(state.level>=4&&sel===1){pct=45;label='Narrow for a senior role';hint='Architect / Lead roles usually span more than one area — consider adding one.';}
+    fit.style.display='';
+    document.getElementById('fitBar').style.width=pct+'%';
+    document.getElementById('fitLabel').textContent=label+' · '+pct+'%';
+    document.getElementById('fitHint').textContent=hint;
+  }
+  function updateCompose(){
+    renderFit();
+    var list=compose();
+    var ml=document.getElementById('modList');
+    if(!list.length){ ml.innerHTML='<li class="empty">'+(!state.level?'Pick a seniority level first (Step 1).':'Pick a primary area to build the assessment.')+'</li>'; document.getElementById('dur').textContent='—'; document.getElementById('composeNote').textContent=''; return; }
+    var total=list.reduce(function(s,x){return s+x.m.m;},0);
+    ml.innerHTML=list.map(function(x){
+      var cls=x.role==='capstone'?'gen':(x.role==='transfer'?TRACKS[x.track].cls:TRACKS[x.track].cls);
+      var lab=x.role==='primary'?TRACKS[x.track].name.split(' ')[0]:(x.role==='transfer'?'Transfer':(x.role==='capstone'?'Capstone':TRACKS[x.track].name.split(' ')[0]));
+      return '<li class="mod"><span class="mt '+cls+'">'+lab+'</span><span><span class="mn">'+x.m.n+'</span><span class="md">'+x.m.d+(x.role==='primary'?' · deep':'')+'</span></span><span class="mm">'+x.m.m+'m</span></li>';
+    }).join('');
+    document.getElementById('dur').textContent='~'+total+' min';
+    var L=LEVELS[state.level-1];
+    document.getElementById('composeNote').textContent=L.lv+' · '+L.role+' — length scales with seniority by adding modules, not by making one harder.';
+  }
+
+  /* ---- nav ---- */
+  var SCREENS=['role','coverage','preview','send','results'];
+  function show(name){
+    SCREENS.forEach(function(s){document.getElementById('s-'+s).classList.toggle('active',s===name);});
+    var idx=SCREENS.indexOf(name);
+    Array.prototype.forEach.call(document.getElementById('steps').children,function(st,i){
+      st.classList.toggle('on',i===idx);
+      st.classList.toggle('done',i<idx);
+    });
+    window.scrollTo({top:0,behavior:'smooth'});
+    if(name==='preview')buildPreview();
+    if(name==='send')buildSend();
+    if(name==='results')buildResults();
+  }
+  function flash(id,msg){var e=document.getElementById(id);e.textContent=msg;e.style.color='var(--crit)';setTimeout(function(){e.textContent='';e.style.color='';},2600);}
+
+  document.getElementById('toCoverage').addEventListener('click',function(){
+    state.role=document.getElementById('roleName').value.trim();
+    if(!state.level){flash('roleHint','Pick a seniority level to continue.');return;}
+    show('coverage');
+  });
+  document.getElementById('toPreview').addEventListener('click',function(){
+    if(!state.primary){flash('covHint','Pick at least one area and mark it primary.');return;}
+    show('preview');
+  });
+  document.getElementById('toSend').addEventListener('click',function(){show('send');});
+  document.getElementById('doSend').addEventListener('click',function(){show('results');});
+  document.querySelectorAll('[data-back]').forEach(function(b){b.addEventListener('click',function(){show(b.dataset.back);});});
+  document.getElementById('steps').addEventListener('click',function(e){
+    var st=e.target.closest('.step'); if(!st)return;
+    if(st.classList.contains('done')||st.classList.contains('on')) show(st.dataset.go);
+  });
+
+  /* ---- preview ---- */
+  function buildPreview(){
+    var list=compose(), L=LEVELS[state.level-1];
+    document.getElementById('prevTitle').textContent=state.role+' · '+L.role;
+    var total=list.reduce(function(s,x){return s+x.m.m;},0);
+    document.getElementById('prevDur').textContent='~'+total+' minutes';
+    document.getElementById('prevList').innerHTML=list.map(function(x,i){
+      return '<div class="pit"><span class="pn">'+(i+1)+'</span><span><span class="pt">'+x.m.n+'</span><br><span class="pd">'+TRACKS[x.track].name+' · '+x.m.d+'</span></span></div>';
+    }).join('');
+  }
+
+  /* ---- send ---- */
+  var cl=document.getElementById('candList');
+  document.getElementById('addCand').addEventListener('click',function(){
+    var d=document.createElement('div');d.className='cand';
+    d.innerHTML='<input type="text" placeholder="Full name"><input type="email" placeholder="email@company.com"><button class="rm" title="Remove">×</button>';
+    cl.appendChild(d);bindRm();
+  });
+  function bindRm(){cl.querySelectorAll('.rm').forEach(function(b){b.onclick=function(){if(cl.children.length>1)b.parentNode.remove();buildSend();};});}
+  bindRm();
+  document.querySelector('[data-q="exp"]').addEventListener('click',function(e){var b=e.target.closest('.chip');if(!b)return;Array.prototype.forEach.call(this.children,function(c){c.classList.toggle('sel',c===b);});state.exp=+b.dataset.v;buildSend();});
+  cl.addEventListener('input',buildSend);
+  function buildSend(){
+    var n=Array.prototype.filter.call(cl.querySelectorAll('.cand'),function(c){return c.querySelector('input[type=email]').value.trim();}).length;
+    var L=LEVELS[state.level-1];
+    document.getElementById('sendSummary').innerHTML=(n||'0')+' candidate'+(n===1?'':'s')+' · '+state.role+' <b>('+L.lv+')</b> · link valid '+state.exp+' days';
+  }
+
+  /* ---- results (sample) ---- */
+  var SAMPLE=[
+    {n:'Priya Sharma',e:'priya@examplemail.com',aws:88,ai:72,det:90,ov:84,st:'done',
+     obj:[['ok','Public access closed at the root','AWS'],['ok','HTTPS + shared-key enforced','AWS'],['part','IAM role scoped — one excess action left','AWS'],['ok','Prompt-injection caught & filtered','AI'],['no','Output-guardrail bypassed on tool-call','AI'],['ok','Exfil detected, rule fires clean','Detection']]},
+    {n:'Rahul Mehta',e:'rahul@examplemail.com',aws:80,ai:30,det:65,ov:61,st:'done',
+     obj:[['ok','Public access closed at the root','AWS'],['ok','HTTPS + shared-key enforced','AWS'],['ok','IAM role right-sized','AWS'],['no','Missed the indirect prompt-injection','AI'],['no','No output guardrail added','AI'],['part','Rule fires but also on benign traffic','Detection']]},
+    {n:'Aisha Khan',e:'aisha@examplemail.com',aws:null,ai:null,det:null,ov:null,st:'prog',obj:[]}
+  ];
+  function barColor(v){return v>=80?'var(--good)':v>=60?'var(--warn)':'var(--crit)';}
+  function scoreCell(v){ if(v==null)return '<div class="cell"><span class="v" style="color:var(--muted)">—</span></div>';
+    return '<div class="cell"><span class="v">'+v+'</span><span class="bar"><i style="width:'+v+'%;background:'+barColor(v)+'"></i></span></div>';}
+  function buildResults(){
+    var tb=document.getElementById('rosterBody');tb.innerHTML='';
+    // Deterministic gamification: both tiles are pure functions of the data.
+    var submitted=SAMPLE.filter(function(c){return c.st==='done';}).length;
+    var hrs=Math.round(submitted*1.5);           // ~1.5h screen replaced per auto-graded candidate
+    var cut=70;                                   // the pass bar — fixed, not a slider
+    var graded=SAMPLE.filter(function(c){return c.ov!=null;});
+    var shortlist=graded.filter(function(c){return c.ov>=cut;}).length;
+    var top=graded.slice().sort(function(a,b){return b.ov-a.ov;})[0];
+    document.getElementById('statstrip').innerHTML=
+      '<div class="stat"><span class="si">⏱️</span><span><div class="sv">~'+hrs+' hrs</div><div class="sl">first-round screening saved · '+submitted+' auto-graded</div></span></div>'+
+      '<div class="stat"><span class="si">🎯</span><span><div class="sv">'+shortlist+' of '+graded.length+'</div><div class="sl">meet the bar (≥'+cut+') · top match '+(top?top.n.split(" ")[0]:'—')+'</div></span></div>';
+    SAMPLE.forEach(function(c,i){
+      var isShort=c.ov!=null&&c.ov>=cut, isTop=top&&c.n===top.n;
+      var tr=document.createElement('tr');tr.className='cand-row'+(isShort?' short':'');
+      tr.innerHTML='<td><div class="cn">'+c.n+(isTop?'<span class="topchip">Top match</span>':'')+'</div><div class="ce">'+c.e+'</div></td>'+
+        '<td class="num">'+scoreCell(c.aws)+'</td><td class="num">'+scoreCell(c.ai)+'</td><td class="num">'+scoreCell(c.det)+'</td>'+
+        '<td class="num"><span class="score" style="font-size:15px;color:'+(c.ov==null?'var(--muted)':barColor(c.ov))+'">'+(c.ov==null?'—':c.ov)+'</span></td>'+
+        '<td>'+(c.st==='done'?'<span class="pill done"><span class="dot"></span>Submitted</span>':'<span class="pill prog"><span class="dot"></span>In progress</span>')+'</td>';
+      var det=document.createElement('tr');det.className='detail';
+      var inner=c.obj.length? '<div class="inner"><p class="eyebrow" style="color:var(--muted);margin:0 0 8px;">Per-objective evidence — '+c.n.split(' ')[0]+'</p>'+
+        c.obj.map(function(o){var ic=o[0]==='ok'?'ok':o[0]==='no'?'no':'part';var sym=o[0]==='ok'?'✓':o[0]==='no'?'✕':'~';
+          return '<div class="obj"><span class="oi '+ic+'">'+sym+'</span><span>'+o[1]+'</span><span class="om">'+o[2]+'</span></div>';}).join('')+
+        '<div style="margin-top:10px;font-size:11.5px;color:var(--muted)">Reflection + recording available on the full report. Candidate never sees a score.</div></div>' : '';
+      det.innerHTML='<td colspan="6">'+inner+'</td>';
+      if(c.obj.length){ tr.addEventListener('click',function(){det.classList.toggle('open');}); } else { tr.style.cursor='default'; }
+      tb.appendChild(tr);tb.appendChild(det);
+    });
+  }
+
+  /* init */
+  selectLevel(3);
+  state.tracks.aws=true;state.tracks.ai=true;state.tracks.soc=true;state.primary='aws';
+  renderTracks();updateCompose();buildSend();
+  show('role');
+})();
+</script>
+
+</body>
+</html>
