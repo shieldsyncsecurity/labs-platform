@@ -46,3 +46,44 @@ export function labLabel(slug: string | undefined | null): string {
   if (!slug) return "";
   return LAB_LABEL[slug] ?? slug;
 }
+
+// --- Portal v2 module catalog (ADDITIVE; dormant until v2 consumes it) --------
+// A "module" is the reusable, independently-graded unit of a COMPOSED assessment
+// (Portal v2). See docs/ENTERPRISE-PORTAL-V2-SPEC.md. A module maps 1:1 onto the
+// engine's existing lease->deploy->grade->teardown unit (labSlug); v2 only
+// orchestrates + aggregates many of them. Only DEPLOYED, GRADEABLE labs get a
+// live entry here (adding a non-deployable slug would just burn a lease); the
+// planned library lives in the spec, not here, until each lab is buildable.
+export type Track = "aws" | "azure" | "soc" | "ai";
+export type GraderType = "state" | "investigation" | "attack-then-defend";
+export type Module = {
+  moduleId: string;
+  labSlug: string; // engine target -- MUST be a key of LAB_LABEL
+  track: Track;
+  domain: string; // "data-protection" | "identity" | "detection" | "incident-response" | "prevention" | "prioritization"
+  level: number; // 1..5 the scenario is authored for
+  title: string; // recruiter/candidate-facing
+  graderType: GraderType;
+  minutes: number;
+};
+
+// The ONE live module today. Grows as labs are authored (spec Phase 5, the long pole).
+export const MODULE_CATALOG: Module[] = [
+  {
+    moduleId: "aws-s3-exposure-l2",
+    labSlug: "s3-misconfiguration-audit",
+    track: "aws",
+    domain: "data-protection",
+    level: 2,
+    title: "Lock the exposed S3 store — app preserved",
+    graderType: "state",
+    minutes: 20,
+  },
+];
+
+export function modulesForTrack(track: Track): Module[] {
+  return MODULE_CATALOG.filter((m) => m.track === track);
+}
+export function moduleById(id: string): Module | undefined {
+  return MODULE_CATALOG.find((m) => m.moduleId === id);
+}

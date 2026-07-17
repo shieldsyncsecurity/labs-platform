@@ -260,20 +260,35 @@ function reportExpiryIso() {
 /** createAssessment(): one per "job" (which lab, name, whether hints are on). Mints
  *  both the assessmentId (internal) and reportToken (the employer's secret /r/<token>
  *  comparison-report link) up front. */
-export async function createAssessment({ orgId, labSlug, name, hintsOn }) {
+export async function createAssessment({ orgId, labSlug, name, hintsOn, level, coverage, modules }) {
   const db = await ddb();
   const assessmentId = newToken();
   const reportToken = newToken();
+  // Portal v2 (composed): if modules[] is supplied, that's the suite; otherwise
+  // derive a single-module suite from labSlug so a v1 assessment == a 1-module v2
+  // assessment (full backward compatibility). modules/coverage are stored as JSON
+  // strings and are DORMANT until the v2 attempt-orchestration consumes them --
+  // the v1 read/lease path only ever reads `labSlug`, which is preserved.
+  // See docs/ENTERPRISE-PORTAL-V2-SPEC.md.
+  const hasModules = Array.isArray(modules) && modules.length > 0;
+  const suite = hasModules
+    ? modules
+    : (labSlug ? [{ moduleId: labSlug, labSlug, weight: 1 }] : []);
+  const primaryLab = hasModules ? (modules[0]?.labSlug ?? "") : (labSlug ?? "");
   const item = {
     assessmentId: S(assessmentId),
     orgId: S(orgId),
-    labSlug: S(labSlug),
+    labSlug: S(primaryLab), // retained: v1 flows + the first module's lab
     name: S(name ?? ""),
     hintsOn: BOOL(hintsOn),
     reportToken: S(reportToken),
     reportExpiresAt: S(reportExpiryIso()),
     createdAt: S(nowIso()),
+    schemaV: N(hasModules ? 2 : 1),
+    modules: S(JSON.stringify(suite)),
   };
+  if (typeof level === "number") item.level = N(level);
+  if (coverage && typeof coverage === "object") item.coverage = S(JSON.stringify(coverage));
   await db.send(new PutItemCommand({ TableName: ASSESSMENTS_TABLE, Item: item }));
   return itemToObject(item);
 }
