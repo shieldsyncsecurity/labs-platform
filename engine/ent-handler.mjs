@@ -36,6 +36,8 @@ import {
   claimAzureSp,
   releaseAzureSp,
   getAzureSp,
+  updateSpSecret,
+  resetAzureInviteForRetry,
   eraseCandidatePii,
   revokeAssessmentReport,
   renewAssessmentReport,
@@ -115,6 +117,7 @@ import {
   grade as azGrade,
   teardown as azTeardown,
   assignLearner as azAssignLearner,
+  rotateSpSecret as azRotateSpSecret,
 } from "./azure-infra.mjs";
 
 // Absolute dir of this module -- used to locate the bundled labs/ tree for track
@@ -645,7 +648,7 @@ async function runWarmEnt({ labSlug }) {
 // it (plus the anon blob URL + stack name + ready flag) back onto the invite via
 // stampAzureSession so /ent/submit can grade + tear down. stampAzureSession never
 // touches status, so it can't clobber a candidate who submitted meanwhile.
-async function runDeployAzure({ inviteToken, sessionId, resourceGroup, subscriptionId, location, labSlug }) {
+async function runDeployAzure({ inviteToken, sessionId, resourceGroup, subscriptionId, location, labSlug, spId }) {
   try {
     const deployed = await azDeploy({ sessionId, resourceGroup, subscriptionId, location, labSlug });
     const seeded = await azSeedBlob(deployed);
@@ -658,33 +661,41 @@ async function runDeployAzure({ inviteToken, sessionId, resourceGroup, subscript
     }).catch((e) => console.error(`[ent-worker/azure] stamp failed ${inviteToken}: ${e.message}`));
   } catch (e) {
     console.error(`[ent-worker/azure] deploy failed ${sessionId}: ${e.message}`);
-    // Provision failed — mark the invite so the app can surface an error, and
-    // best-effort tear down anything half-created so the RG never leaks/bills.
-    await stampAzureSession(inviteToken, { azError: "provision_failed" }).catch(() => {});
+    // Provision failed. Recover so nothing leaks and the candidate isn't stranded on
+    // "preparing" forever (mirrors the AWS runDeployEnt recovery): tear the RG down,
+    // RELEASE the pooled SP back to the pool (not just delete the RG -- the SP would
+    // otherwise be lost from the pool), and reset the invite to "booked" so the next
+    // /ent/start re-provisions fresh.
     await azTeardown({ resourceGroup, subscriptionId }).catch(() => {});
+    if (spId) await releaseAzureSp(spId, inviteToken).catch(() => {});
+    await resetAzureInviteForRetry(inviteToken).catch(() => {});
   }
   return { ok: true };
 }
 
-async function runTeardownAzure({ resourceGroup, subscriptionId, stackName, roleDefId, spId }) {
+async function runTeardownAzure({ resourceGroup, subscriptionId, stackName, roleDefId, spId, inviteToken }) {
+  let tornDown = true;
   try {
     if (resourceGroup) await azTeardown({ resourceGroup, subscriptionId, stackName, roleDefId });
   } catch (e) {
     // Never throw out of the worker — teardown failures are logged and left for
-    // ops to reconcile (the RG-delete is the authoritative wipe; a failure here
-    // is rare and surfaced in CloudWatch, not to the already-submitted candidate).
+    // ops/the reaper to reconcile.
+    tornDown = false;
     console.error(`[ent-worker/azure] teardown failed ${resourceGroup}: ${e.message}`);
   }
-  // Return the pooled candidate SP to the pool. The RG-scoped learner-role assignment
-  // is auto-removed by the RG delete above, so the released SP has zero standing access.
-  if (spId) {
+  // Return the SP to the pool ONLY once the RG (and thus its RG-scoped learner-role
+  // assignment) is CONFIRMED deleted. On teardown failure the assignment is still live,
+  // so freeing the SP would hand the next candidate standing access to the leftover RG —
+  // leave it "assigned" for the self-heal reaper. Invite-scoped so a stale/duplicate
+  // teardown can never free an SP another session has already re-claimed.
+  if (spId && tornDown) {
     try {
-      await releaseAzureSp(spId);
+      await releaseAzureSp(spId, inviteToken);
     } catch (e) {
       console.error(`[ent-worker/azure] SP release failed ${spId}: ${e.message}`);
     }
   }
-  return { ok: true };
+  return { ok: true, tornDown };
 }
 
 // Dispatch a worker action. In Lambda, fire it as a real async self-invoke
@@ -749,7 +760,7 @@ async function startAzureSession({ invite, inviteToken, labSlug }) {
   if (invite.status === "started" && invite.azResourceGroup) {
     let azAccess = null;
     if (invite.azSpId) {
-      const sp = await getAzureSp(invite.azSpId);
+      const sp = await getAzureSp(invite.azSpId, inviteToken);
       if (sp) azAccess = buildAzAccess({ sp, subscriptionId: invite.azSubscriptionId, resourceGroup: invite.azResourceGroup });
     }
     return resp(200, {
@@ -773,7 +784,7 @@ async function startAzureSession({ invite, inviteToken, labSlug }) {
     if (fresh?.azResourceGroup) {
       let azAccess = null;
       if (fresh.azSpId) {
-        const sp = await getAzureSp(fresh.azSpId);
+        const sp = await getAzureSp(fresh.azSpId, inviteToken);
         if (sp) azAccess = buildAzAccess({ sp, subscriptionId: fresh.azSubscriptionId, resourceGroup: fresh.azResourceGroup });
       }
       return resp(200, {
@@ -800,12 +811,41 @@ async function startAzureSession({ invite, inviteToken, labSlug }) {
     return resp(503, { error: "AZURE_ACCESS_POOL_FULL", retry: true });
   }
 
+  // If this SP was RECLAIMED from an abandoned session (the self-heal reaper), clean up
+  // that stale session's leftover RG + reset its invite so nothing lingers (best-effort).
+  if (sp.reclaimedFrom) {
+    try {
+      const stale = await getInvite(sp.reclaimedFrom);
+      if (stale?.azResourceGroup) {
+        await invokeEntWorker("teardown-azure", { resourceGroup: stale.azResourceGroup, subscriptionId: stale.azSubscriptionId });
+      }
+      await resetAzureInviteForRetry(sp.reclaimedFrom);
+    } catch (e) {
+      console.error("[ent/start/azure] stale-session cleanup (non-fatal):", e?.message);
+    }
+  }
+
+  // ROTATE the SP secret before handing it out (critical isolation fix): a secret a
+  // PRIOR holder of this pooled SP saved must be dead before we grant this SP a new RG.
+  // On failure, fail closed (release SP + free the claim); no candidate gets access.
+  let spCreds;
+  try {
+    const rot = await azRotateSpSecret(sp.appObjectId, sp.keyId);
+    await updateSpSecret(sp.spId, rot.secret, rot.keyId);
+    spCreds = { ...sp, clientSecret: rot.secret, keyId: rot.keyId };
+  } catch (e) {
+    console.error("[ent/start/azure] secret rotation failed:", e?.message);
+    await releaseAzureSp(sp.spId, inviteToken).catch(() => {});
+    await releaseStartClaim(inviteToken);
+    return resp(503, { error: "AZURE_ACCESS_FAILED", retry: true });
+  }
+
   let leased;
   try {
     leased = await azLease("ent:" + inviteToken, labSlug);
   } catch (e) {
     // Nothing provisioned -> release the SP + free the claim so the next poll retries.
-    await releaseAzureSp(sp.spId).catch(() => {});
+    await releaseAzureSp(sp.spId, inviteToken).catch(() => {});
     await releaseStartClaim(inviteToken);
     console.error("[ent/start/azure] lease failed:", e?.message);
     return resp(503, { error: "NO_CAPACITY", retry: true });
@@ -822,46 +862,56 @@ async function startAzureSession({ invite, inviteToken, labSlug }) {
     });
   } catch (e) {
     console.error("[ent/start/azure] learner-role grant failed:", e?.message);
-    await releaseAzureSp(sp.spId).catch(() => {});
+    await releaseAzureSp(sp.spId, inviteToken).catch(() => {});
     await invokeEntWorker("teardown-azure", { resourceGroup: leased.resourceGroup, subscriptionId: leased.subscriptionId });
     await releaseStartClaim(inviteToken);
     return resp(503, { error: "AZURE_ACCESS_FAILED", retry: true });
   }
 
-  const scoredExpiresAt = new Date(Date.now() + ENT_TIMEBOX_MIN * 60000).toISOString();
   // Persist the Azure session handles + the claimed SP id onto the invite so
-  // /ent/submit can grade + tear down + release the SP. azReady=false until the async
-  // worker finishes deploy+seed.
-  await setInviteStatus(inviteToken, "started", {
-    sessionId: leased.sessionId,
-    azResourceGroup: leased.resourceGroup,
-    azSubscriptionId: leased.subscriptionId,
-    azLocation: leased.location,
-    azSpId: sp.spId,
-    azReady: false,
-    consumedCompute: true,
-    startedAt: new Date().toISOString(),
-    scoredExpiresAt,
-  });
-
-  // Async deploy+seed (~1-2 min): stamps azStorageAccount/azAnonBlobUrl/azStackName
-  // + azReady back onto the invite when done. The candidate can `az login` NOW; the
-  // target storage account appears in their RG once the worker completes.
-  await invokeEntWorker("deploy-azure", {
-    inviteToken,
-    sessionId: leased.sessionId,
-    resourceGroup: leased.resourceGroup,
-    subscriptionId: leased.subscriptionId,
-    location: leased.location,
-    labSlug,
-  });
+  // /ent/submit can grade + tear down + release the SP. Wrapped so a DynamoDB throw here
+  // can't strand the leased RG + the assigned SP with no recorded handle (they'd leak,
+  // there is no reaper for an unrecorded RG) -- clean up + fail closed, mirroring above.
+  const scoredExpiresAt = new Date(Date.now() + ENT_TIMEBOX_MIN * 60000).toISOString();
+  try {
+    await setInviteStatus(inviteToken, "started", {
+      sessionId: leased.sessionId,
+      azResourceGroup: leased.resourceGroup,
+      azSubscriptionId: leased.subscriptionId,
+      azLocation: leased.location,
+      azSpId: sp.spId,
+      azReady: false,
+      consumedCompute: true,
+      startedAt: new Date().toISOString(),
+      scoredExpiresAt,
+    });
+    // Async deploy+seed (~1-2 min): stamps azStorageAccount/azAnonBlobUrl/azStackName
+    // + azReady back onto the invite when done. The candidate can `az login` NOW; the
+    // target storage account appears in their RG once the worker completes. spId is
+    // passed so a deploy failure can release the SP (not just tear the RG down).
+    await invokeEntWorker("deploy-azure", {
+      inviteToken,
+      sessionId: leased.sessionId,
+      resourceGroup: leased.resourceGroup,
+      subscriptionId: leased.subscriptionId,
+      location: leased.location,
+      labSlug,
+      spId: sp.spId,
+    });
+  } catch (e) {
+    console.error("[ent/start/azure] persist/dispatch failed:", e?.message);
+    await releaseAzureSp(sp.spId, inviteToken).catch(() => {});
+    await invokeEntWorker("teardown-azure", { resourceGroup: leased.resourceGroup, subscriptionId: leased.subscriptionId }).catch(() => {});
+    await releaseStartClaim(inviteToken);
+    return resp(503, { error: "AZURE_ACCESS_FAILED", retry: true });
+  }
 
   return resp(200, {
     sessionId: leased.sessionId,
     status: "leasing",
     warm: false,
     consoleUrl: azurePortalUrl(leased),
-    azAccess: buildAzAccess({ sp, subscriptionId: leased.subscriptionId, resourceGroup: leased.resourceGroup }),
+    azAccess: buildAzAccess({ sp: spCreds, subscriptionId: leased.subscriptionId, resourceGroup: leased.resourceGroup }),
     accessPending: false,
     scoredExpiresAt,
     expiresAt: scoredExpiresAt,
@@ -946,13 +996,16 @@ async function submitAzureSession({ invite, inviteToken, labSlug, reflection, au
     return resp(200, { ok: true, submitted: true, lateSubmit });
   } finally {
     // ALWAYS delete the RG + release the pooled SP, even if grading/putResult threw,
-    // so nothing leaks (RG resources or a stuck pool slot).
+    // so nothing leaks (RG resources or a stuck pool slot). inviteToken makes the SP
+    // release invite-scoped, so a double-submit's duplicate teardown can't free an SP
+    // that has since been re-claimed by another candidate.
     await invokeEntWorker("teardown-azure", {
       resourceGroup: invite.azResourceGroup,
       subscriptionId: invite.azSubscriptionId,
       stackName: invite.azStackName,
       roleDefId: invite.azRoleDefId,
       spId: invite.azSpId,
+      inviteToken,
     }).catch((e) => console.error("[ent/submit/azure] teardown dispatch failed:", e?.message));
   }
 }

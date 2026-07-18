@@ -43,6 +43,11 @@ const AUDIT_TABLE = "ShieldSyncEntAudit";
 // state. A free SP holds ZERO standing role assignments (granted per-session, RG-
 // scoped, auto-removed on RG delete), so a released SP's secret is inert.
 const AZURE_SP_POOL_TABLE = "ShieldSyncEntAzureSpPool";
+// After this many minutes an "assigned" pool SP is treated as ABANDONED and may be
+// reclaimed by claimAzureSp (the self-heal reaper). Must exceed the scored timebox +
+// grace (ent-handler ENT_TIMEBOX_MIN 60 + ENT_GRACE_MIN 15) so a live session is never
+// yanked out from under an active candidate.
+const ENT_AZURE_SESSION_MAX_MIN = 90;
 
 // Epoch-seconds helpers for ttl / rolling windows.
 const DAYS = 24 * 3600;
@@ -758,61 +763,93 @@ export async function stampAzureSession(inviteToken, extra = {}) {
  * conditional write fails and it tries the next free row). Returns the SP's
  * { spId, clientSecret, tenantId, spObjectId }, or null if the pool is exhausted.
  */
-export async function claimAzureSp(inviteToken) {
+export async function claimAzureSp(inviteToken, { staleAfterSec = (ENT_AZURE_SESSION_MAX_MIN) * 60 } = {}) {
   const db = await ddb();
-  const scan = await db.send(
-    new ScanCommand({
-      TableName: AZURE_SP_POOL_TABLE,
-      FilterExpression: "#s = :free",
-      ExpressionAttributeNames: { "#s": "status" },
-      ExpressionAttributeValues: { ":free": S("free") },
-    })
-  );
-  for (const raw of scan.Items ?? []) {
+  // 1) Prefer a genuinely FREE service principal.
+  const free = (await db.send(new ScanCommand({
+    TableName: AZURE_SP_POOL_TABLE, FilterExpression: "#s = :free",
+    ExpressionAttributeNames: { "#s": "status" }, ExpressionAttributeValues: { ":free": S("free") },
+  }))).Items ?? [];
+  for (const raw of free) {
     const sp = itemToObject(raw);
     try {
-      const r = await db.send(
-        new UpdateItemCommand({
-          TableName: AZURE_SP_POOL_TABLE,
-          Key: { spId: S(sp.spId) },
-          UpdateExpression: "SET #s = :assigned, assignedInvite = :inv, assignedAt = :at",
-          ConditionExpression: "#s = :free",
-          ExpressionAttributeNames: { "#s": "status" },
-          ExpressionAttributeValues: { ":assigned": S("assigned"), ":free": S("free"), ":inv": S(inviteToken), ":at": S(nowIso()) },
-          ReturnValues: "ALL_NEW",
-        })
-      );
+      const r = await db.send(new UpdateItemCommand({
+        TableName: AZURE_SP_POOL_TABLE, Key: { spId: S(sp.spId) },
+        UpdateExpression: "SET #s = :assigned, assignedInvite = :inv, assignedAt = :at",
+        ConditionExpression: "#s = :free",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":assigned": S("assigned"), ":free": S("free"), ":inv": S(inviteToken), ":at": S(nowIso()) },
+        ReturnValues: "ALL_NEW",
+      }));
       const c = itemToObject(r.Attributes);
-      return { spId: c.spId, clientSecret: c.clientSecret, tenantId: c.tenantId, spObjectId: c.spObjectId };
+      return { spId: c.spId, clientSecret: c.clientSecret, tenantId: c.tenantId, spObjectId: c.spObjectId, appObjectId: c.appObjectId ?? null, keyId: c.keyId ?? null, reclaimedFrom: null };
     } catch (e) {
       if (e.name === "ConditionalCheckFailedException") continue; // grabbed by a concurrent start -> next
       throw e;
     }
   }
-  return null; // pool exhausted
+  // 2) Pool exhausted -> SELF-HEAL: reclaim a STALE "assigned" SP whose session was
+  //    abandoned (assignedAt older than the max session window). Without this an
+  //    abandoned start leaks its SP forever (no other reaper frees it), eventually
+  //    503-ing the whole track. CAS on assignedAt so two concurrent reclaims can't
+  //    double-grab the same SP. Returns reclaimedFrom so the caller can tear down the
+  //    abandoned session's leftover RG.
+  const cutoffMs = Date.now() - staleAfterSec * 1000;
+  const assigned = (await db.send(new ScanCommand({
+    TableName: AZURE_SP_POOL_TABLE, FilterExpression: "#s = :assigned",
+    ExpressionAttributeNames: { "#s": "status" }, ExpressionAttributeValues: { ":assigned": S("assigned") },
+  }))).Items ?? [];
+  for (const raw of assigned) {
+    const sp = itemToObject(raw);
+    const atMs = sp.assignedAt ? new Date(sp.assignedAt).getTime() : 0;
+    if (!(atMs > 0) || atMs > cutoffMs) continue; // fresh (or unstamped) -> leave it
+    try {
+      const r = await db.send(new UpdateItemCommand({
+        TableName: AZURE_SP_POOL_TABLE, Key: { spId: S(sp.spId) },
+        UpdateExpression: "SET assignedInvite = :inv, assignedAt = :at",
+        ConditionExpression: "#s = :assigned AND assignedAt = :oldAt",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":assigned": S("assigned"), ":inv": S(inviteToken), ":at": S(nowIso()), ":oldAt": S(sp.assignedAt) },
+        ReturnValues: "ALL_NEW",
+      }));
+      const c = itemToObject(r.Attributes);
+      return { spId: c.spId, clientSecret: c.clientSecret, tenantId: c.tenantId, spObjectId: c.spObjectId, appObjectId: c.appObjectId ?? null, keyId: c.keyId ?? null, reclaimedFrom: sp.assignedInvite ?? null };
+    } catch (e) {
+      if (e.name === "ConditionalCheckFailedException") continue; // another reclaim won -> next
+      throw e;
+    }
+  }
+  return null; // genuinely exhausted (all SPs assigned + still fresh)
 }
 
 /**
- * releaseAzureSp(): return a claimed SP to the pool (status="free"). Called at
- * teardown. The per-session RBAC assignment is auto-removed when the session RG is
- * deleted (Azure cleans up assignments scoped to a deleted RG), so the freed SP
- * returns to ZERO standing access. Idempotent + absence-tolerant.
+ * releaseAzureSp(): return a claimed SP to the pool (status="free"). INVITE-SCOPED:
+ * when inviteToken is supplied it frees the SP ONLY if it is still assigned to THAT
+ * invite, so a stale/duplicate teardown whose SP has since been re-claimed by another
+ * session is a safe no-op (never frees an SP a different candidate is actively using).
+ * The RG-scoped RBAC assignment is auto-removed when the session RG is deleted, so a
+ * released SP returns to ZERO standing access. Idempotent + absence-tolerant.
  */
-export async function releaseAzureSp(spId) {
+export async function releaseAzureSp(spId, inviteToken) {
   if (!spId) return null;
   const db = await ddb();
+  const names = { "#s": "status" };
+  const values = { ":free": S("free") };
+  let cond = "attribute_exists(spId)";
+  if (inviteToken) {
+    cond = "#s = :assigned AND assignedInvite = :inv";
+    values[":assigned"] = S("assigned");
+    values[":inv"] = S(inviteToken);
+  }
   try {
-    const r = await db.send(
-      new UpdateItemCommand({
-        TableName: AZURE_SP_POOL_TABLE,
-        Key: { spId: S(spId) },
-        UpdateExpression: "SET #s = :free REMOVE assignedInvite, assignedAt",
-        ConditionExpression: "attribute_exists(spId)",
-        ExpressionAttributeNames: { "#s": "status" },
-        ExpressionAttributeValues: { ":free": S("free") },
-        ReturnValues: "ALL_NEW",
-      })
-    );
+    const r = await db.send(new UpdateItemCommand({
+      TableName: AZURE_SP_POOL_TABLE, Key: { spId: S(spId) },
+      UpdateExpression: "SET #s = :free REMOVE assignedInvite, assignedAt",
+      ConditionExpression: cond,
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+      ReturnValues: "ALL_NEW",
+    }));
     return itemToObject(r.Attributes);
   } catch (e) {
     if (e.name === "ConditionalCheckFailedException") return null;
@@ -820,15 +857,63 @@ export async function releaseAzureSp(spId) {
   }
 }
 
+/** updateSpSecret(): persist a freshly-ROTATED client secret (+ its Graph keyId) onto
+ *  the pool row, so the next candidate is handed a never-before-seen secret and the
+ *  keyId is available to removePassword it on the following rotation. See azure-infra
+ *  rotateSpSecret + the claim path in ent-handler. */
+export async function updateSpSecret(spId, clientSecret, keyId) {
+  if (!spId) return null;
+  const db = await ddb();
+  const r = await db.send(new UpdateItemCommand({
+    TableName: AZURE_SP_POOL_TABLE, Key: { spId: S(spId) },
+    UpdateExpression: "SET clientSecret = :s, keyId = :k",
+    ConditionExpression: "attribute_exists(spId)",
+    ExpressionAttributeValues: { ":s": S(clientSecret), ":k": S(keyId ?? "") },
+    ReturnValues: "ALL_NEW",
+  }));
+  return itemToObject(r.Attributes);
+}
+
 /** getAzureSp(): read one pool SP row by spId, for reconnect (hand the SAME creds to
- *  a candidate who restarts). Returns { spId, clientSecret, tenantId, spObjectId } or null. */
-export async function getAzureSp(spId) {
+ *  a candidate who restarts). When inviteToken is supplied, returns null unless the SP
+ *  is STILL assigned to that invite -- so a candidate whose stale SP was reclaimed by
+ *  the reaper (and re-handed to someone else) never receives another candidate's creds.
+ *  Returns { spId, clientSecret, tenantId, spObjectId, keyId } or null. */
+export async function getAzureSp(spId, inviteToken) {
   if (!spId) return null;
   const db = await ddb();
   const r = await db.send(new GetItemCommand({ TableName: AZURE_SP_POOL_TABLE, Key: { spId: S(spId) } }));
   if (!r.Item) return null;
   const sp = itemToObject(r.Item);
-  return { spId: sp.spId, clientSecret: sp.clientSecret, tenantId: sp.tenantId, spObjectId: sp.spObjectId };
+  if (inviteToken && sp.assignedInvite !== inviteToken) return null; // reclaimed -> not this candidate's SP
+  return { spId: sp.spId, clientSecret: sp.clientSecret, tenantId: sp.tenantId, spObjectId: sp.spObjectId, appObjectId: sp.appObjectId ?? null, keyId: sp.keyId ?? null };
+}
+
+/**
+ * resetAzureInviteForRetry(): clear a started azure invite's dead session handles and
+ * put it back to "booked" so the candidate's next /ent/start re-provisions cleanly.
+ * Used when the async deploy-azure worker fails (RG torn down, SP released) -- without
+ * this the invite is stuck "started" pointing at a deleted RG and the room spins on
+ * "preparing" forever (claimStartLease only fires from "booked"). setInviteStatus/
+ * stampAzureSession only SET, so a dedicated REMOVE is needed to clear the fields.
+ */
+export async function resetAzureInviteForRetry(inviteToken) {
+  const db = await ddb();
+  try {
+    const r = await db.send(new UpdateItemCommand({
+      TableName: INVITES_TABLE, Key: { inviteToken: S(inviteToken) },
+      UpdateExpression:
+        "SET #s = :booked REMOVE azResourceGroup, azSpId, azSubscriptionId, azLocation, azStorageAccount, azAnonBlobUrl, azStackName, azReady, azError, sessionId, consumedCompute, leaseClaimAt",
+      ConditionExpression: "attribute_exists(inviteToken)",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: { ":booked": S("booked") },
+      ReturnValues: "ALL_NEW",
+    }));
+    return itemToObject(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return null;
+    throw e;
+  }
 }
 
 /**

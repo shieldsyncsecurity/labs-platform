@@ -36,6 +36,9 @@ param(
     [string]$Table = "ShieldSyncEntAzureSpPool",
     [string]$AwsProfile = "ent750",
     [string]$Region = "us-east-1",
+    # The engine's management SP -- added as an OWNER of each candidate app so it can
+    # rotate that app's client secret per session via Graph Application.ReadWrite.OwnedBy.
+    [string]$MgmtSpName = "shieldsync-lab-mgmt",
     [switch]$RotateExisting
 )
 
@@ -48,6 +51,12 @@ function Write-Skip($m) { Write-Host "    --  $m (exists)" -ForegroundColor Dark
 $acct = az account show -o json 2>$null | ConvertFrom-Json
 if (-not $acct) { throw "az is not logged in. Run: az login --tenant <ShieldSync Enterprise Labs tenant id>" }
 $TenantId = $acct.tenantId
+# The engine (mgmt SP) rotates each candidate app's secret per session, which needs it
+# to be an OWNER of the app + hold Graph Application.ReadWrite.OwnedBy (admin-consented).
+$mgmtSpObjId = (az ad sp list --display-name $MgmtSpName --query "[0].id" -o tsv 2>$null)
+if ([string]::IsNullOrWhiteSpace($mgmtSpObjId)) {
+    Write-Warning "mgmt SP '$MgmtSpName' not found -- run setup-landing-zone.ps1 first. Continuing, but the engine will NOT be able to rotate secrets until it owns these apps + has Graph consent."
+}
 Write-Step "Seeding $PoolSize candidate SPs into tenant $TenantId -> DynamoDB $Table (profile $AwsProfile)"
 
 # Reused temp file for the DynamoDB item (holds a secret briefly; scrubbed after each put, never deleted).
@@ -73,8 +82,15 @@ for ($i = 1; $i -le $PoolSize; $i++) {
         continue  # exists and no rotate -> leave its row untouched
     }
 
-    # The RBAC assignment targets the SP's OBJECT id (not the appId), so store both.
-    $spObjectId = (az ad sp show --id $appId --query id -o tsv)
+    # The RBAC assignment targets the SP's OBJECT id; the engine's per-session Graph
+    # secret-rotation targets the APPLICATION object id + the current credential keyId.
+    # Capture all three (plus make the mgmt SP an owner so it CAN rotate).
+    $spObjectId  = (az ad sp show --id $appId --query id -o tsv)
+    $appObjectId = (az ad app show --id $appId --query id -o tsv)
+    $keyId       = (az ad app credential list --id $appId --query "[0].keyId" -o tsv)
+    if (-not [string]::IsNullOrWhiteSpace($mgmtSpObjId)) {
+        az ad app owner add --id $appId --owner-object-id $mgmtSpObjId 2>$null | Out-Null  # idempotent
+    }
 
     # Write the pool row. status=free so the engine can claim it. Item carries the secret,
     # so write via a temp file (never on the command line / process args), then scrub it.
@@ -83,6 +99,8 @@ for ($i = 1; $i -le $PoolSize; $i++) {
         clientSecret = @{ S = $secret }
         tenantId     = @{ S = $TenantId }
         spObjectId   = @{ S = $spObjectId }
+        appObjectId  = @{ S = $appObjectId }
+        keyId        = @{ S = $keyId }
         status       = @{ S = "free" }
         createdAt    = @{ S = (Get-Date).ToUniversalTime().ToString("o") }
     }
@@ -98,5 +116,13 @@ Write-Host "`nDone. Free pool rows:" -ForegroundColor Cyan
 aws dynamodb scan --table-name $Table --filter-expression "#s = :f" `
     --expression-attribute-names '{\"#s\":\"status\"}' --expression-attribute-values '{\":f\":{\"S\":\"free\"}}' `
     --select "COUNT" --region $Region --profile $AwsProfile --query "Count" --output text
-Write-Host "`nNOTE: the engine also needs AZURE_LEARNER_ROLE_NAME to match the registered learner role" -ForegroundColor Yellow
-Write-Host "(default 'ShieldSync Lab Learner - Storage'); it is already the setup-landing-zone.ps1 default." -ForegroundColor Yellow
+Write-Host "`n=== REQUIRED before the Azure track goes live ===" -ForegroundColor Yellow
+Write-Host "1. Grant the mgmt SP ($MgmtSpName) Microsoft Graph 'Application.ReadWrite.OwnedBy'" -ForegroundColor Yellow
+Write-Host "   (app-only) permission WITH ADMIN CONSENT. The engine rotates each candidate app's" -ForegroundColor Yellow
+Write-Host "   client secret PER SESSION so a prior candidate's saved secret is dead before the app" -ForegroundColor Yellow
+Write-Host "   is re-handed to another candidate (the isolation fix). Without this consent + the" -ForegroundColor Yellow
+Write-Host "   owner-add this script did, /ent/start fails closed (503 AZURE_ACCESS_FAILED)." -ForegroundColor Yellow
+Write-Host "   Portal: Entra ID -> App registrations -> $MgmtSpName -> API permissions -> Add ->" -ForegroundColor Yellow
+Write-Host "   Microsoft Graph -> Application permissions -> Application.ReadWrite.OwnedBy -> Grant admin consent." -ForegroundColor Yellow
+Write-Host "2. AZURE_LEARNER_ROLE_NAME must match the registered learner role (default" -ForegroundColor Yellow
+Write-Host "   'ShieldSync Lab Learner - Storage', already the setup-landing-zone.ps1 default)." -ForegroundColor Yellow

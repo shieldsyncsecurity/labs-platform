@@ -485,6 +485,67 @@ export async function assignLearner(ctx) {
   return { roleAssignmentId: assignment?.id ?? assignmentId, roleDefinitionId };
 }
 
+// ── rotateSpSecret() ──────────────────────────────────────────────────────────
+// Rotate a pooled candidate SP's client secret via Microsoft Graph: add a fresh
+// password credential AND removePassword the previous one, so a secret a PRIOR
+// candidate saved is DEAD before the SP is re-handed to the next candidate. This
+// closes the temporal credential-reuse isolation break (a released-but-un-rotated SP,
+// re-claimed for a new candidate's RG, would otherwise let the old candidate's saved
+// `az login` creds reach the new candidate's environment). Called on CLAIM, so the
+// fresh secret + the new RG assignment land together.
+//
+// Targets the APPLICATION object (/applications/{appObjectId}) -- `az login
+// --service-principal -u <appId> -p <secret>` authenticates against the app
+// registration's client credentials, NOT the service-principal object's, so the
+// rotated password must live on the application. (appObjectId is distinct from the SP
+// object id used for the RBAC role assignment.)
+//
+// REQUIRES the engine identity (mgmt SP) to hold Microsoft Graph
+// Application.ReadWrite.OwnedBy (admin-consented) on the pooled app registrations --
+// Azure RBAC alone does not grant Graph credential management. Until that consent is
+// in place this throws, and startAzureSession fails closed (no candidate access).
+// Returns { secret, keyId } -- the NEW secret + its keyId (needed to remove it next time).
+export async function rotateSpSecret(appObjectId, oldKeyId) {
+  if (!appObjectId) throw new Error("rotateSpSecret: appObjectId required");
+  const cred = await credential();
+  const tok = await cred.getToken("https://graph.microsoft.com/.default");
+  if (!tok?.token) throw new Error("rotateSpSecret: could not acquire a Graph token");
+  const base = `https://graph.microsoft.com/v1.0/applications/${encodeURIComponent(appObjectId)}`;
+  const auth = { authorization: `Bearer ${tok.token}`, "content-type": "application/json" };
+
+  // addPassword -> the new secret value is returned ONCE, in secretText.
+  const addRes = await fetch(`${base}/addPassword`, {
+    method: "POST",
+    headers: auth,
+    body: JSON.stringify({ passwordCredential: { displayName: "shieldsync-session" } }),
+  });
+  if (!addRes.ok) {
+    const t = await addRes.text().catch(() => "");
+    throw new Error(`rotateSpSecret addPassword HTTP ${addRes.status}: ${t.slice(0, 200)}`);
+  }
+  const added = await addRes.json();
+  const secret = added?.secretText;
+  const keyId = added?.keyId;
+  if (!secret || !keyId) throw new Error("rotateSpSecret: addPassword returned no secretText/keyId");
+
+  // removePassword the OLD credential so the prior candidate's saved secret dies now.
+  if (oldKeyId) {
+    const rmRes = await fetch(`${base}/removePassword`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ keyId: oldKeyId }),
+    });
+    if (!rmRes.ok && rmRes.status !== 404) {
+      const t = await rmRes.text().catch(() => "");
+      // Non-fatal: the new secret is already live; a lingering old credential is swept
+      // by the next rotation. Log loudly so a persistent failure is visible in CloudWatch.
+      console.warn(`  [azure-infra] rotateSpSecret removePassword(old) HTTP ${rmRes.status}: ${t.slice(0, 200)}`);
+    }
+  }
+  console.log(`  rotated app secret for ${appObjectId} (new keyId ${keyId})`);
+  return { secret, keyId };
+}
+
 // ── grade() ─────────────────────────────────────────────────────────────────
 // Delegates to graders.azure.mjs (authored separately) so scoring logic lives in
 // ONE place. Passes the ctx it needs: credential + subscription + RG + account +
