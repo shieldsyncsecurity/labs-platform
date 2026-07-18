@@ -692,16 +692,27 @@ async function runTeardownAzure({ resourceGroup, subscriptionId, stackName, role
     tornDown = false;
     console.error(`[ent-worker/azure] teardown failed ${resourceGroup}: ${e.message}`);
   }
-  // Return the SP to the pool ONLY once the RG (and thus its RG-scoped learner-role
-  // assignment) is CONFIRMED deleted. On teardown failure the assignment is still live,
-  // so freeing the SP would hand the next candidate standing access to the leftover RG —
-  // leave it "assigned" for the self-heal reaper. Invite-scoped so a stale/duplicate
-  // teardown can never free an SP another session has already re-claimed.
-  if (spId && tornDown) {
-    try {
-      await releaseAzureSp(spId, inviteToken);
-    } catch (e) {
-      console.error(`[ent-worker/azure] SP release failed ${spId}: ${e.message}`);
+  // Only act once the RG (and thus its RG-scoped learner-role assignment) is CONFIRMED
+  // deleted. On teardown failure the assignment is still live, so freeing the SP would
+  // hand the next candidate standing access to the leftover RG — leave BOTH the SP
+  // "assigned" and the invite's RG pointer intact for the 90-min self-heal reaper.
+  if (tornDown) {
+    // Return the SP to the pool. Invite-scoped so a stale/duplicate teardown can never
+    // free an SP another session has already re-claimed.
+    if (spId) {
+      try {
+        await releaseAzureSp(spId, inviteToken);
+      } catch (e) {
+        console.error(`[ent-worker/azure] SP release failed ${spId}: ${e.message}`);
+      }
+    }
+    // Reset the invite so a START-failure recovery re-provisions cleanly. The status
+    // guard on resetAzureInviteForRetry makes this a NO-OP for a submit-path teardown
+    // (invite already "submitted") — so the same worker serves both callers safely.
+    if (inviteToken) {
+      await resetAzureInviteForRetry(inviteToken).catch((e) =>
+        console.error(`[ent-worker/azure] invite reset failed ${inviteToken}: ${e?.message}`)
+      );
     }
   }
   return { ok: true, tornDown };
@@ -909,13 +920,12 @@ async function startAzureSession({ invite, inviteToken, labSlug }) {
     });
   } catch (e) {
     console.error("[ent/start/azure] persist/dispatch failed:", e?.message);
-    // Reset the invite so the candidate re-provisions instead of being stranded "started"
-    // (if setInviteStatus committed before the dispatch threw). The status guard on
-    // resetAzureInviteForRetry makes it a no-op when the persist itself failed (invite
-    // still "booked"). Tear down + release the SP via the worker so the SP is freed ONLY
-    // after its live RG assignment is gone -- a direct release here would leak the
-    // assignment to the next candidate who claims this SP.
-    await resetAzureInviteForRetry(inviteToken).catch(() => {});
+    // Tear down + release the SP + reset the invite via the worker (teardown-azure), which
+    // gates ALL of that on the RG delete SUCCEEDING. Do NOT reset the invite eagerly here:
+    // that would erase the azResourceGroup pointer the self-heal reaper needs, so if the
+    // async teardown then also fails the RG would leak unreclaimably. releaseStartClaim
+    // covers the sub-case where setInviteStatus itself failed (invite still "booked", no
+    // sessionId) so the candidate's retry re-provisions.
     await releaseStartClaim(inviteToken).catch(() => {});
     await invokeEntWorker("teardown-azure", {
       resourceGroup: leased.resourceGroup,
