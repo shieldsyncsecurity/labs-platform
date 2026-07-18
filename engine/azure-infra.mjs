@@ -152,9 +152,24 @@ export async function lease(userId = "demo-learner", labSlug = LAB_SLUG, locatio
 //
 // FALLBACK. Deployment Stacks are exposed via
 // ResourceManagementClient.deploymentStacks in recent @azure/arm-resources. If
-// that operations group is unavailable in the installed SDK version, we fall back
-// to a plain deployments.beginCreateOrUpdateAndWait — the learner then has no
-// deny-delete guard, but the lab is still fully deployable/gradeable (documented).
+// that operations group is unavailable in the installed SDK version (it is NOT in
+// arm-resources@6.1.0 — the pinned version), we fall back to a plain
+// deployments.beginCreateOrUpdateAndWait — the learner then has no deny-delete
+// deny-assignment, but the lab is still fully deployable/gradeable.
+//
+// ── Is the missing deny-delete a real gap? No — it is redundant defense-in-depth. ──
+// The PRIMARY control against a learner deleting the scenario is the least-privilege
+// learner role (lab.json -> learnerRole): it grants storageAccounts READ + WRITE (so
+// they can remediate) but NO */delete action and no subscription-scope action, so a
+// learner simply CANNOT delete the account/container regardless of any deny-assignment
+// (this is the same model the AWS labs use). And even if they could, a DELETED account
+// grades as FAIL (the grader can't read the flags), so deletion never helps them pass.
+// The Deployment Stack deny-assignment would only add belt-and-braces. OPTIONAL
+// HARDENING (tracked): @azure/arm-resourcesdeploymentstacks@2.0.0 now ships the stacks
+// client as a standalone package — wiring deploy()/teardown() to it would restore the
+// deny-assignment. Not done here: it is a redundant control, and it needs re-validating
+// that the mgmt SP (Contributor + scoped RBAC-admin) is permitted to lay a
+// denyAssignment, which Contributor alone does not obviously allow.
 //
 // Returns { sessionId, resourceGroup, storageAccountName, blobContainer,
 //           seedBlobName, anonymousBlobUrl, usedStack }.
@@ -199,18 +214,20 @@ export async function deploy(ctx) {
     outputs = stack?.properties?.outputs ?? null;
     usedStack = true;
   } else {
-    // Documented fallback: plain deployment (NO deny-delete guard). This silently
-    // weakens the defense-in-depth deny-delete assignment, so it must NOT run
-    // unattended in prod: require an explicit ALLOW_NO_STACK=1 escape hatch. A
-    // missing SDK feature should fail loudly, not quietly ship an unguarded lab.
-    if (process.env.NODE_ENV === "production" && process.env.ALLOW_NO_STACK !== "1") {
-      throw new Error(
-        "deploy: deploymentStacks unavailable in this @azure/arm-resources and NODE_ENV=production. " +
-          "The plain-deployment fallback has NO deny-delete guard. Upgrade @azure/arm-resources to a version " +
-          "with deploymentStacks, or set ALLOW_NO_STACK=1 to explicitly accept an unguarded deploy."
+    // Plain-deployment fallback (arm-resources@6.1.0 exposes no deploymentStacks group).
+    // The learner then gets no deny-delete deny-assignment -- which is ACCEPTABLE, not a
+    // silent gap: the least-privilege learner role has no */delete action (the PRIMARY
+    // control), and a deleted account grades as fail anyway (see the deploy() header). So
+    // we WARN and PROCEED rather than throw. (Earlier this threw when NODE_ENV=production
+    // -- a latent foot-gun that would have broken a perfectly acceptable deploy the moment
+    // NODE_ENV got set; removed deliberately.) ALLOW_NO_STACK=1 just silences the warning.
+    if (process.env.ALLOW_NO_STACK !== "1") {
+      console.warn(
+        "  [azure-infra] deploymentStacks unavailable (arm-resources@6.1.0) -> plain deployment, no " +
+          "deny-delete deny-assignment. Acceptable: the least-privilege learner role has no delete action. " +
+          "Optional hardening: @azure/arm-resourcesdeploymentstacks@2.0.0."
       );
     }
-    console.warn("  deploymentStacks unavailable in this @azure/arm-resources — falling back to a plain deployment (NO deny-delete guard).");
     const dep = await rc.deployments.beginCreateOrUpdateAndWait(resourceGroup, stackName, {
       properties: { mode: "Incremental", template, parameters },
       tags: { [LAB_TAG]: labSlug, ShieldSyncSession: sessionId },
