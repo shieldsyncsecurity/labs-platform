@@ -6,8 +6,16 @@
 # mangles any non-ASCII chars and breaks parsing. Keep this file ASCII.
 #
 # Bundles ent-handler.mjs (entry) + entinfra.mjs + the REUSED labinfra.mjs / graders.mjs
-# / metrics.mjs + the labs/ CloudFormation templates (leaseEnt/deployLab/teardown read
-# them). Same S3-upload + API-Gateway pattern as deploy.ps1.
+# / metrics.mjs + azure-infra.mjs + graders.azure.mjs (the Azure lab lifecycle +
+# grader) + the labs/ templates (leaseEnt/deployLab/teardown + the Azure driver read
+# them) + the @azure/* node_modules closure. Same S3-upload + API-Gateway pattern as
+# deploy.ps1.
+#
+# WHY node_modules now: the nodejs22.x runtime provides @aws-sdk built-in, so the AWS
+# path never needed bundled deps. The @azure/* SDKs are NOT in the runtime, so the
+# Azure path only works if they are packed into the zip. We bundle everything under
+# node_modules EXCEPT @aws-sdk (runtime-provided) and .bin. Azure code is dormant
+# until an "azure"-track lab is leased, so this is inert for the live AWS flow.
 #
 # Before FIRST run, the 6 ent tables must exist: node create-ent-tables.mjs
 # To set the shared secret in one shot:  $env:ENT_ENGINE_SECRET="<value>"; .\deploy\deploy-ent.ps1
@@ -63,25 +71,52 @@ Write-Host "`n[3/6] Building deployment package ..." -ForegroundColor Cyan
 $ZIP_PATH  = "$DEPLOY_DIR\ent-engine.zip"
 if (Test-Path $ZIP_PATH) { Remove-Item $ZIP_PATH -Force }
 
-# ent-handler is the entry; it imports entinfra + labinfra (which needs graders + metrics).
+# ent-handler is the entry; it imports entinfra + labinfra (needs graders + metrics)
+# and azure-infra (needs graders.azure for the "azure"-track labs).
 Compress-Archive -Path `
   "$SCRIPT_DIR\ent-handler.mjs", `
   "$SCRIPT_DIR\entinfra.mjs", `
   "$SCRIPT_DIR\labinfra.mjs", `
   "$SCRIPT_DIR\graders.mjs", `
-  "$SCRIPT_DIR\metrics.mjs" `
+  "$SCRIPT_DIR\metrics.mjs", `
+  "$SCRIPT_DIR\azure-infra.mjs", `
+  "$SCRIPT_DIR\graders.azure.mjs" `
   -DestinationPath $ZIP_PATH
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open($ZIP_PATH, "Update")
 
-# labs/<slug>/<file> entries so they unzip to /var/task/labs/... where labinfra reads
-# them (join(__dirname,"labs",slug,"template.yaml")). Identical packing to deploy.ps1.
+# labs/<slug>/<file> entries so they unzip to /var/task/labs/... where labinfra AND
+# azure-infra read them (join(__dirname,"labs",slug,"...")). The whole labs/ tree is
+# packed recursively, so the Azure lab (labs/storage-public-exposure-audit with its
+# lab.json + main.json) rides along with the AWS templates. Identical to deploy.ps1.
 $LABS_ROOT = (Resolve-Path "$SCRIPT_DIR\..\labs").Path
 Get-ChildItem $LABS_ROOT -Recurse -File | ForEach-Object {
     $rel = "labs/" + $_.FullName.Substring($LABS_ROOT.Length + 1).Replace("\","/")
     $e = $zip.CreateEntry($rel); $s = $e.Open()
     $b = [System.IO.File]::ReadAllBytes($_.FullName); $s.Write($b,0,$b.Length); $s.Close()
+}
+
+# node_modules/<...> entries -> unzip to /var/task/node_modules so Node resolves the
+# @azure/* SDKs the Azure driver dynamically imports. Pack EVERYTHING under
+# node_modules EXCEPT @aws-sdk (the runtime provides it) and .bin (shell shims, not
+# needed). If node_modules is absent (deps not installed), skip with a warning -- the
+# AWS path still deploys fine; only the Azure path would then be broken at runtime.
+$NM_ROOT = "$SCRIPT_DIR\node_modules"
+if (Test-Path $NM_ROOT) {
+    $NM_ROOT = (Resolve-Path $NM_ROOT).Path
+    $nmCount = 0
+    Get-ChildItem $NM_ROOT -Recurse -File | ForEach-Object {
+        $relRaw = $_.FullName.Substring($NM_ROOT.Length + 1).Replace("\","/")
+        if ($relRaw -like "@aws-sdk/*" -or $relRaw -like ".bin/*") { return }
+        $rel = "node_modules/" + $relRaw
+        $e = $zip.CreateEntry($rel); $s = $e.Open()
+        $b = [System.IO.File]::ReadAllBytes($_.FullName); $s.Write($b,0,$b.Length); $s.Close()
+        $nmCount++
+    }
+    Write-Host "  bundled $nmCount node_modules files (@azure closure; @aws-sdk excluded)"
+} else {
+    Write-Warning "  node_modules not found at $NM_ROOT - Azure labs will fail at runtime (run 'npm ci' in engine/ first). AWS path unaffected."
 }
 $zip.Dispose()
 Write-Host "  $([Math]::Round((Get-Item $ZIP_PATH).Length/1MB,1)) MB"

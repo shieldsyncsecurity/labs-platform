@@ -693,6 +693,53 @@ export async function setInviteStatus(inviteToken, status, extra = {}) {
 }
 
 /**
+ * stampAzureSession(): write Azure session handles onto the invite WITHOUT touching
+ * `status`. The Azure lab lifecycle (azure-infra.mjs) has no separate session table
+ * -- labinfra owns the AWS account-pool sessions, but Azure's disposable unit is a
+ * per-session RESOURCE GROUP whose per-session state (resource group, deployed
+ * storage account, anonymous blob URL, deployment-stack name, ready/error flags)
+ * lives on the invite so /ent/submit can grade + tear it down later. The async
+ * deploy-azure worker calls this AFTER it provisions, so it must NOT re-set status
+ * (that would clobber a candidate who has already submitted in the meantime).
+ * Guarded by attribute_exists so a vanished invite is a clean null. Mirrors the
+ * generic field-SET shape of setInviteStatus, minus the status write.
+ */
+export async function stampAzureSession(inviteToken, extra = {}) {
+  const db = await ddb();
+  const names = {};
+  const values = {};
+  const sets = [];
+  let i = 0;
+  for (const [k, v] of Object.entries(extra)) {
+    if (v === undefined) continue;
+    const nameKey = `#f${i}`;
+    const valueKey = `:v${i}`;
+    names[nameKey] = k;
+    values[valueKey] = attrFor(v);
+    sets.push(`${nameKey} = ${valueKey}`);
+    i++;
+  }
+  if (sets.length === 0) return await getInvite(inviteToken);
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: INVITES_TABLE,
+        Key: { inviteToken: S(inviteToken) },
+        UpdateExpression: "SET " + sets.join(", "),
+        ConditionExpression: "attribute_exists(inviteToken)",
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObject(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return null;
+    throw e;
+  }
+}
+
+/**
  * refundInvite(): idempotent, exactly-once credit-back for an invite (e.g. the
  * employer revokes before the candidate ever starts, or a technical failure voids
  * the attempt). Needs the invite's orgId first, so we getInvite() before the

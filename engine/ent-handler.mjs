@@ -32,6 +32,7 @@ import {
   refundInvite,
   revokeInvite,
   stampInviteResend,
+  stampAzureSession,
   eraseCandidatePii,
   revokeAssessmentReport,
   renewAssessmentReport,
@@ -93,10 +94,28 @@ import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 // ses.send() shim + local SendEmailCommand class defined below (~line 137), so
 // the six existing SendEmailCommand call sites stay byte-for-byte unchanged.
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, readFileSync, existsSync } from "node:fs";
 import { chmod } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { randomInt } from "node:crypto";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+// Azure lab lifecycle driver (Portal v2 multi-cloud). SAFE to import statically:
+// azure-infra.mjs's only top-level import is node:crypto -- every @azure/* package
+// is a LAZY dynamic import inside a verb. So loading this module never pulls the
+// @azure deps, and the whole Azure path stays dormant (zero effect on the live AWS
+// flow) unless an "azure"-track lab is actually leased.
+import {
+  lease as azLease,
+  deploy as azDeploy,
+  seedBlob as azSeedBlob,
+  grade as azGrade,
+  teardown as azTeardown,
+} from "./azure-infra.mjs";
+
+// Absolute dir of this module -- used to locate the bundled labs/ tree for track
+// detection (see entLabTrack). In Lambda that's /var/task; locally it's engine/.
+const _here = dirname(fileURLToPath(import.meta.url));
 
 // aws-nuke binary bootstrap — IDENTICAL to handler.mjs (the B2C engine). The
 // 287 MB binary is too large to bundle, so it lives in the deploy bucket and is
@@ -123,6 +142,12 @@ const nukeReady = process.env.AWS_LAMBDA_FUNCTION_NAME
 // reflection step both have headroom before the account auto-expires.
 const ENT_TIMEBOX_MIN = 60;
 const ENT_GRACE_MIN = 15;
+
+// Azure has no scarce account pool (its disposable unit is a per-session Resource
+// Group minted fresh at /ent/start), so its "capacity" isn't a warm-pool count.
+// This is the per-slot concurrency ceiling the booking flow gates Azure labs on --
+// a soft guard well under the subscription's storage-account/RG limits, not a pool.
+const AZURE_SLOT_CAP = 20;
 
 // OTP send throttling (per-invite). A cooldown between sends and a rolling 24h cap
 // resist SES-cost abuse and code-spam. These counters live on the invite and are
@@ -511,6 +536,56 @@ function rosterLabel(status, expired) {
   return "Invited"; // created / consented / verified
 }
 
+// ── Multi-cloud track dispatch (Portal v2) ────────────────────────────────────
+// A lab's cloud provider lives in its lab.json `track` ("aws" | "azure"). The
+// enterprise engine forks the account-lifecycle verbs (slots/book/start/submit +
+// the deploy/grade/teardown workers) by track: the DEFAULT AWS path is unchanged;
+// an "azure" lab routes to azure-infra.mjs + graders.azure.mjs, whose disposable
+// unit is a per-session RESOURCE GROUP (no account pool, no warm) instead of a
+// leased AWS account. Read from the bundled labs/ tree once, then cached. ANY
+// problem -- unsafe slug, missing lab.json, unreadable JSON -- falls back to "aws",
+// so a packaging slip can NEVER silently route an AWS lab down the Azure path
+// (which would try to create Azure resources for an AWS scenario, or vice versa).
+const _trackCache = new Map();
+const SAFE_LAB_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
+function entLabTrack(labSlug) {
+  if (typeof labSlug !== "string" || !SAFE_LAB_SLUG.test(labSlug)) return "aws";
+  if (_trackCache.has(labSlug)) return _trackCache.get(labSlug);
+  let track = "aws";
+  try {
+    // Lambda unzips labs/ next to this module (here/labs); a local run has them at
+    // the repo root (here/../labs). Try both, mirroring azure-infra's loader.
+    const candidates = [
+      join(_here, "labs", labSlug, "lab.json"),
+      join(_here, "..", "labs", labSlug, "lab.json"),
+    ];
+    const p = candidates.find((f) => existsSync(f));
+    if (p) {
+      const j = JSON.parse(readFileSync(p, "utf8"));
+      if (typeof j.track === "string" && j.track.trim()) track = j.track.trim().toLowerCase();
+    }
+  } catch {
+    track = "aws";
+  }
+  _trackCache.set(labSlug, track);
+  return track;
+}
+
+// azurePortalUrl(): the learner-facing URL for an Azure session. Unlike AWS (a
+// federated console SIGN-IN URL minted per session by mintConsoleUrl), the Azure
+// candidate-access mechanism -- a per-session Entra principal for mintAccess, or
+// CLI-first service-principal credentials -- is an OWNER-GATED decision (see the
+// project_shieldsync_azure_labs memory: CLI-first vs Portal-parity) and is NOT
+// wired here. Until it is, /ent/start returns the RG's portal overview URL as a
+// placeholder plus accessPending:true, so the app renders a "provisioning / access
+// pending" state rather than a broken console link. Returns null if ids are absent.
+function azurePortalUrl(sess) {
+  const sub = sess.azSubscriptionId || sess.subscriptionId;
+  const rg = sess.azResourceGroup || sess.resourceGroup;
+  if (!sub || !rg) return null;
+  return `https://portal.azure.com/#@/resource/subscriptions/${sub}/resourceGroups/${rg}/overview`;
+}
+
 // ── Async worker actions (deploy + teardown) ─────────────────────────────
 //
 // Both the real Lambda-worker branch (event._worker, invoked async via
@@ -557,6 +632,48 @@ async function runWarmEnt({ labSlug }) {
   return { ok: true };
 }
 
+// ── Azure worker actions (deploy+seed / teardown) ─────────────────────────────
+// The Azure analog of runDeployEnt / runTeardownEnt. Azure's deploy (ARM template
+// or Deployment Stack) + blob seed is ~1-2 min, so it MUST run async — awaiting it
+// inline in /ent/start would blow the API Gateway 30s ceiling, exactly like the AWS
+// cold deploy. Unlike AWS (where the account + exec role are known at lease time),
+// the Azure storage account name is only known AFTER deploy, so this worker STAMPS
+// it (plus the anon blob URL + stack name + ready flag) back onto the invite via
+// stampAzureSession so /ent/submit can grade + tear down. stampAzureSession never
+// touches status, so it can't clobber a candidate who submitted meanwhile.
+async function runDeployAzure({ inviteToken, sessionId, resourceGroup, subscriptionId, location, labSlug }) {
+  try {
+    const deployed = await azDeploy({ sessionId, resourceGroup, subscriptionId, location, labSlug });
+    const seeded = await azSeedBlob(deployed);
+    await stampAzureSession(inviteToken, {
+      azStorageAccount: seeded.storageAccountName,
+      azBlobContainer: seeded.blobContainer,
+      azAnonBlobUrl: seeded.anonymousBlobUrl,
+      azStackName: seeded.stackName,
+      azReady: true,
+    }).catch((e) => console.error(`[ent-worker/azure] stamp failed ${inviteToken}: ${e.message}`));
+  } catch (e) {
+    console.error(`[ent-worker/azure] deploy failed ${sessionId}: ${e.message}`);
+    // Provision failed — mark the invite so the app can surface an error, and
+    // best-effort tear down anything half-created so the RG never leaks/bills.
+    await stampAzureSession(inviteToken, { azError: "provision_failed" }).catch(() => {});
+    await azTeardown({ resourceGroup, subscriptionId }).catch(() => {});
+  }
+  return { ok: true };
+}
+
+async function runTeardownAzure({ resourceGroup, subscriptionId, stackName, roleDefId }) {
+  try {
+    if (resourceGroup) await azTeardown({ resourceGroup, subscriptionId, stackName, roleDefId });
+  } catch (e) {
+    // Never throw out of the worker — teardown failures are logged and left for
+    // ops to reconcile (the RG-delete is the authoritative wipe; a failure here
+    // is rare and surfaced in CloudWatch, not to the already-submitted candidate).
+    console.error(`[ent-worker/azure] teardown failed ${resourceGroup}: ${e.message}`);
+  }
+  return { ok: true };
+}
+
 // Dispatch a worker action. In Lambda, fire it as a real async self-invoke
 // (InvocationType: "Event") so the ~90s deploy / ~6min teardown never blocks
 // the candidate-facing response. The dispatch call itself is AWAITED —
@@ -579,6 +696,185 @@ async function invokeEntWorker(action, payload) {
   if (action === "deploy-ent") return runDeployEnt(payload);
   if (action === "teardown-ent") return runTeardownEnt(payload);
   if (action === "warm-ent") return runWarmEnt(payload);
+  if (action === "deploy-azure") return runDeployAzure(payload);
+  if (action === "teardown-azure") return runTeardownAzure(payload);
+}
+
+// ── Azure branch of POST /ent/start ───────────────────────────────────────────
+// Mirrors the AWS start's concurrency discipline (claimStartLease serializes the
+// fresh provision ON THE INVITE so two concurrent starts can't mint two RGs and
+// orphan one) but with Azure's lifecycle: mint an RG (azLease), then dispatch the
+// async deploy+seed worker. Azure has no warm pool, so a fresh start is ALWAYS
+// "leasing" until the worker stamps azReady. Reconnect = the invite already holds a
+// live RG (started, not yet torn down), so re-attach without minting a second RG.
+// The caller has already validated the invite exists, is unexpired, and is in a
+// startable state (booked|started).
+async function startAzureSession({ invite, inviteToken, labSlug }) {
+  // Reconnect: a started invite that still carries its RG re-attaches (never a 2nd RG).
+  if (invite.status === "started" && invite.azResourceGroup) {
+    return resp(200, {
+      sessionId: invite.sessionId,
+      status: invite.azReady ? "active" : "leasing",
+      consoleUrl: azurePortalUrl(invite),
+      scoredExpiresAt: invite.scoredExpiresAt,
+      expiresAt: invite.scoredExpiresAt,
+      reconnected: true,
+      accessPending: true,
+    });
+  }
+
+  // Serialize the fresh provision on the invite (same claim primitive as AWS).
+  const claimed = await claimStartLease(inviteToken);
+  if (!claimed) {
+    // Another concurrent start is already provisioning this invite. Re-read: if it
+    // now holds an RG, reconnect the candidate to it; else ask the app to retry.
+    const fresh = await getInvite(inviteToken);
+    if (fresh?.azResourceGroup) {
+      return resp(200, {
+        sessionId: fresh.sessionId,
+        status: fresh.azReady ? "active" : "leasing",
+        consoleUrl: azurePortalUrl(fresh),
+        scoredExpiresAt: fresh.scoredExpiresAt,
+        expiresAt: fresh.scoredExpiresAt,
+        reconnected: true,
+        accessPending: true,
+      });
+    }
+    return resp(409, { error: "START_IN_PROGRESS", retry: true });
+  }
+
+  let leased;
+  try {
+    leased = await azLease("ent:" + inviteToken, labSlug);
+  } catch (e) {
+    // Nothing provisioned -> free the claim so the candidate's next poll retries
+    // immediately instead of eating 409s for the claim TTL.
+    await releaseStartClaim(inviteToken);
+    console.error("[ent/start/azure] lease failed:", e?.message);
+    return resp(503, { error: "NO_CAPACITY", retry: true });
+  }
+
+  const scoredExpiresAt = new Date(Date.now() + ENT_TIMEBOX_MIN * 60000).toISOString();
+  // Persist the Azure session handles onto the invite so /ent/submit can grade +
+  // tear down. azReady=false until the async worker finishes deploy+seed.
+  await setInviteStatus(inviteToken, "started", {
+    sessionId: leased.sessionId,
+    azResourceGroup: leased.resourceGroup,
+    azSubscriptionId: leased.subscriptionId,
+    azLocation: leased.location,
+    azReady: false,
+    consumedCompute: true,
+    startedAt: new Date().toISOString(),
+    scoredExpiresAt,
+  });
+
+  // Async deploy+seed (~1-2 min): stamps azStorageAccount/azAnonBlobUrl/azStackName
+  // + azReady back onto the invite when done.
+  await invokeEntWorker("deploy-azure", {
+    inviteToken,
+    sessionId: leased.sessionId,
+    resourceGroup: leased.resourceGroup,
+    subscriptionId: leased.subscriptionId,
+    location: leased.location,
+    labSlug,
+  });
+
+  return resp(200, {
+    sessionId: leased.sessionId,
+    status: "leasing",
+    warm: false,
+    consoleUrl: azurePortalUrl(leased),
+    scoredExpiresAt,
+    expiresAt: scoredExpiresAt,
+    accessPending: true,
+  });
+}
+
+// ── Azure branch of POST /ent/submit ──────────────────────────────────────────
+// Same grade-then-teardown discipline as the AWS submit (grade WHILE the
+// environment is still live; ALWAYS tear the RG down in finally so it can't
+// leak/bill), but grades via graders.azure.mjs against the account's control-plane
+// flags + an unauthenticated data-plane probe, and tears down by deleting the RG.
+// The Azure session state lives on the invite (stamped by the deploy-azure worker),
+// not in a session table. The caller has already handled the idempotent
+// double-submit + NOT_SUBMITTABLE (status !== "started") guards.
+async function submitAzureSession({ invite, inviteToken, labSlug, reflection, autoSubmitted }) {
+  if (!labSlug || !invite.azResourceGroup) {
+    return resp(409, { error: "NO_ACTIVE_SESSION" });
+  }
+
+  const nowMs = Date.now();
+  const scoredExpMs = invite.scoredExpiresAt ? new Date(invite.scoredExpiresAt).getTime() : NaN;
+  const lateSubmit = Number.isFinite(scoredExpMs) && nowMs > scoredExpMs;
+  const secondsLate = lateSubmit ? Math.round((nowMs - scoredExpMs) / 1000) : 0;
+  const reflectionText =
+    typeof reflection === "string" ? reflection.slice(0, REFLECTION_MAX_CHARS) : null;
+
+  try {
+    let grade;
+    let gradeError;
+    try {
+      if (!invite.azStorageAccount) {
+        // The async deploy hasn't finished (or failed) -> nothing gradeable. Record
+        // incomplete rather than throwing; the finally still tears the RG down.
+        gradeError = "grading_incomplete";
+        grade = { gradable: false, criteria: [], passed: false };
+      } else {
+        grade = await azGrade({
+          labSlug,
+          subscriptionId: invite.azSubscriptionId,
+          resourceGroup: invite.azResourceGroup,
+          storageAccountName: invite.azStorageAccount,
+          anonymousBlobUrl: invite.azAnonBlobUrl,
+        });
+      }
+    } catch (e) {
+      // Full detail (may embed subscription id / RG) to CloudWatch ONLY; a fixed
+      // string into the stored result the employer sees.
+      console.error("[ent/submit/azure] grade failed:", e);
+      gradeError = "grading_incomplete";
+      grade = { gradable: false, criteria: [], passed: false };
+    }
+
+    const crit = grade.criteria || [];
+    const total = crit.length;
+    const passed = crit.filter((c) => c.passed && !c.unknown).length;
+    const correctness = total ? Math.round(55 * (passed / total)) : 0;
+    const composite = correctness;
+
+    const report = {
+      composite,
+      correctness,
+      dims: { quality: "pending", speed: "pending", process: "pending", reflection: "pending" },
+      criteria: crit,
+      passedCount: passed,
+      totalCriteria: total,
+      reflectionText,
+      reflectionScore: null,
+      integrity: "pending",
+      autoSubmitted,
+      lateSubmit,
+      secondsLate,
+      scoredExpiresAt: invite.scoredExpiresAt ?? null,
+      gradedAt: new Date().toISOString(),
+      ...(gradeError ? { gradeError } : {}),
+    };
+
+    await putResult(invite.assessmentId, inviteToken, report);
+    await setInviteStatus(inviteToken, "submitted", {
+      submittedAt: new Date().toISOString(),
+      lateSubmit,
+    });
+    return resp(200, { ok: true, submitted: true, lateSubmit });
+  } finally {
+    // ALWAYS delete the RG, even if grading/putResult threw, so nothing leaks.
+    await invokeEntWorker("teardown-azure", {
+      resourceGroup: invite.azResourceGroup,
+      subscriptionId: invite.azSubscriptionId,
+      stackName: invite.azStackName,
+      roleDefId: invite.azRoleDefId,
+    }).catch((e) => console.error("[ent/submit/azure] teardown dispatch failed:", e?.message));
+  }
 }
 
 export async function handler(event) {
@@ -595,6 +891,14 @@ export async function handler(event) {
     }
     if (action === "warm-ent") {
       await runWarmEnt(event);
+      return { ok: true };
+    }
+    if (action === "deploy-azure") {
+      await runDeployAzure(event);
+      return { ok: true };
+    }
+    if (action === "teardown-azure") {
+      await runTeardownAzure(event);
       return { ok: true };
     }
     return { ok: true };
@@ -1748,6 +2052,13 @@ export async function handler(event) {
       if (new Date(invite.expiresAt) < new Date()) {
         return resp(410, { error: "LINK_EXPIRED" });
       }
+      // Azure labs have no scarce account pool — capacity is bounded by the
+      // subscription, not a warm pool. Report a generous fixed cap so the app's
+      // slot grid renders (never "scheduling opens soon" from an empty AWS pool).
+      const slotAssess = await getAssessment(invite.assessmentId);
+      if (slotAssess && entLabTrack(slotAssess.labSlug) === "azure") {
+        return resp(200, { capacity: AZURE_SLOT_CAP, available: AZURE_SLOT_CAP });
+      }
       const caps = await entReservedCounts();
       // capacity 0 => app shows "scheduling opens soon"; the app generates the
       // candidate-facing time grid client-side, /ent/book is the atomic guard.
@@ -1770,6 +2081,21 @@ export async function handler(event) {
       // invite, so short-circuit BEFORE bookSlot - re-incrementing the counter would
       // let one invite consume multiple seats and exhaust the slot.
       if (invite.status === "booked" && invite.slotKey === slotKey) {
+        return resp(200, { ok: true, slotKey });
+      }
+
+      // Azure fork: no scarce AWS pool to gate on and no CloudFormation warm to
+      // pre-provision (the RG is minted fresh at /ent/start). Book against a
+      // generous fixed cap so the slot grid stays consistent, but NEVER consult
+      // entReservedCounts() (AWS) or dispatch ensureWarmEnt (CloudFormation).
+      const bookAssess = await getAssessment(invite.assessmentId);
+      if (bookAssess && entLabTrack(bookAssess.labSlug) === "azure") {
+        if (invite.status === "booked" && invite.slotKey && invite.slotKey !== slotKey) {
+          await releaseSlot(invite.slotKey, inviteToken).catch(() => {});
+        }
+        const rAz = await bookSlot(slotKey, AZURE_SLOT_CAP, inviteToken);
+        if (!rAz.ok) return resp(409, { error: "SLOT_FULL" });
+        await setInviteStatus(inviteToken, "booked", { slotKey, slotAt: slotKey });
         return resp(200, { ok: true, slotKey });
       }
 
@@ -1813,6 +2139,15 @@ export async function handler(event) {
       // "started" is allowed too — that's the reconnect path below, not a fresh lease.
       if (!["booked", "started"].includes(invite.status)) {
         return resp(409, { error: "NOT_STARTABLE" });
+      }
+
+      // Azure fork: RG-per-session lifecycle (no pool, no warm) — handled entirely
+      // in startAzureSession. Everything below this point is the AWS account-pool path.
+      {
+        const startAssess = await getAssessment(invite.assessmentId);
+        if (startAssess && entLabTrack(startAssess.labSlug) === "azure") {
+          return await startAzureSession({ invite, inviteToken, labSlug: startAssess.labSlug });
+        }
       }
 
       // ── Idempotent reconnect (crash-resume): never lease a 2nd account ──
@@ -1934,6 +2269,13 @@ export async function handler(event) {
 
       const assessment = await getAssessment(invite.assessmentId);
       const labSlug = assessment?.labSlug;
+
+      // Azure fork: RG-based grade + teardown (graders.azure.mjs), handled entirely
+      // in submitAzureSession. Everything below is the AWS account-pool submit path.
+      if (entLabTrack(labSlug) === "azure") {
+        return await submitAzureSession({ invite, inviteToken, labSlug, reflection, autoSubmitted });
+      }
+
       if (!labSlug || !invite.sessionId || !invite.accountId || !invite.execRoleArn) {
         return resp(409, { error: "NO_ACTIVE_SESSION" });
       }
