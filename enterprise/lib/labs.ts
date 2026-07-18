@@ -17,6 +17,7 @@
 // the allowlist and the form options below are both derived from it.
 export const LAB_LABEL: Record<string, string> = {
   "s3-misconfiguration-audit": "S3 misconfiguration & data exposure",
+  "storage-public-exposure-audit": "Azure Storage public exposure & data leak",
 };
 
 // Ordered allowlist of enterprise lab slugs an assessment may be created
@@ -78,6 +79,19 @@ export const MODULE_CATALOG: Module[] = [
     title: "Lock the exposed S3 store — app preserved",
     graderType: "state",
     minutes: 20,
+  },
+  {
+    // Azure peer of the S3 data-exposure module. Engine target
+    // storage-public-exposure-audit carries track:"azure" in its lab.json, so the
+    // enterprise engine routes its lease/deploy/grade/teardown to azure-infra.mjs.
+    moduleId: "azure-storage-exposure-l1",
+    labSlug: "storage-public-exposure-audit",
+    track: "azure",
+    domain: "data-protection",
+    level: 1,
+    title: "Lock the leaky Azure Storage account",
+    graderType: "state",
+    minutes: 30,
   },
 ];
 
