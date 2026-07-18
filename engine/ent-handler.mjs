@@ -661,14 +661,23 @@ async function runDeployAzure({ inviteToken, sessionId, resourceGroup, subscript
     }).catch((e) => console.error(`[ent-worker/azure] stamp failed ${inviteToken}: ${e.message}`));
   } catch (e) {
     console.error(`[ent-worker/azure] deploy failed ${sessionId}: ${e.message}`);
-    // Provision failed. Recover so nothing leaks and the candidate isn't stranded on
-    // "preparing" forever (mirrors the AWS runDeployEnt recovery): tear the RG down,
-    // RELEASE the pooled SP back to the pool (not just delete the RG -- the SP would
-    // otherwise be lost from the pool), and reset the invite to "booked" so the next
-    // /ent/start re-provisions fresh.
-    await azTeardown({ resourceGroup, subscriptionId }).catch(() => {});
-    if (spId) await releaseAzureSp(spId, inviteToken).catch(() => {});
-    await resetAzureInviteForRetry(inviteToken).catch(() => {});
+    // Provision failed. Recover (mirrors the AWS runDeployEnt recovery). CRITICAL: the SP
+    // already holds a LIVE RG-scoped role assignment (granted at start), so only release
+    // it + reset the invite once the RG is CONFIRMED deleted -- otherwise the still-live
+    // assignment leaks to the next candidate who claims this SP. On teardown failure leave
+    // the SP "assigned" + the invite pointing at the RG so claimAzureSp's 90-min self-heal
+    // reaper reclaims the SP and tears down the orphan RG on reclaim.
+    let tornDown = true;
+    try {
+      await azTeardown({ resourceGroup, subscriptionId });
+    } catch (te) {
+      tornDown = false;
+      console.error(`[ent-worker/azure] teardown-after-deploy-fail failed ${resourceGroup}: ${te.message}`);
+    }
+    if (tornDown) {
+      if (spId) await releaseAzureSp(spId, inviteToken).catch(() => {});
+      await resetAzureInviteForRetry(inviteToken).catch(() => {});
+    }
   }
   return { ok: true };
 }
@@ -900,9 +909,20 @@ async function startAzureSession({ invite, inviteToken, labSlug }) {
     });
   } catch (e) {
     console.error("[ent/start/azure] persist/dispatch failed:", e?.message);
-    await releaseAzureSp(sp.spId, inviteToken).catch(() => {});
-    await invokeEntWorker("teardown-azure", { resourceGroup: leased.resourceGroup, subscriptionId: leased.subscriptionId }).catch(() => {});
-    await releaseStartClaim(inviteToken);
+    // Reset the invite so the candidate re-provisions instead of being stranded "started"
+    // (if setInviteStatus committed before the dispatch threw). The status guard on
+    // resetAzureInviteForRetry makes it a no-op when the persist itself failed (invite
+    // still "booked"). Tear down + release the SP via the worker so the SP is freed ONLY
+    // after its live RG assignment is gone -- a direct release here would leak the
+    // assignment to the next candidate who claims this SP.
+    await resetAzureInviteForRetry(inviteToken).catch(() => {});
+    await releaseStartClaim(inviteToken).catch(() => {});
+    await invokeEntWorker("teardown-azure", {
+      resourceGroup: leased.resourceGroup,
+      subscriptionId: leased.subscriptionId,
+      spId: sp.spId,
+      inviteToken,
+    }).catch(() => {});
     return resp(503, { error: "AZURE_ACCESS_FAILED", retry: true });
   }
 

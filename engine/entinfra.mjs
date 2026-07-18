@@ -904,9 +904,14 @@ export async function resetAzureInviteForRetry(inviteToken) {
       TableName: INVITES_TABLE, Key: { inviteToken: S(inviteToken) },
       UpdateExpression:
         "SET #s = :booked REMOVE azResourceGroup, azSpId, azSubscriptionId, azLocation, azStorageAccount, azAnonBlobUrl, azStackName, azReady, azError, sessionId, consumedCompute, leaseClaimAt",
-      ConditionExpression: "attribute_exists(inviteToken)",
+      // MUST be status-guarded: a deploy-worker failure can fire AFTER the candidate
+      // already submitted (mid-provision early submit / auto-submit), and an unguarded
+      // reset would flip a TERMINAL "submitted" invite back to "booked" -- letting the
+      // candidate re-start + overwrite their result. Only recover an invite still
+      // mid-provision ("started"); any terminal state is a no-op.
+      ConditionExpression: "attribute_exists(inviteToken) AND #s = :started",
       ExpressionAttributeNames: { "#s": "status" },
-      ExpressionAttributeValues: { ":booked": S("booked") },
+      ExpressionAttributeValues: { ":booked": S("booked"), ":started": S("started") },
       ReturnValues: "ALL_NEW",
     }));
     return itemToObject(r.Attributes);

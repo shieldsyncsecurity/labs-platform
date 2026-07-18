@@ -528,21 +528,35 @@ export async function rotateSpSecret(appObjectId, oldKeyId) {
   const keyId = added?.keyId;
   if (!secret || !keyId) throw new Error("rotateSpSecret: addPassword returned no secretText/keyId");
 
-  // removePassword the OLD credential so the prior candidate's saved secret dies now.
-  if (oldKeyId) {
-    const rmRes = await fetch(`${base}/removePassword`, {
-      method: "POST",
-      headers: auth,
-      body: JSON.stringify({ keyId: oldKeyId }),
-    });
+  // Kill EVERY other credential on the app -- the prior candidate's secret AND any orphan
+  // left by a past failed persist -- keeping ONLY the just-added one. This makes rotation
+  // self-healing (sweeps orphans a dual-write failure could leave) and truly fail-closed.
+  // Enumerate the app's current passwordCredentials; if the read fails, fall back to the
+  // known oldKeyId so we at least kill the prior candidate's secret.
+  let staleKeyIds = [];
+  try {
+    const getRes = await fetch(base, { method: "GET", headers: { authorization: `Bearer ${tok.token}` } });
+    if (getRes.ok) {
+      const app = await getRes.json();
+      staleKeyIds = (app?.passwordCredentials ?? []).map((c) => c.keyId).filter((k) => k && k !== keyId);
+    } else if (oldKeyId) {
+      staleKeyIds = [oldKeyId];
+    }
+  } catch {
+    if (oldKeyId) staleKeyIds = [oldKeyId];
+  }
+  for (const k of staleKeyIds) {
+    const rmRes = await fetch(`${base}/removePassword`, { method: "POST", headers: auth, body: JSON.stringify({ keyId: k }) });
     if (!rmRes.ok && rmRes.status !== 404) {
+      // FAIL CLOSED: a prior credential is still live. Undo the new add so it isn't
+      // orphaned, then throw -- startAzureSession's catch then releases the SP + 503s, so
+      // no candidate is handed access while an old secret still authenticates as this app.
+      await fetch(`${base}/removePassword`, { method: "POST", headers: auth, body: JSON.stringify({ keyId }) }).catch(() => {});
       const t = await rmRes.text().catch(() => "");
-      // Non-fatal: the new secret is already live; a lingering old credential is swept
-      // by the next rotation. Log loudly so a persistent failure is visible in CloudWatch.
-      console.warn(`  [azure-infra] rotateSpSecret removePassword(old) HTTP ${rmRes.status}: ${t.slice(0, 200)}`);
+      throw new Error(`rotateSpSecret removePassword(stale ${k}) HTTP ${rmRes.status}: ${t.slice(0, 200)}`);
     }
   }
-  console.log(`  rotated app secret for ${appObjectId} (new keyId ${keyId})`);
+  console.log(`  rotated app secret for ${appObjectId} (new keyId ${keyId}, swept ${staleKeyIds.length} stale)`);
   return { secret, keyId };
 }
 
