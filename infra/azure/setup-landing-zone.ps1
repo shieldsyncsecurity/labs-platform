@@ -3,16 +3,19 @@
     ShieldSync Labs - Azure landing-zone setup  (ONE-TIME, per account)
     ===================================================================
     The Azure analog of the AWS infra/ setup. Creates, in ONE sponsored subscription:
-      1. A pool of resource groups (one RG per lab lease).
+      1. (OPTIONAL, default OFF) a pool of resource groups. VESTIGIAL: the engine's
+         azure-infra.lease() mints a DYNAMIC RG per session and ignores any pool. -PoolSize 0.
       2. A management service principal  (shieldsync-lab-mgmt)  - the engine's deploy/teardown identity.
       3. A read-only probe service principal (shieldsync-lab-probe) - the grader's read-only identity.
       4. The custom RBAC role the mgmt SP is allowed to assign to learners (assignment happens per-lease).
       5. The "deny expensive" Azure Policy (from deny-expensive-policy.json) assigned at the sub scope.
 
     DESIGN
-      - Pool of RESOURCE GROUPS in one sub (not many subs). The RG is the teardown unit.
-      - LEAST PRIVILEGE, split by blast radius: mgmt SP can write but only on the RG pool + can only
-        assign the ONE learner role; probe SP is Reader-only. Neither is Owner of the subscription.
+      - DYNAMIC RESOURCE GROUP per session in one sub (not a pre-created pool, not many subs). The RG is
+        the teardown unit; azure-infra.lease() creates it and teardown() deletes it.
+      - LEAST PRIVILEGE, split by blast radius: mgmt SP can write + create RGs across this ONE dedicated,
+        deny-policy-fenced labs sub + can only assign the ONE learner role; probe SP is Reader-only.
+        Neither is Owner. (Sub scope is required BECAUSE the session RG name isn't known ahead of time.)
       - COST: RGs, SPs, roles, role assignments and policy assignments are all free at idle.
 
     IDEMPOTENT: safe to re-run. It reconciles to desired state - it will NOT create duplicate SPs,
@@ -32,8 +35,11 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$SubscriptionId,
 
-    # How many concurrent leases (resource groups) to pre-create. Grow later by re-running.
-    [int]$PoolSize = 5,
+    # DEPRECATED pre-created RG pool. The engine's azure-infra.lease() mints a DYNAMIC
+    # resource group per session (sslab-<slug>-<hex>) and NEVER consults a pool, so the
+    # default is now 0 (no vestigial pool). The SP grants below are at SUBSCRIPTION scope
+    # to match that dynamic-RG model. Set >0 only for optional manual/legacy pooling.
+    [int]$PoolSize = 0,
 
     # Region for the RG pool + the allowed-locations lock. Must match the labs' deploysToRegion.
     [string]$Location = "eastus",
@@ -95,9 +101,12 @@ foreach ($ns in @("Microsoft.Storage", "Microsoft.Authorization", "Microsoft.Res
 }
 
 # ---------------------------------------------------------------------------
-# 1. Resource-group pool  (one RG per lease; the teardown unit)
+# 1. Resource-group pool  (OPTIONAL/VESTIGIAL - default PoolSize 0)
 # ---------------------------------------------------------------------------
-Write-Step "Ensuring $PoolSize pooled resource groups ($RgPrefix-NNN) in $Location"
+# The engine mints a DYNAMIC RG per session (azure-infra.lease -> sslab-<slug>-<hex>) and
+# never reads a pool, so this loop is a no-op at the default PoolSize 0. Left in only for
+# optional manual pooling; the SP grants below are subscription-scoped regardless.
+if ($PoolSize -gt 0) { Write-Step "Ensuring $PoolSize pooled resource groups ($RgPrefix-NNN) in $Location" }
 for ($i = 1; $i -le $PoolSize; $i++) {
     $rg = "{0}-{1:D3}" -f $RgPrefix, $i
     $exists = (Invoke-Az group exists -n $rg)   # returns "true"/"false"
@@ -192,24 +201,24 @@ if ([string]::IsNullOrWhiteSpace($mgmtAppId)) {
         Write-Ok "rotated mgmt SP secret"
     }
 }
-# Scope mgmt writes to the RG pool only (idempotent: az create-role-assignment is a no-op if present).
-Write-Step "Assigning mgmt SP -> Contributor on each pool RG"
-for ($i = 1; $i -le $PoolSize; $i++) {
-    $rg = "{0}-{1:D3}" -f $RgPrefix, $i
-    $rgScope = "$subScope/resourceGroups/$rg"
-    Invoke-Az role assignment create --assignee $mgmtAppId --role "Contributor" --scope $rgScope | Out-Null
-    # seedBlob() uploads the "secret" object via an AAD token (a DATA-plane write), and Contributor
-    # (control plane) does NOT include blob-data write - so the mgmt SP also needs Storage Blob Data
-    # Contributor. Scoped to the pool RG only, never the subscription. Without this, seedBlob 403s.
-    Invoke-Az role assignment create --assignee $mgmtAppId --role "Storage Blob Data Contributor" --scope $rgScope | Out-Null
-    # RBAC-admin so it can grant the learner role. Condition: it may ONLY assign the one learner role,
-    # so a compromised mgmt SP cannot hand out Owner/Contributor. ($learnerRoleId fetched once above.)
-    $cond = "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$learnerRoleId}))"
-    Invoke-Az role assignment create --assignee $mgmtAppId `
-        --role "Role Based Access Control Administrator" --scope $rgScope `
-        --condition $cond --condition-version "2.0" | Out-Null
-}
-Write-Ok "mgmt SP scoped to pool RGs"
+# The engine mints a DYNAMIC RG per session (name not known ahead of time), so the mgmt SP
+# MUST be scoped at the SUBSCRIPTION - it has to create + write resource groups anywhere in
+# this dedicated, deny-policy-fenced labs sub. (Pool-RG-scoped grants could never cover an
+# as-yet-unnamed session RG.) Wider blast radius than pool-scoping, but bounded to one throwaway
+# labs subscription + the deny-expensive policy. This matches the LIVE landing zone.
+Write-Step "Assigning mgmt SP -> Contributor + Storage Blob Data Contributor + scoped RBAC-admin at subscription"
+Invoke-Az role assignment create --assignee $mgmtAppId --role "Contributor" --scope $subScope | Out-Null
+# seedBlob() uploads the "secret" object via an AAD token (a DATA-plane write), and Contributor
+# (control plane) does NOT include blob-data write - so the mgmt SP also needs Storage Blob Data
+# Contributor. Without this, seedBlob 403s.
+Invoke-Az role assignment create --assignee $mgmtAppId --role "Storage Blob Data Contributor" --scope $subScope | Out-Null
+# RBAC-admin so it can grant the learner role. Condition: it may ONLY assign the one learner role,
+# so a compromised mgmt SP cannot hand out Owner/Contributor. ($learnerRoleId fetched once above.)
+$cond = "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$learnerRoleId}))"
+Invoke-Az role assignment create --assignee $mgmtAppId `
+    --role "Role Based Access Control Administrator" --scope $subScope `
+    --condition $cond --condition-version "2.0" | Out-Null
+Write-Ok "mgmt SP scoped at subscription (dynamic-RG model)"
 
 # --- 3b. Probe SP: read-only. Used by graders.azure.mjs for the control-plane flag reads. --------
 Write-Step "Ensuring read-only probe SP '$ProbeSpName'"
@@ -227,15 +236,12 @@ if ([string]::IsNullOrWhiteSpace($probeAppId)) {
         Write-Ok "rotated probe SP secret"
     }
 }
-# Reader on each pool RG. Reader canNOT list storage keys and canNOT read blob data, so a leaked probe
-# secret is harmless. (The grader's unauthenticated blob GET needs no creds at all.)
-Write-Step "Assigning probe SP -> Reader on each pool RG"
-for ($i = 1; $i -le $PoolSize; $i++) {
-    $rg = "{0}-{1:D3}" -f $RgPrefix, $i
-    $rgScope = "$subScope/resourceGroups/$rg"
-    Invoke-Az role assignment create --assignee $probeAppId --role "Reader" --scope $rgScope | Out-Null
-}
-Write-Ok "probe SP scoped Reader on pool RGs"
+# Reader at the SUBSCRIPTION: the grader reads control-plane flags on the dynamic session RG,
+# which can be any RG in the sub. Reader canNOT list storage keys and canNOT read blob data, so a
+# leaked probe secret is harmless. (The grader's unauthenticated blob GET needs no creds at all.)
+Write-Step "Assigning probe SP -> Reader at subscription"
+Invoke-Az role assignment create --assignee $probeAppId --role "Reader" --scope $subScope | Out-Null
+Write-Ok "probe SP scoped Reader at subscription"
 
 # ---------------------------------------------------------------------------
 # 4. Deny-expensive Azure Policy  (the SCP analog) at subscription scope
