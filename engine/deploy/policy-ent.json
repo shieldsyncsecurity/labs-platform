@@ -34,7 +34,8 @@
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAudit",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAudit/index/*",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntLeads",
-        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntDocs"
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntDocs",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAzureSpPool"
       ]
     },
     {

@@ -37,6 +37,12 @@ const RESULTS_TABLE = "ShieldSyncEntResults";
 const ORDERS_TABLE = "ShieldSyncEntOrders";
 const AGREEMENTS_TABLE = "ShieldSyncEntAgreements";
 const AUDIT_TABLE = "ShieldSyncEntAudit";
+// Pool of pre-created Entra service principals handed to Azure-lab candidates for
+// `az login` (Cognito candidates have no Entra identity). Seeded by
+// infra/azure/seed-candidate-sp-pool.ps1; each row is one SP's creds + free/assigned
+// state. A free SP holds ZERO standing role assignments (granted per-session, RG-
+// scoped, auto-removed on RG delete), so a released SP's secret is inert.
+const AZURE_SP_POOL_TABLE = "ShieldSyncEntAzureSpPool";
 
 // Epoch-seconds helpers for ttl / rolling windows.
 const DAYS = 24 * 3600;
@@ -737,6 +743,92 @@ export async function stampAzureSession(inviteToken, extra = {}) {
     if (e.name === "ConditionalCheckFailedException") return null;
     throw e;
   }
+}
+
+/**
+ * claimAzureSp(): atomically claim ONE free candidate service principal from the
+ * Azure SP pool for a session. Enterprise (Cognito) candidates have no Entra
+ * identity, so an azure lab hands the candidate a POOLED SP's creds -- scoped to
+ * their session RG by a per-session RBAC assignment -- to `az login`. Each
+ * concurrent session needs a DISTINCT SP (a shared SP would let one candidate reach
+ * another candidate's RG), so we pool them and claim one per session.
+ *
+ * Scans for status="free" and conditionally flips ONE to "assigned" (guarded by
+ * status="free", so two concurrent starts can't grab the same SP -- the loser's
+ * conditional write fails and it tries the next free row). Returns the SP's
+ * { spId, clientSecret, tenantId, spObjectId }, or null if the pool is exhausted.
+ */
+export async function claimAzureSp(inviteToken) {
+  const db = await ddb();
+  const scan = await db.send(
+    new ScanCommand({
+      TableName: AZURE_SP_POOL_TABLE,
+      FilterExpression: "#s = :free",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: { ":free": S("free") },
+    })
+  );
+  for (const raw of scan.Items ?? []) {
+    const sp = itemToObject(raw);
+    try {
+      const r = await db.send(
+        new UpdateItemCommand({
+          TableName: AZURE_SP_POOL_TABLE,
+          Key: { spId: S(sp.spId) },
+          UpdateExpression: "SET #s = :assigned, assignedInvite = :inv, assignedAt = :at",
+          ConditionExpression: "#s = :free",
+          ExpressionAttributeNames: { "#s": "status" },
+          ExpressionAttributeValues: { ":assigned": S("assigned"), ":free": S("free"), ":inv": S(inviteToken), ":at": S(nowIso()) },
+          ReturnValues: "ALL_NEW",
+        })
+      );
+      const c = itemToObject(r.Attributes);
+      return { spId: c.spId, clientSecret: c.clientSecret, tenantId: c.tenantId, spObjectId: c.spObjectId };
+    } catch (e) {
+      if (e.name === "ConditionalCheckFailedException") continue; // grabbed by a concurrent start -> next
+      throw e;
+    }
+  }
+  return null; // pool exhausted
+}
+
+/**
+ * releaseAzureSp(): return a claimed SP to the pool (status="free"). Called at
+ * teardown. The per-session RBAC assignment is auto-removed when the session RG is
+ * deleted (Azure cleans up assignments scoped to a deleted RG), so the freed SP
+ * returns to ZERO standing access. Idempotent + absence-tolerant.
+ */
+export async function releaseAzureSp(spId) {
+  if (!spId) return null;
+  const db = await ddb();
+  try {
+    const r = await db.send(
+      new UpdateItemCommand({
+        TableName: AZURE_SP_POOL_TABLE,
+        Key: { spId: S(spId) },
+        UpdateExpression: "SET #s = :free REMOVE assignedInvite, assignedAt",
+        ConditionExpression: "attribute_exists(spId)",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":free": S("free") },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return itemToObject(r.Attributes);
+  } catch (e) {
+    if (e.name === "ConditionalCheckFailedException") return null;
+    throw e;
+  }
+}
+
+/** getAzureSp(): read one pool SP row by spId, for reconnect (hand the SAME creds to
+ *  a candidate who restarts). Returns { spId, clientSecret, tenantId, spObjectId } or null. */
+export async function getAzureSp(spId) {
+  if (!spId) return null;
+  const db = await ddb();
+  const r = await db.send(new GetItemCommand({ TableName: AZURE_SP_POOL_TABLE, Key: { spId: S(spId) } }));
+  if (!r.Item) return null;
+  const sp = itemToObject(r.Item);
+  return { spId: sp.spId, clientSecret: sp.clientSecret, tenantId: sp.tenantId, spObjectId: sp.spObjectId };
 }
 
 /**

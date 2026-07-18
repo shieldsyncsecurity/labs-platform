@@ -442,6 +442,49 @@ async function loadLearnerRole(labSlug) {
   return { ...r, _learnerRole: labJson._learnerRole };
 }
 
+// ── assignLearner() ───────────────────────────────────────────────────────────
+// Grant a principal the REGISTERED least-privilege learner role, scoped to ONE
+// session RG. Used by the enterprise engine to grant a POOLED candidate SERVICE
+// PRINCIPAL access (enterprise/Cognito candidates have no Entra user identity, so
+// mintAccess -- which needs a human's AAD object id -- can't serve them; they
+// `az login --service-principal` with a pooled SP instead).
+//
+// Unlike mintAccess (which mints a FRESH per-session custom role def), this assigns
+// the role the landing zone already registered at subscription scope
+// (AZURE_LEARNER_ROLE_NAME, default "ShieldSync Lab Learner - Storage"). That is
+// DELIBERATE: the mgmt SP's RBAC-admin is CONDITIONED to assign ONLY that one role
+// id, so assigning a per-session role def would be refused. The RG-scoped assignment
+// is auto-removed when teardown deletes the RG. Returns { roleAssignmentId, roleDefinitionId }.
+export async function assignLearner(ctx) {
+  const { resourceGroup, principalId } = ctx;
+  if (!resourceGroup) throw new Error("assignLearner: ctx.resourceGroup required");
+  if (!principalId) throw new Error("assignLearner: ctx.principalId (SP object id) required");
+  const sub = ctx.subscriptionId || subscriptionId();
+  const rgScope = `/subscriptions/${sub}/resourceGroups/${resourceGroup}`;
+  const roleName = process.env.AZURE_LEARNER_ROLE_NAME || "ShieldSync Lab Learner - Storage";
+
+  const ac = await authClient();
+  // Resolve the registered learner role definition id (a subscription-scoped custom role).
+  let roleDefinitionId = null;
+  for await (const rd of ac.roleDefinitions.list(`/subscriptions/${sub}`, { filter: `roleName eq '${roleName}'` })) {
+    roleDefinitionId = rd.id;
+    break;
+  }
+  if (!roleDefinitionId) {
+    throw new Error(`assignLearner: registered learner role '${roleName}' not found in subscription ${sub} (run the landing-zone setup)`);
+  }
+
+  const { randomUUID } = await import("node:crypto");
+  const assignmentId = randomUUID();
+  const assignment = await ac.roleAssignments.create(rgScope, assignmentId, {
+    roleDefinitionId,
+    principalId,
+    principalType: ctx.principalType || "ServicePrincipal",
+  });
+  console.log(`  assigned learner role to principal ${principalId} on ${resourceGroup}`);
+  return { roleAssignmentId: assignment?.id ?? assignmentId, roleDefinitionId };
+}
+
 // ── grade() ─────────────────────────────────────────────────────────────────
 // Delegates to graders.azure.mjs (authored separately) so scoring logic lives in
 // ONE place. Passes the ctx it needs: credential + subscription + RG + account +

@@ -33,6 +33,9 @@ import {
   revokeInvite,
   stampInviteResend,
   stampAzureSession,
+  claimAzureSp,
+  releaseAzureSp,
+  getAzureSp,
   eraseCandidatePii,
   revokeAssessmentReport,
   renewAssessmentReport,
@@ -111,6 +114,7 @@ import {
   seedBlob as azSeedBlob,
   grade as azGrade,
   teardown as azTeardown,
+  assignLearner as azAssignLearner,
 } from "./azure-infra.mjs";
 
 // Absolute dir of this module -- used to locate the bundled labs/ tree for track
@@ -662,7 +666,7 @@ async function runDeployAzure({ inviteToken, sessionId, resourceGroup, subscript
   return { ok: true };
 }
 
-async function runTeardownAzure({ resourceGroup, subscriptionId, stackName, roleDefId }) {
+async function runTeardownAzure({ resourceGroup, subscriptionId, stackName, roleDefId, spId }) {
   try {
     if (resourceGroup) await azTeardown({ resourceGroup, subscriptionId, stackName, roleDefId });
   } catch (e) {
@@ -670,6 +674,15 @@ async function runTeardownAzure({ resourceGroup, subscriptionId, stackName, role
     // ops to reconcile (the RG-delete is the authoritative wipe; a failure here
     // is rare and surfaced in CloudWatch, not to the already-submitted candidate).
     console.error(`[ent-worker/azure] teardown failed ${resourceGroup}: ${e.message}`);
+  }
+  // Return the pooled candidate SP to the pool. The RG-scoped learner-role assignment
+  // is auto-removed by the RG delete above, so the released SP has zero standing access.
+  if (spId) {
+    try {
+      await releaseAzureSp(spId);
+    } catch (e) {
+      console.error(`[ent-worker/azure] SP release failed ${spId}: ${e.message}`);
+    }
   }
   return { ok: true };
 }
@@ -700,26 +713,54 @@ async function invokeEntWorker(action, payload) {
   if (action === "teardown-azure") return runTeardownAzure(payload);
 }
 
+// buildAzAccess(): the candidate-facing CLI-first access payload. Enterprise
+// candidates have no Entra identity, so they `az login` as a POOLED service
+// principal (claimAzureSp) that was granted the least-privilege learner role scoped
+// to THIS session's RG (azAssignLearner). The secret is a per-session credential the
+// candidate needs to authenticate; it is revoked when teardown deletes the RG (the
+// RG-scoped role assignment vanishes) and the SP is released back to the pool.
+function buildAzAccess({ sp, subscriptionId, resourceGroup }) {
+  return {
+    method: "cli-service-principal",
+    clientId: sp.spId,
+    clientSecret: sp.clientSecret,
+    tenantId: sp.tenantId,
+    subscriptionId,
+    resourceGroup,
+    loginCommand: `az login --service-principal -u ${sp.spId} -p "${sp.clientSecret}" --tenant ${sp.tenantId}`,
+    setSubscription: `az account set --subscription ${subscriptionId}`,
+  };
+}
+
 // ── Azure branch of POST /ent/start ───────────────────────────────────────────
 // Mirrors the AWS start's concurrency discipline (claimStartLease serializes the
 // fresh provision ON THE INVITE so two concurrent starts can't mint two RGs and
-// orphan one) but with Azure's lifecycle: mint an RG (azLease), then dispatch the
-// async deploy+seed worker. Azure has no warm pool, so a fresh start is ALWAYS
-// "leasing" until the worker stamps azReady. Reconnect = the invite already holds a
-// live RG (started, not yet torn down), so re-attach without minting a second RG.
-// The caller has already validated the invite exists, is unexpired, and is in a
-// startable state (booked|started).
+// orphan one) but with Azure's lifecycle: mint an RG (azLease), claim a pooled
+// candidate SP + grant it the RG-scoped learner role (azAssignLearner) so the
+// candidate can `az login` (they have no Entra identity), then dispatch the async
+// deploy+seed worker. Azure has no warm pool, so a fresh start is ALWAYS "leasing"
+// until the worker stamps azReady. Reconnect = the invite already holds a live RG
+// (started, not yet torn down), so re-attach + re-hand the SAME SP creds without
+// minting a second RG. The caller has already validated the invite exists, is
+// unexpired, and is in a startable state (booked|started).
 async function startAzureSession({ invite, inviteToken, labSlug }) {
   // Reconnect: a started invite that still carries its RG re-attaches (never a 2nd RG).
+  // Re-hand the SAME pooled SP creds (read from the pool) so the candidate can re-login.
   if (invite.status === "started" && invite.azResourceGroup) {
+    let azAccess = null;
+    if (invite.azSpId) {
+      const sp = await getAzureSp(invite.azSpId);
+      if (sp) azAccess = buildAzAccess({ sp, subscriptionId: invite.azSubscriptionId, resourceGroup: invite.azResourceGroup });
+    }
     return resp(200, {
       sessionId: invite.sessionId,
       status: invite.azReady ? "active" : "leasing",
       consoleUrl: azurePortalUrl(invite),
+      azAccess,
+      accessPending: !azAccess,
       scoredExpiresAt: invite.scoredExpiresAt,
       expiresAt: invite.scoredExpiresAt,
       reconnected: true,
-      accessPending: true,
     });
   }
 
@@ -730,38 +771,73 @@ async function startAzureSession({ invite, inviteToken, labSlug }) {
     // now holds an RG, reconnect the candidate to it; else ask the app to retry.
     const fresh = await getInvite(inviteToken);
     if (fresh?.azResourceGroup) {
+      let azAccess = null;
+      if (fresh.azSpId) {
+        const sp = await getAzureSp(fresh.azSpId);
+        if (sp) azAccess = buildAzAccess({ sp, subscriptionId: fresh.azSubscriptionId, resourceGroup: fresh.azResourceGroup });
+      }
       return resp(200, {
         sessionId: fresh.sessionId,
         status: fresh.azReady ? "active" : "leasing",
         consoleUrl: azurePortalUrl(fresh),
+        azAccess,
+        accessPending: !azAccess,
         scoredExpiresAt: fresh.scoredExpiresAt,
         expiresAt: fresh.scoredExpiresAt,
         reconnected: true,
-        accessPending: true,
       });
     }
     return resp(409, { error: "START_IN_PROGRESS", retry: true });
+  }
+
+  // Claim a pooled candidate SP FIRST (a cheap DDB op) so an exhausted pool costs
+  // NO resource group (no lease-then-teardown churn on a rejected start). A free SP
+  // has zero standing access; the RG-scoped grant happens after the lease below.
+  const sp = await claimAzureSp(inviteToken);
+  if (!sp) {
+    await releaseStartClaim(inviteToken);
+    console.error("[ent/start/azure] candidate SP pool exhausted (seed/grow the pool)");
+    return resp(503, { error: "AZURE_ACCESS_POOL_FULL", retry: true });
   }
 
   let leased;
   try {
     leased = await azLease("ent:" + inviteToken, labSlug);
   } catch (e) {
-    // Nothing provisioned -> free the claim so the candidate's next poll retries
-    // immediately instead of eating 409s for the claim TTL.
+    // Nothing provisioned -> release the SP + free the claim so the next poll retries.
+    await releaseAzureSp(sp.spId).catch(() => {});
     await releaseStartClaim(inviteToken);
     console.error("[ent/start/azure] lease failed:", e?.message);
     return resp(503, { error: "NO_CAPACITY", retry: true });
   }
 
+  // Grant the claimed SP the RG-scoped learner role so the candidate can `az login`.
+  // On failure, release the SP + tear the RG down + free the claim so nothing leaks.
+  try {
+    await azAssignLearner({
+      subscriptionId: leased.subscriptionId,
+      resourceGroup: leased.resourceGroup,
+      principalId: sp.spObjectId,
+      principalType: "ServicePrincipal",
+    });
+  } catch (e) {
+    console.error("[ent/start/azure] learner-role grant failed:", e?.message);
+    await releaseAzureSp(sp.spId).catch(() => {});
+    await invokeEntWorker("teardown-azure", { resourceGroup: leased.resourceGroup, subscriptionId: leased.subscriptionId });
+    await releaseStartClaim(inviteToken);
+    return resp(503, { error: "AZURE_ACCESS_FAILED", retry: true });
+  }
+
   const scoredExpiresAt = new Date(Date.now() + ENT_TIMEBOX_MIN * 60000).toISOString();
-  // Persist the Azure session handles onto the invite so /ent/submit can grade +
-  // tear down. azReady=false until the async worker finishes deploy+seed.
+  // Persist the Azure session handles + the claimed SP id onto the invite so
+  // /ent/submit can grade + tear down + release the SP. azReady=false until the async
+  // worker finishes deploy+seed.
   await setInviteStatus(inviteToken, "started", {
     sessionId: leased.sessionId,
     azResourceGroup: leased.resourceGroup,
     azSubscriptionId: leased.subscriptionId,
     azLocation: leased.location,
+    azSpId: sp.spId,
     azReady: false,
     consumedCompute: true,
     startedAt: new Date().toISOString(),
@@ -769,7 +845,8 @@ async function startAzureSession({ invite, inviteToken, labSlug }) {
   });
 
   // Async deploy+seed (~1-2 min): stamps azStorageAccount/azAnonBlobUrl/azStackName
-  // + azReady back onto the invite when done.
+  // + azReady back onto the invite when done. The candidate can `az login` NOW; the
+  // target storage account appears in their RG once the worker completes.
   await invokeEntWorker("deploy-azure", {
     inviteToken,
     sessionId: leased.sessionId,
@@ -784,9 +861,10 @@ async function startAzureSession({ invite, inviteToken, labSlug }) {
     status: "leasing",
     warm: false,
     consoleUrl: azurePortalUrl(leased),
+    azAccess: buildAzAccess({ sp, subscriptionId: leased.subscriptionId, resourceGroup: leased.resourceGroup }),
+    accessPending: false,
     scoredExpiresAt,
     expiresAt: scoredExpiresAt,
-    accessPending: true,
   });
 }
 
@@ -867,12 +945,14 @@ async function submitAzureSession({ invite, inviteToken, labSlug, reflection, au
     });
     return resp(200, { ok: true, submitted: true, lateSubmit });
   } finally {
-    // ALWAYS delete the RG, even if grading/putResult threw, so nothing leaks.
+    // ALWAYS delete the RG + release the pooled SP, even if grading/putResult threw,
+    // so nothing leaks (RG resources or a stuck pool slot).
     await invokeEntWorker("teardown-azure", {
       resourceGroup: invite.azResourceGroup,
       subscriptionId: invite.azSubscriptionId,
       stackName: invite.azStackName,
       roleDefId: invite.azRoleDefId,
+      spId: invite.azSpId,
     }).catch((e) => console.error("[ent/submit/azure] teardown dispatch failed:", e?.message));
   }
 }
