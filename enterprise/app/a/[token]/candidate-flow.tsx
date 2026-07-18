@@ -29,10 +29,26 @@ type Invite = {
   slotKey?: string;
 };
 
+// Azure candidate access (CLI-first). Azure labs hand the candidate a pooled
+// service-principal credential to `az login` with (they have no Entra identity),
+// scoped to their session resource group. Present only for azure-track assessments;
+// AWS labs use consoleUrl instead.
+type AzAccess = {
+  method: string;
+  clientId: string;
+  clientSecret: string;
+  tenantId: string;
+  subscriptionId: string;
+  resourceGroup: string;
+  loginCommand: string;
+  setSubscription: string;
+};
+
 type StartResponse = {
   sessionId: string;
   status: "leasing" | "active";
   consoleUrl: string;
+  azAccess?: AzAccess | null;
   scoredExpiresAt: string;
   expiresAt: string;
   warm?: boolean;
@@ -749,6 +765,7 @@ export default function CandidateFlow({ token }: { token: string }) {
             name={invite?.name}
             hintsOn={invite?.hintsOn}
             consoleUrl={session?.consoleUrl}
+            azAccess={session?.azAccess}
             countdown={countdown}
             waiting={!session || session.status !== "active"}
             onSubmit={() => setPhase("reflection")}
@@ -1105,10 +1122,38 @@ function StartingCard() {
   );
 }
 
+// A read-only command line with a copy button — used by the Azure CLI-first room.
+function CopyCmd({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex items-stretch gap-2">
+      <pre className="min-w-0 flex-1 overflow-x-auto rounded-lg bg-canvas px-3 py-2 font-mono text-xs text-ink">
+        {text}
+      </pre>
+      <button
+        type="button"
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          } catch {
+            /* clipboard blocked — candidate can still select + copy */
+          }
+        }}
+        className="shrink-0 rounded-lg border border-line-strong px-3 text-xs font-semibold text-ink-soft transition-colors hover:border-brand hover:text-brand-strong"
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
+}
+
 function RoomCard({
   name,
   hintsOn,
   consoleUrl,
+  azAccess,
   countdown,
   waiting,
   onSubmit,
@@ -1116,6 +1161,7 @@ function RoomCard({
   name?: string;
   hintsOn?: boolean;
   consoleUrl?: string;
+  azAccess?: AzAccess | null;
   countdown: string;
   waiting: boolean;
   onSubmit: () => void;
@@ -1130,14 +1176,73 @@ function RoomCard({
     );
   }
 
+  const header = (
+    <div className="flex items-center justify-between">
+      <h2 className="text-lg font-semibold text-ink">{name || "Assessment"}</h2>
+      <span className="rounded-full bg-canvas px-3 py-1 font-mono text-sm font-semibold text-ink">
+        {countdown}
+      </span>
+    </div>
+  );
+
+  // Azure CLI-first: the candidate signs in with a session service-principal
+  // credential (no Azure Portal login — they have no Entra identity) and works
+  // from the Azure CLI, scoped to their own resource group.
+  if (azAccess) {
+    return (
+      <div className="flex flex-col gap-5">
+        {header}
+        <p className="text-sm text-ink-soft">
+          Secure the Azure Storage account in your resource group, then submit. You work from the
+          Azure CLI with the session credentials below.
+        </p>
+        {hintsOn && (
+          <p className="text-sm text-ink-soft">Hints are available for this assessment.</p>
+        )}
+        <ol className="flex flex-col gap-3 text-sm text-ink-soft">
+          <li>
+            <span className="font-semibold text-ink">1.</span> Install the Azure CLI if you don't
+            have it:{" "}
+            <a
+              href="https://aka.ms/installazurecli"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-brand-strong underline"
+            >
+              aka.ms/installazurecli
+            </a>
+          </li>
+          <li>
+            <span className="font-semibold text-ink">2.</span> Sign in with your session credentials
+            (valid for this assessment only):
+            <div className="mt-2">
+              <CopyCmd text={azAccess.loginCommand} />
+            </div>
+          </li>
+          <li>
+            <span className="font-semibold text-ink">3.</span> Point the CLI at your subscription:
+            <div className="mt-2">
+              <CopyCmd text={azAccess.setSubscription} />
+            </div>
+          </li>
+          <li>
+            <span className="font-semibold text-ink">4.</span> Your target is resource group{" "}
+            <code className="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs text-ink">
+              {azAccess.resourceGroup}
+            </code>
+            . Find and fix the leaky storage account, then submit.
+          </li>
+        </ol>
+        <button type="button" onClick={onSubmit} className={BTN_SECONDARY}>
+          Submit assessment
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-ink">{name || "Assessment"}</h2>
-        <span className="rounded-full bg-canvas px-3 py-1 font-mono text-sm font-semibold text-ink">
-          {countdown}
-        </span>
-      </div>
+      {header}
 
       <p className="text-sm text-ink-soft">
         Complete the security task in the AWS console, then submit.

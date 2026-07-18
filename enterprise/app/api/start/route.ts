@@ -46,7 +46,14 @@ export async function POST(req: Request) {
   } catch (err) {
     if (err instanceof EntEngineError) {
       console.error("[api/start] engine error", err.status, err.body);
-      const code = safeEngineCode(err.body, ["NO_CAPACITY", "LINK_EXPIRED", "NOT_STARTABLE"]);
+      const code = safeEngineCode(err.body, [
+        "NO_CAPACITY",
+        "LINK_EXPIRED",
+        "NOT_STARTABLE",
+        // Azure candidate-access provisioning (busy/retry, same UX as NO_CAPACITY).
+        "AZURE_ACCESS_POOL_FULL",
+        "AZURE_ACCESS_FAILED",
+      ]);
       return NextResponse.json({ error: code ?? "Could not start the assessment." }, { status: err.status });
     }
     console.error("[api/start] unexpected error", err);
