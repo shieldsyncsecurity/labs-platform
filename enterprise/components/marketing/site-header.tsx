@@ -33,11 +33,15 @@ export function SiteHeader() {
         <div className="flex items-center gap-3">
           <a
             href="https://shieldsyncsecurity.com"
-            className="whitespace-nowrap rounded-lg text-sm font-medium text-muted transition-colors hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            aria-label="Go to the main ShieldSync site"
+            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-1.5 py-1 text-sm font-medium text-ink-soft transition-colors hover:text-brand-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
           >
-            {/* Short label on phones (the header is tight next to the CTA), full domain on wider screens. */}
-            <span className="sm:hidden">Main site</span>
-            <span className="hidden sm:inline">shieldsyncsecurity.com</span>
+            {/* Back-arrow + clear label so it reads as an ACTION (go to the main site),
+                not a muted domain string. Same on every screen size. */}
+            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 flex-none" fill="none" aria-hidden="true">
+              <path d="M9.5 12l-4-4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Main site
           </a>
           <Link
             href="/book-demo"
