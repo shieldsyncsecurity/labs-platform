@@ -55,12 +55,14 @@ type RosterRow = {
   slotKey?: string;
   submittedAt?: string;
   candidateReportToken?: string;
+  durationSec?: number; // measured started->submitted time on task (submitted rows only)
 };
 
 type ReportData = {
   assessment?: { name?: string; labSlug?: string; createdAt?: string };
   results?: ResultRow[];
   roster?: RosterRow[];
+  timeboxMin?: number; // the scored time window (minutes), for "N of 60 min" context
 };
 
 // Unified table row: scored (submitted + graded) rows carry rank/bar data;
@@ -75,6 +77,7 @@ type DisplayRow = {
   totalCriteria?: number;
   hasReflection?: boolean;
   breakdownToken?: string;
+  durationSec?: number;
 };
 
 // Ranked ordering after the scored rows: submitted-awaiting-grade first,
@@ -111,6 +114,8 @@ export default async function AssessmentReportPage({
   // null = engine response without roster (stale cache / older engine):
   // fall back to the legacy submitted-only table gracefully.
   const roster = Array.isArray(data?.roster) ? data!.roster! : null;
+  const timeboxMin =
+    typeof data?.timeboxMin === "number" && data.timeboxMin > 0 ? data.timeboxMin : 60;
 
   const scored = results
     .map((r) => ({ row: r, pct: correctnessPct(r?.passedCount, r?.totalCriteria) }))
@@ -144,6 +149,7 @@ export default async function AssessmentReportPage({
       totalCriteria: row?.totalCriteria ?? 0,
       hasReflection: Boolean(row?.reflectionText && row.reflectionText.trim().length > 0),
       breakdownToken: rosterRow?.candidateReportToken,
+      durationSec: typeof rosterRow?.durationSec === "number" ? rosterRow.durationSec : undefined,
     };
   });
 
@@ -226,13 +232,14 @@ export default async function AssessmentReportPage({
       ) : (
         <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+            <table className="w-full min-w-[820px] border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-line bg-canvas/70 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
                   <th className="px-5 py-3.5">Rank</th>
                   <th className="px-5 py-3.5">Candidate</th>
                   <th className="px-5 py-3.5">Objectives</th>
                   <th className="px-5 py-3.5">Correctness</th>
+                  <th className="px-5 py-3.5">Time on task</th>
                   <th className="px-5 py-3.5">Status</th>
                   <th className="px-5 py-3.5 text-center">Reflection</th>
                   <th className="px-5 py-3.5">Report</th>
@@ -278,6 +285,13 @@ export default async function AssessmentReportPage({
                           <span className="text-muted">&mdash;</span>
                         )}
                       </td>
+                      <td className="px-5 py-4 tabular-nums text-ink-soft">
+                        {isScored ? (
+                          formatMins(r.durationSec)
+                        ) : (
+                          <span className="text-muted">&mdash;</span>
+                        )}
+                      </td>
                       <td className="px-5 py-4">
                         <StatusChip status={r.status} />
                       </td>
@@ -319,8 +333,9 @@ export default async function AssessmentReportPage({
 
       <p className="mt-6 text-xs leading-relaxed text-muted">
         Candidates are ranked by verified objective correctness on a real, isolated AWS environment.
-        Each candidate&apos;s full per-objective breakdown and written reasoning is on their individual
-        report link.
+        Time on task is the measured start-to-submit duration within the {timeboxMin}-minute window,
+        shown for context only &mdash; it is not part of the score or the ranking. Each candidate&apos;s
+        full per-objective breakdown and written reasoning is on their individual report link.
       </p>
     </ReportShell>
   );
@@ -370,4 +385,12 @@ function StatCard({ label, value }: { label: string; value: string }) {
       <div className="mt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted">{label}</div>
     </div>
   );
+}
+
+// Time on task, rounded to minutes ("<1 min" for a sub-minute solve). A neutral,
+// measured fact (started -> submitted) -- never a score or a ranking input.
+function formatMins(sec?: number): string {
+  if (typeof sec !== "number" || !Number.isFinite(sec) || sec < 0) return "—";
+  if (sec < 60) return "<1 min";
+  return `${Math.round(sec / 60)} min`;
 }

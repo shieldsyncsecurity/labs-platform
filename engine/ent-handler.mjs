@@ -1537,6 +1537,15 @@ export async function handler(event) {
         if (inv.status === "submitted") {
           row.submittedAt = inv.submittedAt;
           row.candidateReportToken = inv.candidateReportToken;
+          // Time-on-task: a REAL, measured signal (started -> submitted). Surfaced
+          // neutrally in the report -- it is NOT a score dimension and NEVER ranks the
+          // candidates; it is simply an honest fact ("solved in N of the 60 min") the
+          // hiring team finds useful. Deliberately not a composite/verdict (the report's
+          // honest-MVP stance: only objective correctness is scored).
+          if (inv.startedAt && inv.submittedAt) {
+            const sec = Math.round((new Date(inv.submittedAt).getTime() - new Date(inv.startedAt).getTime()) / 1000);
+            if (Number.isFinite(sec) && sec >= 0) row.durationSec = sec;
+          }
         }
         roster.push(row);
       }
@@ -1545,6 +1554,7 @@ export async function handler(event) {
         assessment: { name: assessment.name, labSlug: assessment.labSlug, createdAt: assessment.createdAt },
         results: named,
         roster,
+        timeboxMin: ENT_TIMEBOX_MIN,
       });
     }
 
