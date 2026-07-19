@@ -222,14 +222,14 @@ function CmpMark({ value, strong }: { value: "yes" | "no" | "partial"; strong?: 
 
 /* -------------------------------------------------------------- THE REPORT */
 
-// Honest with the real report: it ranks by verified correctness and shows
-// objectives passed -- it never emits a hire/no-hire VERDICT (that decision is
-// the employer's). So the preview mirrors that: correctness % + objectives, no
+// Honest with the real report: it ranks by verified checks passed (grouped into
+// competencies) and never emits a hire/no-hire VERDICT (that decision is the
+// employer's). So the preview mirrors that: a checks-passed % + count, no
 // "Strong hire"/"No hire" labels the product doesn't actually produce.
 const REPORT_ROWS = [
-  { name: "Candidate A", score: 83, bar: 83, tag: "5 / 6 objectives" },
-  { name: "Candidate B", score: 67, bar: 67, tag: "4 / 6 objectives" },
-  { name: "Candidate C", score: 50, bar: 50, tag: "3 / 6 objectives" },
+  { name: "Candidate A", score: 83, bar: 83, tag: "5 / 6 checks" },
+  { name: "Candidate B", score: 67, bar: 67, tag: "4 / 6 checks" },
+  { name: "Candidate C", score: 50, bar: 50, tag: "3 / 6 checks" },
 ];
 
 function TheReport() {
@@ -243,9 +243,10 @@ function TheReport() {
         <div className="max-w-md">
           <p className="text-[15px] leading-relaxed text-ink-soft">
             Every session ends in one comparable artifact: candidates ranked
-            side-by-side, each objective scored on what they actually built in the
-            cloud, plus their written reasoning. No interpretation required &mdash; just
-            a decision.
+            side-by-side, each one&rsquo;s work scored across four competencies &mdash;
+            correctness, security rigor, no new exposure and operational safety &mdash;
+            verified on what they actually built in the cloud, plus their written
+            reasoning. No interpretation required &mdash; just a decision.
           </p>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
             <Link
@@ -401,7 +402,7 @@ const FAQS = [
   },
   {
     q: "What exactly is graded?",
-    a: "The engine inspects the live AWS configuration the candidate produced — per-objective pass or fail on real cloud state — plus their short written reflection explaining what they found and fixed. No multiple choice, no self-reporting.",
+    a: "The engine inspects the live AWS configuration the candidate produced — real cloud state, not multiple choice — and scores it across four objective competencies: reaching the secure end-state (correctness), hardening it with least privilege and defence in depth (security rigor), not opening a new hole while fixing (no new exposure), and not deleting or breaking the workload to clear the finding (operational safety). Every check is verified against the account and shown with the candidate's short written reflection. No self-reporting.",
   },
   {
     q: "How do we buy it?",
