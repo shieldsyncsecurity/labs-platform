@@ -23,23 +23,39 @@
   "successCriteria": [
     {
       "id": "no-public-buckets",
-      "description": "No bucket in the account allows anonymous public read.",
-      "verify": "aws s3api get-public-access-block + bucket policy review on every Lab-tagged bucket."
-    },
-    {
-      "id": "encryption-required",
-      "description": "Every Lab bucket has a bucket policy denying unencrypted PutObject.",
-      "verify": "Bucket policy contains s3:PutObject Deny with s3:x-amz-server-side-encryption condition."
-    },
-    {
-      "id": "tls-only",
-      "description": "Every Lab bucket denies non-TLS requests.",
-      "verify": "Bucket policy contains aws:SecureTransport=false Deny."
+      "dimension": "correctness",
+      "description": "No Lab bucket allows anonymous public read.",
+      "verify": "get-bucket-policy-status + bucket policy review on every Lab-tagged bucket; the bucket must still exist (deleting it is not a fix)."
     },
     {
       "id": "least-privilege-iam",
-      "description": "The lab IAM user no longer has s3:* on Resource '*'.",
+      "dimension": "rigor",
+      "description": "The lab 'auditor' user no longer has s3:* on Resource '*'.",
       "verify": "Inline policy on /lab/auditor scoped to the lab buckets only."
+    },
+    {
+      "id": "encryption-required",
+      "dimension": "rigor",
+      "description": "Every Lab bucket denies unencrypted PutObject.",
+      "verify": "Bucket policy contains an s3:PutObject Deny with an s3:x-amz-server-side-encryption condition."
+    },
+    {
+      "id": "tls-only",
+      "dimension": "rigor",
+      "description": "Every Lab bucket denies non-TLS (HTTP) requests.",
+      "verify": "Bucket policy contains an aws:SecureTransport=false Deny."
+    },
+    {
+      "id": "no-anonymous-grant",
+      "dimension": "no_new_exposure",
+      "description": "No Lab bucket policy grants a wildcard (anonymous) principal — the fix leaves no new open door.",
+      "verify": "No Allow statement with Principal '*' (or {\"AWS\":\"*\"}) in any Lab bucket policy, even if Block Public Access currently masks it."
+    },
+    {
+      "id": "resources-intact",
+      "dimension": "operational_safety",
+      "description": "Both Lab buckets still exist — secured in place, not deleted to clear the finding.",
+      "verify": "HeadBucket on each Lab bucket succeeds (the lab grades fixing, not deletion)."
     }
   ],
 
