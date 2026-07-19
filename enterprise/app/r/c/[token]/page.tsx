@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 import {
   Bar,
-  PassBadge,
+  CompetencyProfile,
   PreliminaryBanner,
   ReportHeader,
   ReportNotFound,
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
 // same applies here: this route must always reflect live grading state.
 export const dynamic = "force-dynamic";
 
-type CriterionRow = { id?: string; description?: string; passed?: boolean; unknown?: boolean };
+type CriterionRow = { id?: string; description?: string; passed?: boolean; unknown?: boolean; dimension?: string };
 
 type CandidateResult = {
   assessmentId?: string;
@@ -148,7 +148,7 @@ export default async function CandidateReportPage({
         <section className="mb-8 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
           <div className="border-b border-line bg-gradient-to-br from-brand/[0.05] to-cyan/[0.03] px-6 py-6 sm:px-8">
             <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand">
-              Objective correctness
+              Verified checks passed
             </h2>
             <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
               <div className="flex items-baseline gap-3">
@@ -158,7 +158,7 @@ export default async function CandidateReportPage({
                 {total ? (
                   <span className="text-2xl font-semibold tabular-nums text-muted">/ {total}</span>
                 ) : null}
-                <span className="ml-1 text-sm text-ink-soft">objectives passed</span>
+                <span className="ml-1 text-sm text-ink-soft">checks passed</span>
               </div>
               <span className="text-2xl font-bold tabular-nums text-brand">{pct}%</span>
             </div>
@@ -180,34 +180,20 @@ export default async function CandidateReportPage({
         <section className="mb-8">
           <div className="mb-3 flex items-baseline justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-              Objective breakdown
+              Competency profile
             </h2>
             {criteria.length ? (
               <span className="font-mono text-xs text-muted">
-                {passedCriteria}/{criteria.length} passed
+                {passedCriteria}/{criteria.length} checks passed
               </span>
             ) : null}
           </div>
           {criteria.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-line-strong bg-surface px-6 py-10 text-center text-ink-soft">
-              No objective results are available for this run.
+              No verified results are available for this run.
             </div>
           ) : (
-            <ul className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
-              {criteria.map((c, i) => (
-                <li
-                  key={c?.id ?? i}
-                  className="flex items-center justify-between gap-4 border-b border-line/70 px-5 py-4 transition-colors last:border-b-0 hover:bg-canvas/60"
-                >
-                  <span className="text-sm text-ink-soft">
-                    {c?.description ?? c?.id ?? `Objective ${i + 1}`}
-                  </span>
-                  <span className="flex-none">
-                    <PassBadge passed={c?.passed} unknown={c?.unknown} />
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <CompetencyProfile criteria={criteria} />
           )}
         </section>
 

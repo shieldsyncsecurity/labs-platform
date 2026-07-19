@@ -3,6 +3,7 @@ import Link from "next/link";
 import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 import {
   Bar,
+  CompetencyChips,
   PreliminaryBanner,
   RankBadge,
   ReportHeader,
@@ -10,6 +11,7 @@ import {
   ReportShell,
   correctnessPct,
   formatDate,
+  type ReportCriterion,
 } from "../_components/report-bits";
 
 // Employer-facing comparison report -- never indexed, never cached (each view
@@ -33,7 +35,7 @@ type ResultRow = {
   composite?: number;
   correctness?: number;
   dims?: Record<string, string>;
-  criteria?: Array<{ id?: string; description?: string; passed?: boolean; unknown?: boolean }>;
+  criteria?: ReportCriterion[];
   passedCount?: number;
   totalCriteria?: number;
   reflectionText?: string | null;
@@ -78,6 +80,7 @@ type DisplayRow = {
   hasReflection?: boolean;
   breakdownToken?: string;
   durationSec?: number;
+  criteria?: ReportCriterion[];
 };
 
 // Ranked ordering after the scored rows: submitted-awaiting-grade first,
@@ -150,6 +153,7 @@ export default async function AssessmentReportPage({
       hasReflection: Boolean(row?.reflectionText && row.reflectionText.trim().length > 0),
       breakdownToken: rosterRow?.candidateReportToken,
       durationSec: typeof rosterRow?.durationSec === "number" ? rosterRow.durationSec : undefined,
+      criteria: Array.isArray(row?.criteria) ? row.criteria : undefined,
     };
   });
 
@@ -236,8 +240,8 @@ export default async function AssessmentReportPage({
               <thead>
                 <tr className="border-b border-line bg-canvas/70 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
                   <th className="px-5 py-3.5">Rank</th>
-                  <th className="px-5 py-3.5">Candidate</th>
-                  <th className="px-5 py-3.5">Objectives</th>
+                  <th className="px-5 py-3.5">Candidate &amp; competencies</th>
+                  <th className="px-5 py-3.5">Checks</th>
                   <th className="px-5 py-3.5">Correctness</th>
                   <th className="px-5 py-3.5">Time on task</th>
                   <th className="px-5 py-3.5">Status</th>
@@ -265,7 +269,14 @@ export default async function AssessmentReportPage({
                           </span>
                         )}
                       </td>
-                      <td className="px-5 py-4 text-sm font-medium text-ink">{r.name}</td>
+                      <td className="px-5 py-4">
+                        <div className="text-sm font-medium text-ink">{r.name}</div>
+                        {isScored && r.criteria && r.criteria.length > 0 ? (
+                          <div className="mt-1.5">
+                            <CompetencyChips criteria={r.criteria} />
+                          </div>
+                        ) : null}
+                      </td>
                       <td className="px-5 py-4 tabular-nums text-ink-soft">
                         {isScored && r.totalCriteria
                           ? `${r.passed} / ${r.totalCriteria}`
@@ -332,10 +343,12 @@ export default async function AssessmentReportPage({
       )}
 
       <p className="mt-6 text-xs leading-relaxed text-muted">
-        Candidates are ranked by verified objective correctness on a real, isolated AWS environment.
-        Time on task is the measured start-to-submit duration within the {timeboxMin}-minute window,
-        shown for context only &mdash; it is not part of the score or the ranking. Each candidate&apos;s
-        full per-objective breakdown and written reasoning is on their individual report link.
+        Candidates are ranked by verified checks passed on a real, isolated cloud environment. The
+        competency tags under each name group those checks into correctness, security rigor, no new
+        exposure and operational safety &mdash; the full per-check breakdown is on each candidate&apos;s
+        individual report. Time on task is the measured start-to-submit duration within the{" "}
+        {timeboxMin}-minute window, shown for context only &mdash; it is not part of the score or the
+        ranking.
       </p>
     </ReportShell>
   );

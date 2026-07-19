@@ -211,8 +211,9 @@ export function PreliminaryBanner() {
       </span>
       <p>
         <span className="font-semibold text-brand-strong">How this is scored.</span>{" "}
-        Reports currently score objective correctness, verified against the live AWS environment
-        each candidate worked in.
+        Every check below is verified against the live cloud environment each candidate worked in.
+        Scoring reflects objective, measured outcomes only — we don&rsquo;t infer soft skills or
+        apply a hire / no-hire verdict.
       </p>
     </div>
   );
@@ -288,6 +289,160 @@ export function RankBadge({ rank }: { rank: number }) {
         {rank}
       </span>
     </>
+  );
+}
+
+// ── Competency profile ───────────────────────────────────────────────────────
+// The report decomposes the single "correctness" number into the competencies a
+// hiring manager actually weighs. Every dimension here is OBJECTIVE and evidence-
+// backed: each criterion is verified against the live cloud environment the
+// candidate worked in (see engine/graders*.mjs). This introduces NO un-measured
+// signal — it does not touch the still-"pending" soft dimensions (quality/speed/
+// process/reflection) — so it stays inside the honest-scoring rule at the top of
+// this file: only what we can verify is shown, and there is still no /100 or
+// hire/no-hire verdict.
+
+export type ReportCriterion = {
+  id?: string;
+  description?: string;
+  passed?: boolean;
+  unknown?: boolean;
+  dimension?: string;
+};
+
+// Display order + hiring-manager-facing label & meaning for each graded dimension.
+// Keys must match the `dimension` tags authored in engine/graders*.mjs.
+const DIMENSION_META: { key: string; label: string; blurb: string }[] = [
+  { key: "correctness", label: "Objective correctness", blurb: "Reached the required secure end-state — the core task." },
+  { key: "rigor", label: "Security rigor", blurb: "Hardened properly: least privilege and defence in depth, not just the minimum." },
+  { key: "no_new_exposure", label: "No new exposure", blurb: "Closed the issue without leaving or opening another way in." },
+  { key: "operational_safety", label: "Operational safety", blurb: "Secured the workload in place — didn't delete or break it to clear the alert." },
+];
+// Any criterion without a recognised dimension (older results, or a lab not yet
+// tagged) still renders, grouped under a neutral bucket at the end.
+const FALLBACK_DIM = { key: "objectives", label: "Objectives", blurb: "Verified checks for this assessment." };
+
+export type CompetencyGroup = {
+  key: string;
+  label: string;
+  blurb: string;
+  criteria: ReportCriterion[];
+  passed: number; // verified-passing
+  verified: number; // total minus "could not verify"
+  total: number;
+};
+
+/** Group graded criteria into ordered competency buckets by their `dimension` tag. */
+export function groupByDimension(criteria: ReportCriterion[]): CompetencyGroup[] {
+  const known = new Set(DIMENSION_META.map((d) => d.key));
+  const byKey = new Map<string, ReportCriterion[]>();
+  for (const c of criteria) {
+    const k = c?.dimension && known.has(c.dimension) ? c.dimension : FALLBACK_DIM.key;
+    (byKey.get(k) ?? byKey.set(k, []).get(k)!).push(c);
+  }
+  const groups: CompetencyGroup[] = [];
+  for (const meta of [...DIMENSION_META, FALLBACK_DIM]) {
+    const list = byKey.get(meta.key);
+    if (!list || list.length === 0) continue;
+    const verified = list.filter((c) => !c.unknown).length;
+    const passed = list.filter((c) => c.passed && !c.unknown).length;
+    groups.push({ ...meta, criteria: list, passed, verified, total: list.length });
+  }
+  return groups;
+}
+
+/**
+ * The competency profile: one scorecard per assessed dimension, each showing its
+ * verified pass ratio and the individual checks (evidence) behind it. This is the
+ * report's core — a Big-4-style breakdown grounded entirely in live-environment
+ * checks. Renders nothing if there are no criteria.
+ */
+export function CompetencyProfile({ criteria }: { criteria: ReportCriterion[] }) {
+  const groups = groupByDimension(criteria);
+  if (groups.length === 0) return null;
+  return (
+    <div className="space-y-4">
+      {groups.map((g) => {
+        const allUnknown = g.verified === 0;
+        const pct = g.verified ? Math.round((100 * g.passed) / g.verified) : 0;
+        return (
+          <section
+            key={g.key}
+            className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-x-5 gap-y-3 border-b border-line/70 bg-canvas/40 px-5 py-4 sm:px-6">
+              <div className="min-w-0 max-w-md">
+                <h3 className="text-sm font-semibold text-ink">{g.label}</h3>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted">{g.blurb}</p>
+              </div>
+              {allUnknown ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 ring-1 ring-inset ring-amber-200">
+                  <GlyphWarn className="h-3.5 w-3.5" />
+                  Not verified
+                </span>
+              ) : (
+                <div className="flex flex-none items-center gap-3">
+                  <span className="font-mono text-xs tabular-nums text-muted">
+                    {g.passed}/{g.verified}
+                  </span>
+                  <div className="w-24 sm:w-28">
+                    <Bar pct={pct} />
+                  </div>
+                </div>
+              )}
+            </div>
+            <ul>
+              {g.criteria.map((c, i) => (
+                <li
+                  key={c?.id ?? i}
+                  className="flex items-center justify-between gap-4 border-b border-line/60 px-5 py-3 last:border-b-0 hover:bg-canvas/50 sm:px-6"
+                >
+                  <span className="text-sm text-ink-soft">
+                    {c?.description ?? c?.id ?? `Check ${i + 1}`}
+                  </span>
+                  <span className="flex-none">
+                    <PassBadge passed={c?.passed} unknown={c?.unknown} />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Compact competency summary for the comparison table — one small pass/total pill
+ * per assessed dimension, so an employer can scan competencies across candidates
+ * at a glance. Skips the neutral fallback bucket to keep the row tight.
+ */
+export function CompetencyChips({ criteria }: { criteria: ReportCriterion[] }) {
+  const groups = groupByDimension(criteria).filter((g) => g.key !== FALLBACK_DIM.key);
+  if (groups.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {groups.map((g) => {
+        const allUnknown = g.verified === 0;
+        const perfect = !allUnknown && g.passed === g.verified;
+        const tone = allUnknown
+          ? "bg-amber-50 text-amber-800 ring-amber-200"
+          : perfect
+            ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+            : "bg-rose-50 text-rose-700 ring-rose-200";
+        return (
+          <span
+            key={g.key}
+            title={g.label}
+            className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${tone}`}
+          >
+            {g.label}
+            <span className="font-mono tabular-nums">{allUnknown ? "—" : `${g.passed}/${g.verified}`}</span>
+          </span>
+        );
+      })}
+    </div>
   );
 }
 

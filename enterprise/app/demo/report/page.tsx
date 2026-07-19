@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import {
   Bar,
-  PassBadge,
+  CompetencyProfile,
   PreliminaryBanner,
   ReportHeader,
   ReportShell,
@@ -38,22 +38,35 @@ const ASSESSMENT = {
   environment: "Real AWS account — isolated per candidate, auto-wiped",
 };
 
+// The six checks the live S3 grader actually runs (engine/graders.mjs gradeS3),
+// grouped into the four competencies the report scores. Building the sample from
+// the real checks keeps it honest — prospects see the exact shape of a real report.
+const S3_CHECKS: { dimension: string; description: string }[] = [
+  { dimension: "correctness", description: "Public read access blocked on all data buckets" },
+  { dimension: "rigor", description: "Over-broad s3:* on the auditor IAM user scoped to least privilege" },
+  { dimension: "rigor", description: "Server-side encryption enforced (unencrypted uploads denied)" },
+  { dimension: "rigor", description: "TLS required — non-HTTPS requests denied by bucket policy" },
+  { dimension: "no_new_exposure", description: "No bucket policy grants a wildcard (anonymous) principal" },
+  { dimension: "operational_safety", description: "Buckets secured in place — not deleted to clear the finding" },
+];
+// A pass/fail pattern (one bool per S3_CHECKS entry) → tagged criteria. Each demo
+// candidate's pattern tells a realistic story the competencies make legible.
+const mkCriteria = (flags: boolean[]) =>
+  S3_CHECKS.map((c, i) => ({ ...c, passed: !!flags[i] }));
+
 const CANDIDATES: DemoCandidate[] = [
-  { name: "Priya S.", role: ASSESSMENT.role, passedCount: 6, totalCriteria: 6, timeUsedMin: 41, hasReflection: true, detailAnchor: "#candidate-report" },
-  { name: "Ananya K.", role: ASSESSMENT.role, passedCount: 5, totalCriteria: 6, timeUsedMin: 52, hasReflection: true },
-  { name: "Rahul M.", role: ASSESSMENT.role, passedCount: 4, totalCriteria: 6, timeUsedMin: 58, hasReflection: true },
-  { name: "Vikram T.", role: ASSESSMENT.role, passedCount: 2, totalCriteria: 6, timeUsedMin: 60, hasReflection: false },
+  // Clean sweep — secured everything, in place.
+  { name: "Priya S.", role: ASSESSMENT.role, passedCount: 6, totalCriteria: 6, timeUsedMin: 41, hasReflection: true, detailAnchor: "#candidate-report", criteria: mkCriteria([true, true, true, true, true, true]) },
+  // Solid — missed only TLS enforcement.
+  { name: "Ananya K.", role: ASSESSMENT.role, passedCount: 5, totalCriteria: 6, timeUsedMin: 52, hasReflection: true, criteria: mkCriteria([true, true, true, false, true, true]) },
+  // Fixed the symptom but left a wildcard grant — the "no new exposure" gap.
+  { name: "Rahul M.", role: ASSESSMENT.role, passedCount: 4, totalCriteria: 6, timeUsedMin: 58, hasReflection: true, criteria: mkCriteria([true, true, true, false, false, true]) },
+  // Deleted a bucket to clear the finding — correctness AND operational-safety fail.
+  { name: "Vikram T.", role: ASSESSMENT.role, passedCount: 2, totalCriteria: 6, timeUsedMin: 60, hasReflection: false, criteria: mkCriteria([false, true, true, false, false, false]) },
 ];
 
-// One expanded candidate detail (what /r/c/[token] shows).
-const DETAIL_CRITERIA: Array<{ description: string; passed?: boolean; unknown?: boolean }> = [
-  { description: "Public access blocked on all data buckets (account-level + per-bucket)", passed: true },
-  { description: "Server-side encryption enforced (SSE-KMS) on the data bucket", passed: true },
-  { description: "Bucket policy requires TLS (aws:SecureTransport) for all requests", passed: true },
-  { description: "Over-broad s3:* on the pipeline IAM user replaced with least-privilege actions", passed: true },
-  { description: "Access scoped to the specific bucket ARN (no Resource \"*\")", passed: true },
-  { description: "Wildcard admin policy detached from the deployer role", passed: true },
-];
+// One expanded candidate detail (what /r/c/[token] shows) — Priya's clean sweep.
+const DETAIL_CRITERIA = mkCriteria([true, true, true, true, true, true]);
 
 const DETAIL_REFLECTION =
   "The data bucket was public and unencrypted, and the pipeline user had s3:* on all resources. " +
@@ -154,13 +167,13 @@ export default function DemoReportPage() {
           At a glance
         </p>
         <p className="mt-2 text-lg font-bold leading-snug text-ink sm:text-xl">
-          {top.c.name} leads with {top.c.passedCount} of {top.c.totalCriteria} objectives passed,
+          {top.c.name} leads with {top.c.passedCount} of {top.c.totalCriteria} checks passed,
           in {top.c.timeUsedMin} of {ASSESSMENT.timeLimitMin} min.
         </p>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-ink-soft">
           {total} of {ASSESSMENT.invited} invited completed the assessment. Verified scores ranged{" "}
           {minPct}% to {maxPct}% (avg {avgPct}%), and {fullPass} candidate{fullPass === 1 ? "" : "s"}{" "}
-          passed every objective.
+          passed every check across all four competencies.
         </p>
       </section>
 
@@ -208,13 +221,13 @@ export default function DemoReportPage() {
         <section className="mb-8 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
           <div className="border-b border-line bg-gradient-to-br from-brand/[0.05] to-cyan/[0.03] px-6 py-6 sm:px-8">
             <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand">
-              Objective correctness
+              Verified checks passed
             </h2>
             <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
               <div className="flex items-baseline gap-3">
                 <span className="text-3xl font-bold tabular-nums leading-none text-ink">{detailPassed}</span>
                 <span className="text-2xl font-semibold tabular-nums text-muted">/ {DETAIL_CRITERIA.length}</span>
-                <span className="ml-1 text-sm text-ink-soft">objectives passed</span>
+                <span className="ml-1 text-sm text-ink-soft">checks passed</span>
               </div>
               <span className="text-2xl font-bold tabular-nums text-brand">{detailPct}%</span>
             </div>
@@ -226,24 +239,12 @@ export default function DemoReportPage() {
 
         <section className="mb-8">
           <div className="mb-3 flex items-baseline justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Objective breakdown</h2>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Competency profile</h2>
             <span className="font-mono text-xs text-muted">
-              {detailPassed}/{DETAIL_CRITERIA.length} passed
+              {detailPassed}/{DETAIL_CRITERIA.length} checks passed
             </span>
           </div>
-          <ul className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
-            {DETAIL_CRITERIA.map((crit, i) => (
-              <li
-                key={i}
-                className="flex items-center justify-between gap-4 border-b border-line/70 px-5 py-4 transition-colors last:border-b-0 hover:bg-canvas/60"
-              >
-                <span className="text-sm text-ink-soft">{crit.description}</span>
-                <span className="flex-none">
-                  <PassBadge passed={crit.passed} unknown={crit.unknown} />
-                </span>
-              </li>
-            ))}
-          </ul>
+          <CompetencyProfile criteria={DETAIL_CRITERIA} />
         </section>
 
         <section className="mb-8">

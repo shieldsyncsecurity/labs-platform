@@ -127,23 +127,41 @@ export async function gradeStoragePublicExposure(ctx) {
   const criterion1Unknown = !!(acctErr || probeErr) || probeAmbiguous;
   const noAnonymousPass = !criterion1Unknown && allowPublic === false && anonBlocked;
 
+  // Operational safety: the account must still EXIST. A 404/absence read (acctErr
+  // null) means it was confirmed deleted — securing-by-destroying the workload, a
+  // determinate fail, not `unknown`. A real probe error (acctErr) → unknown.
+  const accountExists = account != null;
+
   return [
+    // Correctness — the core objective: is anonymous/public blob access actually stopped?
     {
       id: "no-anonymous-blob-access",
+      dimension: "correctness",
       description: "The storage account blocks anonymous/public blob access.",
       passed: noAnonymousPass,
       ...(criterion1Unknown ? { unknown: true } : {}),
     },
+    // Security rigor — proper hardening (transport security + identity-based access), not the minimum.
     {
       id: "secure-transfer-required",
+      dimension: "rigor",
       description: "Secure transfer (HTTPS-only) is required on the account.",
       passed: httpsOnly === true,
       ...unk(acctErr),
     },
     {
       id: "shared-key-access-disabled",
+      dimension: "rigor",
       description: "Shared Key (account-key) access is disabled; data access requires Microsoft Entra ID.",
       passed: sharedKey === false,
+      ...unk(acctErr),
+    },
+    // Operational safety — secured the workload without destroying it.
+    {
+      id: "resources-intact",
+      dimension: "operational_safety",
+      description: "The storage account still exists (secured, not deleted).",
+      passed: accountExists,
       ...unk(acctErr),
     },
   ];

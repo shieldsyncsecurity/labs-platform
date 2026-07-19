@@ -7,6 +7,7 @@ import {
   GetBucketPolicyStatusCommand,
   GetBucketPolicyCommand,
   GetPublicAccessBlockCommand,
+  HeadBucketCommand,
 } from "@aws-sdk/client-s3";
 import {
   IAMClient,
@@ -73,6 +74,16 @@ function isAbsenceError(e) {
   const code = e?.name || e?.Code || e?.__type || "";
   return ABSENCE_ERRORS.has(code) || [...ABSENCE_ERRORS].some((n) => String(code).includes(n));
 }
+// The bucket itself is gone (deleted) — an authoritative, known state. Must be
+// matched EXACTLY, not by substring/status: a missing sub-resource ("NoSuchBucketPolicy",
+// "NoSuchPublicAccessBlockConfiguration") is ALSO a 404 and its code contains the substring
+// "NoSuchBucket", but the bucket still exists. AWS returns code "NoSuchBucket" for Get*/List*
+// on a deleted bucket, and HeadBucket surfaces "NotFound". (HeadBucket has no sub-resource, so
+// a bare 404 there is unambiguous — its caller handles that separately.)
+function isMissingBucket(e) {
+  const code = e?.name || e?.Code || e?.__type || "";
+  return code === "NoSuchBucket" || code === "NotFound";
+}
 // Spread into a criterion to flag "couldn't verify" when a non-absence error hit.
 const unk = (err) => (err ? { unknown: true } : {});
 
@@ -83,24 +94,60 @@ async function gradeS3(creds, accountId) {
 
   const info = {};
   let probeErr = null; // any non-absence error makes the bucket criteria "unknown"
+  let existErr = null; // a non-404/non-NoSuchBucket error probing existence → operational check "unknown"
   for (const b of buckets) {
-    let isPublic = false, policy = null, bpaRestrict = false;
+    let isPublic = false, policy = null, bpaRestrict = false, exists = true, existKnown = false;
+    // Existence: a candidate who DELETES the bucket to "fix" the exposure has destroyed the
+    // workload, not secured it. HeadBucket 404 → gone. A "missing" signal from ANY probe below
+    // is also authoritative (deletion is a known state, not an unverifiable error) and must not
+    // poison probeErr. Only a genuinely ambiguous error (403/throttle) leaves it unknown.
+    try {
+      await s3.send(new HeadBucketCommand({ Bucket: b }));
+      exists = true; existKnown = true;
+    } catch (e) {
+      // HeadBucket has no sub-resource, so a 404 (or NotFound/NoSuchBucket) here always
+      // means the bucket is gone — unlike the Get* calls where 404 can be "no policy".
+      if (isMissingBucket(e) || e?.$metadata?.httpStatusCode === 404) { exists = false; existKnown = true; }
+      else existErr = e; // 403/throttle/etc — can't confirm; resources-intact stays "unknown"
+    }
+    // For the policy/BPA probes: a SUCCESS or a sub-resource-absence error (e.g.
+    // NoSuchBucketPolicy) both prove the bucket EXISTS — AWS returns NoSuchBucket,
+    // not NoSuchBucketPolicy, when the bucket itself is gone. Either way, confirm
+    // existence so resources-intact never falsely reads "unknown" if HeadBucket's
+    // permission differs from the Get* permissions.
     try {
       const ps = await s3.send(new GetBucketPolicyStatusCommand({ Bucket: b }));
       isPublic = !!ps.PolicyStatus?.IsPublic;
-    } catch (e) { if (!isAbsenceError(e)) probeErr = e; /* else: no policy → not public */ }
+      existKnown = true;
+    } catch (e) {
+      if (isMissingBucket(e)) { exists = false; existKnown = true; }
+      else if (isAbsenceError(e)) existKnown = true; /* no policy, but bucket exists */
+      else probeErr = e;
+    }
     try {
       const gp = await s3.send(new GetBucketPolicyCommand({ Bucket: b }));
       policy = parsePolicy(gp.Policy);
-    } catch (e) { if (!isAbsenceError(e)) probeErr = e; /* else: no policy */ }
+      existKnown = true;
+    } catch (e) {
+      if (isMissingBucket(e)) { exists = false; existKnown = true; }
+      else if (isAbsenceError(e)) existKnown = true; /* no policy, but bucket exists */
+      else probeErr = e;
+    }
     try {
       const ab = await s3.send(new GetPublicAccessBlockCommand({ Bucket: b }));
       bpaRestrict = !!ab.PublicAccessBlockConfiguration?.RestrictPublicBuckets;
-    } catch (e) { if (!isAbsenceError(e)) probeErr = e; /* else: no BPA set */ }
-    info[b] = { isPublic, policy, bpaRestrict };
+      existKnown = true;
+    } catch (e) {
+      if (isMissingBucket(e)) { exists = false; existKnown = true; }
+      else if (isAbsenceError(e)) existKnown = true; /* no BPA set, but bucket exists */
+      else probeErr = e;
+    }
+    info[b] = { isPublic, policy, bpaRestrict, exists, existKnown };
   }
 
-  const notPublic = (b) => !info[b].isPublic || info[b].bpaRestrict;
+  // Correctness requires an INTACT, non-public bucket. A deleted bucket reads as
+  // "not public" to the exposure probes, but deleting is not a fix — so gate on exists.
+  const notPublic = (b) => info[b].exists && (!info[b].isPublic || info[b].bpaRestrict);
   const encDeny = (b) =>
     hasDeny(info[b].policy, (st) =>
       asArray(st.Action).some((a) => /s3:PutObject/i.test(a) || a === "s3:*") &&
@@ -108,6 +155,19 @@ async function gradeS3(creds, accountId) {
   const tlsDeny = (b) =>
     hasDeny(info[b].policy, (st) =>
       JSON.stringify(st.Condition || {}).toLowerCase().includes("aws:securetransport"));
+  // No-new-exposure: did they leave/introduce an anonymous grant in the bucket policy?
+  // A wildcard Principal ("*" or {"AWS":"*"}) on an Allow is an open door even when BPA
+  // currently masks IsPublic — flip BPA off and it's public again. A proper fix has none.
+  const anonAllow = (st) => {
+    if (st.Effect !== "Allow") return false;
+    const p = st.Principal;
+    if (p === "*") return true;
+    if (p && typeof p === "object") return asArray(p.AWS).includes("*") || asArray(p.CanonicalUser).includes("*");
+    return false;
+  };
+  // Purely a policy check — a deleted bucket has no exposure (operational-safety flags the
+  // delete). So this passes when there's no anonymous Allow, regardless of existence.
+  const noAnonGrant = (b) => !asArray(info[b].policy?.Statement).some(anonAllow);
 
   // 'auditor' user must no longer hold s3:* (or *) on Resource "*".
   const iam = new IAMClient({ region: REGION, credentials: creds });
@@ -120,11 +180,21 @@ async function gradeS3(creds, accountId) {
     }
   } catch (e) { if (!isAbsenceError(e)) auditorErr = e; /* else: user removed → scoped */ }
 
+  const bothIntact = buckets.every((b) => info[b].exists);
+  // Only claim intact/deleted if existence was actually confirmed for every bucket; if any
+  // probe was ambiguous (403/throttle, never a definitive 200 or missing), report "unknown".
+  const existUnverified = buckets.some((b) => !info[b].existKnown) ? (existErr || true) : null;
   return [
-    { id: "no-public-buckets", description: "No lab bucket allows anonymous public read.", passed: buckets.every(notPublic), ...unk(probeErr) },
-    { id: "encryption-required", description: "Each bucket denies unencrypted PutObject.", passed: buckets.every(encDeny), ...unk(probeErr) },
-    { id: "tls-only", description: "Each bucket denies non-TLS (HTTP) requests.", passed: buckets.every(tlsDeny), ...unk(probeErr) },
-    { id: "least-privilege-iam", description: "The 'auditor' user no longer has s3:* on Resource '*'.", passed: !auditorBroad, ...unk(auditorErr) },
+    // Correctness — did they achieve the required secure end-state (the core objective)?
+    { id: "no-public-buckets", dimension: "correctness", description: "No lab bucket allows anonymous public read.", passed: buckets.every(notPublic), ...unk(probeErr) },
+    // Security rigor — did they harden properly (least-privilege + defence-in-depth), not just do the minimum?
+    { id: "least-privilege-iam", dimension: "rigor", description: "The 'auditor' user no longer has s3:* on Resource '*'.", passed: !auditorBroad, ...unk(auditorErr) },
+    { id: "encryption-required", dimension: "rigor", description: "Each bucket denies unencrypted PutObject.", passed: buckets.every(encDeny), ...unk(probeErr) },
+    { id: "tls-only", dimension: "rigor", description: "Each bucket denies non-TLS (HTTP) requests.", passed: buckets.every(tlsDeny), ...unk(probeErr) },
+    // No new exposure — did the fix avoid leaving/opening an anonymous door?
+    { id: "no-anonymous-grant", dimension: "no_new_exposure", description: "No bucket policy grants a wildcard (anonymous) principal.", passed: buckets.every(noAnonGrant), ...unk(probeErr) },
+    // Operational safety — did they secure the workload without destroying it?
+    { id: "resources-intact", dimension: "operational_safety", description: "Both lab buckets still exist (secured, not deleted).", passed: bothIntact, ...unk(existUnverified) },
   ];
 }
 

@@ -1,7 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Bar, RankBadge, correctnessPct } from "../../r/_components/report-bits";
+import {
+  Bar,
+  CompetencyChips,
+  RankBadge,
+  correctnessPct,
+  type ReportCriterion,
+} from "../../r/_components/report-bits";
 
 /* Interactive slice of the sample report — the ranked comparison table with the
  * filters an employer actually reaches for (top performers, reflection
@@ -17,13 +23,15 @@ export type DemoCandidate = {
   hasReflection: boolean;
   /** Only the expanded sample candidate links to the detail section below. */
   detailAnchor?: string;
+  /** Per-check results, tagged by competency dimension (for the inline chips). */
+  criteria?: ReportCriterion[];
 };
 
 type FilterKey = "all" | "top" | "reflection";
 
 const FILTERS: { key: FilterKey; label: string; hint: string }[] = [
   { key: "all", label: "All candidates", hint: "Everyone who submitted" },
-  { key: "top", label: "Top performers", hint: "5+ of 6 objectives verified" },
+  { key: "top", label: "Top performers", hint: "5+ of 6 checks verified" },
   { key: "reflection", label: "With reflection", hint: "Submitted the written walkthrough" },
 ];
 
@@ -76,8 +84,8 @@ export function DemoComparisonTable({ candidates }: { candidates: DemoCandidate[
             <thead>
               <tr className="border-b border-line bg-canvas/70 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
                 <th className="px-4 py-3.5">Rank</th>
-                <th className="px-4 py-3.5">Candidate</th>
-                <th className="px-4 py-3.5">Objectives</th>
+                <th className="px-4 py-3.5">Candidate &amp; competencies</th>
+                <th className="px-4 py-3.5">Checks</th>
                 <th className="px-4 py-3.5">Correctness</th>
                 <th className="px-4 py-3.5">Time used</th>
                 <th className="px-4 py-3.5">Status</th>
@@ -102,6 +110,11 @@ export function DemoComparisonTable({ candidates }: { candidates: DemoCandidate[
                   <td className="px-4 py-4">
                     <div className="font-medium text-ink">{c.name}</div>
                     <div className="text-xs text-muted">{c.role}</div>
+                    {c.criteria && c.criteria.length > 0 ? (
+                      <div className="mt-1.5">
+                        <CompetencyChips criteria={c.criteria} />
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-4 py-4 tabular-nums text-ink-soft">
                     {c.passedCount} / {c.totalCriteria}
