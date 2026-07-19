@@ -33,9 +33,11 @@ export function SiteHeader() {
         <div className="flex items-center gap-3">
           <a
             href="https://shieldsyncsecurity.com"
-            className="hidden rounded-lg text-sm font-medium text-muted transition-colors hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand sm:inline"
+            className="whitespace-nowrap rounded-lg text-sm font-medium text-muted transition-colors hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
           >
-            shieldsyncsecurity.com
+            {/* Short label on phones (the header is tight next to the CTA), full domain on wider screens. */}
+            <span className="sm:hidden">Main site</span>
+            <span className="hidden sm:inline">shieldsyncsecurity.com</span>
           </a>
           <Link
             href="/book-demo"
