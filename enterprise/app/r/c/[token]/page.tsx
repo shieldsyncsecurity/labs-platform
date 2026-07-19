@@ -36,7 +36,22 @@ type CandidateResult = {
   integrity?: string;
   gradedAt?: string;
   gradeError?: string;
+  // Completion facts (measured by the engine at submit) -- shown honestly, no scoring weight.
+  autoSubmitted?: boolean;
+  lateSubmit?: boolean;
+  secondsLate?: number;
 };
+
+// How the candidate finished -- a measured fact (never a score input). "ok" = finished
+// within the window; "warn" = ran out of time / went over. Null keeps the UI quiet if unknown.
+function completionNote(r: CandidateResult): { label: string; tone: "ok" | "warn" } | null {
+  if (r.autoSubmitted) return { label: "Auto-submitted at the time limit", tone: "warn" };
+  if (r.lateSubmit) {
+    const m = typeof r.secondsLate === "number" && r.secondsLate > 0 ? Math.max(1, Math.round(r.secondsLate / 60)) : null;
+    return { label: m ? `Submitted ${m} min over the limit` : "Submitted after the limit", tone: "warn" };
+  }
+  return { label: "Submitted within the time limit", tone: "ok" };
+}
 
 type CandidateReportData = {
   candidateName?: string;
@@ -101,9 +116,28 @@ export default async function CandidateReportPage({
           eyebrow="Candidate report"
           title={data?.candidateName ?? "Candidate report"}
           meta={
-            result.gradedAt ? (
-              <span>Graded {formatDate(result.gradedAt)}</span>
-            ) : null
+            <span className="inline-flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+              {result.gradedAt ? <span>Graded {formatDate(result.gradedAt)}</span> : null}
+              {(() => {
+                const c = completionNote(result);
+                if (!c) return null;
+                return (
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${
+                      c.tone === "ok"
+                        ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                        : "bg-amber-50 text-amber-800 ring-amber-200"
+                    }`}
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${c.tone === "ok" ? "bg-emerald-500" : "bg-amber-500"}`}
+                      aria-hidden="true"
+                    />
+                    {c.label}
+                  </span>
+                );
+              })()}
+            </span>
           }
         />
 
