@@ -11,6 +11,7 @@ import {
   ReportShell,
   correctnessPct,
   formatDate,
+  verifiedStats,
   type ReportCriterion,
 } from "../_components/report-bits";
 
@@ -120,8 +121,15 @@ export default async function AssessmentReportPage({
   const timeboxMin =
     typeof data?.timeboxMin === "number" && data.timeboxMin > 0 ? data.timeboxMin : 60;
 
+  // Rank by VERIFIED checks passed: unknown ("could not verify") criteria are excluded
+  // from the ratio (see verifiedStats), so a transient probe failure never depresses a
+  // candidate's rank as if they'd failed a check. Falls back to stored counts if a row
+  // has no criteria detail.
   const scored = results
-    .map((r) => ({ row: r, pct: correctnessPct(r?.passedCount, r?.totalCriteria) }))
+    .map((r) => {
+      const vs = verifiedStats(r?.criteria, r?.passedCount, r?.totalCriteria);
+      return { row: r, vs, pct: correctnessPct(vs.passed, vs.total) };
+    })
     .sort((a, b) => b.pct - a.pct);
 
   // Join each graded result to its roster row via the 8-char invite prefix
@@ -134,7 +142,7 @@ export default async function AssessmentReportPage({
   }
 
   const matchedIds = new Set<string>();
-  const displayRows: DisplayRow[] = scored.map(({ row, pct }, i) => {
+  const displayRows: DisplayRow[] = scored.map(({ row, pct, vs }, i) => {
     const prefix = row?.inviteToken ? row.inviteToken.slice(0, 8) : "";
     const rosterRow = prefix ? rosterById.get(prefix) : undefined;
     if (rosterRow?.id) matchedIds.add(rosterRow.id);
@@ -148,8 +156,8 @@ export default async function AssessmentReportPage({
       status: "Submitted",
       rank: i + 1,
       pct,
-      passed: row?.passedCount ?? 0,
-      totalCriteria: row?.totalCriteria ?? 0,
+      passed: vs.passed,
+      totalCriteria: vs.total,
       hasReflection: Boolean(row?.reflectionText && row.reflectionText.trim().length > 0),
       breakdownToken: rosterRow?.candidateReportToken,
       durationSec: typeof rosterRow?.durationSec === "number" ? rosterRow.durationSec : undefined,
@@ -272,9 +280,7 @@ export default async function AssessmentReportPage({
                       <td className="px-5 py-4">
                         <div className="text-sm font-medium text-ink">{r.name}</div>
                         {isScored && r.criteria && r.criteria.length > 0 ? (
-                          <div className="mt-1.5">
-                            <CompetencyChips criteria={r.criteria} />
-                          </div>
+                          <CompetencyChips criteria={r.criteria} className="mt-1.5" />
                         ) : null}
                       </td>
                       <td className="px-5 py-4 tabular-nums text-ink-soft">

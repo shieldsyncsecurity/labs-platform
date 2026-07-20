@@ -9,6 +9,7 @@ import {
   ReportShell,
   correctnessPct,
   formatDate,
+  verifiedStats,
 } from "../../_components/report-bits";
 
 // Employer-facing single-candidate report — never indexed, never cached.
@@ -101,13 +102,13 @@ export default async function CandidateReportPage({
     );
   }
 
-  const passed = result.passedCount ?? 0;
-  const total = result.totalCriteria ?? 0;
-  const pct = correctnessPct(result.passedCount, result.totalCriteria);
   const criteria = Array.isArray(result.criteria) ? result.criteria : [];
+  // Verified-only counts: "could not verify" checks are excluded from BOTH sides of the
+  // ratio, so an unverifiable check never reads as a failure (and an all-unknown run is
+  // "Not verified", not "0%"). Keeps the headline consistent with the per-competency pills.
+  const { passed, total, hadUnknown } = verifiedStats(criteria, result.passedCount, result.totalCriteria);
+  const pct = correctnessPct(passed, total);
   const reflectionText = result.reflectionText?.trim();
-
-  const passedCriteria = criteria.filter((c) => c?.passed).length;
 
   return (
     <ReportShell>
@@ -150,21 +151,33 @@ export default async function CandidateReportPage({
             <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand">
               Verified checks passed
             </h2>
-            <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
-              <div className="flex items-baseline gap-3">
-                <span className="text-3xl font-bold tabular-nums leading-none text-ink">
-                  {total ? passed : "—"}
-                </span>
-                {total ? (
-                  <span className="text-2xl font-semibold tabular-nums text-muted">/ {total}</span>
+            {total > 0 ? (
+              <>
+                <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
+                  <div className="flex items-baseline gap-3">
+                    <span className="text-3xl font-bold tabular-nums leading-none text-ink">{passed}</span>
+                    <span className="text-2xl font-semibold tabular-nums text-muted">/ {total}</span>
+                    <span className="ml-1 text-sm text-ink-soft">checks passed</span>
+                  </div>
+                  <span className="text-2xl font-bold tabular-nums text-brand">{pct}%</span>
+                </div>
+                <div className="mt-5">
+                  <Bar pct={pct} />
+                </div>
+                {hadUnknown ? (
+                  <p className="mt-3 text-xs text-muted">
+                    Some checks couldn&rsquo;t be verified on this run and are excluded from the ratio
+                    above &mdash; they show as &ldquo;Not verified&rdquo; in the profile below.
+                  </p>
                 ) : null}
-                <span className="ml-1 text-sm text-ink-soft">checks passed</span>
-              </div>
-              <span className="text-2xl font-bold tabular-nums text-brand">{pct}%</span>
-            </div>
-            <div className="mt-5">
-              <Bar pct={pct} />
-            </div>
+              </>
+            ) : (
+              <p className="mt-3 text-sm text-ink-soft">
+                None of the automated checks could be verified on this run (a transient issue reaching
+                the live environment). This is <span className="font-semibold text-ink">not a score of zero</span> &mdash;
+                re-open the report shortly, or ask your ShieldSync contact to re-grade.
+              </p>
+            )}
           </div>
           {result.gradeError ? (
             <p className="flex items-start gap-2 px-6 py-3 text-xs text-amber-700 sm:px-8">
@@ -184,7 +197,8 @@ export default async function CandidateReportPage({
             </h2>
             {criteria.length ? (
               <span className="font-mono text-xs text-muted">
-                {passedCriteria}/{criteria.length} checks passed
+                {total > 0 ? `${passed}/${total} verified` : `${criteria.length} not verified`}
+                {hadUnknown && total > 0 ? ` · ${criteria.length - total} unverified` : ""}
               </span>
             ) : null}
           </div>

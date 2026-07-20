@@ -111,9 +111,7 @@ export function DemoComparisonTable({ candidates }: { candidates: DemoCandidate[
                     <div className="font-medium text-ink">{c.name}</div>
                     <div className="text-xs text-muted">{c.role}</div>
                     {c.criteria && c.criteria.length > 0 ? (
-                      <div className="mt-1.5">
-                        <CompetencyChips criteria={c.criteria} />
-                      </div>
+                      <CompetencyChips criteria={c.criteria} className="mt-1.5" />
                     ) : null}
                   </td>
                   <td className="px-4 py-4 tabular-nums text-ink-soft">

@@ -262,6 +262,31 @@ export function correctnessPct(passedCount?: number, totalCriteria?: number): nu
   return Math.round((100 * passed) / total);
 }
 
+/**
+ * Honest pass/total from a criteria list: "could not verify" (unknown) checks are
+ * EXCLUDED from both numerator and denominator, so an unverifiable check never reads
+ * as a failure and an all-unknown run is `total: 0` (render "Not verified", never "0%").
+ * This mirrors groupByDimension's per-dimension `verified` count, so the headline and
+ * the per-competency pills always agree. Falls back to the stored counts only when no
+ * criteria detail is present (older results); the stored passedCount already excludes
+ * unknowns from its numerator, but the stored totalCriteria does not — hence prefer criteria.
+ */
+export function verifiedStats(
+  criteria: ReportCriterion[] | undefined,
+  fallbackPassed?: number,
+  fallbackTotal?: number,
+): { passed: number; total: number; hadUnknown: boolean } {
+  if (Array.isArray(criteria) && criteria.length > 0) {
+    const verified = criteria.filter((c) => !c?.unknown);
+    return {
+      passed: verified.filter((c) => c?.passed).length,
+      total: verified.length,
+      hadUnknown: verified.length < criteria.length,
+    };
+  }
+  return { passed: fallbackPassed ?? 0, total: fallbackTotal ?? 0, hadUnknown: false };
+}
+
 export function formatDate(value?: string): string {
   if (!value) return "—";
   const d = new Date(value);
@@ -418,11 +443,20 @@ export function CompetencyProfile({ criteria }: { criteria: ReportCriterion[] })
  * per assessed dimension, so an employer can scan competencies across candidates
  * at a glance. Skips the neutral fallback bucket to keep the row tight.
  */
-export function CompetencyChips({ criteria }: { criteria: ReportCriterion[] }) {
+export function CompetencyChips({
+  criteria,
+  className = "",
+}: {
+  criteria: ReportCriterion[];
+  className?: string;
+}) {
   const groups = groupByDimension(criteria).filter((g) => g.key !== FALLBACK_DIM.key);
+  // Returns null (renders nothing) when there are no tagged competencies — so callers
+  // apply spacing via `className` here rather than an outer wrapper, which would leave an
+  // empty margin box for all-untagged (older) results.
   if (groups.length === 0) return null;
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className={`flex flex-wrap gap-1.5 ${className}`}>
       {groups.map((g) => {
         const allUnknown = g.verified === 0;
         const perfect = !allUnknown && g.passed === g.verified;

@@ -22,18 +22,27 @@
   "successCriteria": [
     {
       "id": "no-anonymous-blob-access",
+      "dimension": "correctness",
       "description": "The storage account blocks anonymous/public blob access.",
       "verify": "StorageManagementClient.storageAccounts.getProperties reports allowBlobPublicAccess === false AND an unauthenticated HTTPS GET on the seeded blob URL does not return 200 (Resource Graph can't prove the blob is unreadable, so the data-plane probe is required). Best practice also sets the container publicAccess to off."
     },
     {
       "id": "secure-transfer-required",
+      "dimension": "rigor",
       "description": "Secure transfer (HTTPS-only) is required on the account.",
       "verify": "StorageManagementClient.storageAccounts.getProperties reports supportsHttpsTrafficOnly === true."
     },
     {
       "id": "shared-key-access-disabled",
+      "dimension": "rigor",
       "description": "Shared Key (account-key) access is disabled; data access must use Microsoft Entra ID.",
       "verify": "StorageManagementClient.storageAccounts.getProperties reports allowSharedKeyAccess === false (Azure treats an unset value as true, so an explicit false is required to pass)."
+    },
+    {
+      "id": "resources-intact",
+      "dimension": "operational_safety",
+      "description": "The storage account still exists — secured in place, not deleted to clear the finding.",
+      "verify": "StorageManagementClient.storageAccounts.getProperties returns the account (a 404/ResourceNotFound means it was deleted, which is not a fix)."
     }
   ],
 

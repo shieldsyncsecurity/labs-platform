@@ -40,9 +40,10 @@ function isAbsenceError(e) {
 const unk = (err) => (err ? { unknown: true } : {});
 
 // ── Storage account public exposure & data leak ──────────────────────────────
-// Grades the "storage-public-exposure-audit" lab. Three criteria, ids LOAD-
-// BEARING (must match successCriteria in lab.json exactly):
-//   no-anonymous-blob-access | secure-transfer-required | shared-key-access-disabled
+// Grades the "storage-public-exposure-audit" lab. Four criteria, ids LOAD-BEARING
+// (must match successCriteria in lab.json exactly — the B2C scorecard maps
+// objective.id === criterion.id):
+//   no-anonymous-blob-access | secure-transfer-required | shared-key-access-disabled | resources-intact
 export async function gradeStoragePublicExposure(ctx) {
   const { StorageManagementClient } = await import("@azure/arm-storage");
 
