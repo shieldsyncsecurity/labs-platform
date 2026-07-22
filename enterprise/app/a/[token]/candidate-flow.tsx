@@ -697,8 +697,11 @@ export default function CandidateFlow({ token }: { token: string }) {
       setRemainingMs(Math.max(0, left));
       if (left <= 0) {
         // Time is up: move to the reflection card with a hard grace window,
-        // after which we auto-submit. Only arm the deadline once.
-        setGraceDeadline((prev) => prev ?? Date.now() + GRACE_MS);
+        // after which we auto-submit. Anchor the grace deadline to the SERVER
+        // scored-expiry (target), not client Date.now(), so it is a FIXED
+        // wall-clock point (scoredExpiresAt + 5 min) that survives reloads — a
+        // refresh during grace can't keep minting a fresh 5 minutes of overtime.
+        setGraceDeadline((prev) => prev ?? target + GRACE_MS);
         setPhase("reflection");
       }
     };
