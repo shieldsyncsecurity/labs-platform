@@ -3,7 +3,8 @@ import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 
 type PresignBody = {
   inviteToken?: string;
-  items?: Array<{ kind?: string; seq?: number; contentType?: string }>;
+  epoch?: number;
+  items?: Array<{ kind?: string; seq?: number; contentType?: string; size?: number }>;
 };
 
 // Candidate-facing: mint presigned S3 PUT URLs for a batch of session-recording
@@ -17,14 +18,18 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
-  const { inviteToken, items } = body;
-  if (!inviteToken || !Array.isArray(items) || items.length === 0 || items.length > 8) {
-    return NextResponse.json({ error: "inviteToken and 1-8 items are required" }, { status: 400 });
+  const { inviteToken, epoch, items } = body;
+  if (
+    !inviteToken ||
+    typeof epoch !== "number" ||
+    !Array.isArray(items) || items.length === 0 || items.length > 8
+  ) {
+    return NextResponse.json({ error: "inviteToken, epoch and 1-8 items are required" }, { status: 400 });
   }
   try {
     const result = await entFetch("/ent/rec/presign", {
       method: "POST",
-      body: { inviteToken, items },
+      body: { inviteToken, epoch, items },
     });
     return NextResponse.json(result);
   } catch (err) {

@@ -719,10 +719,14 @@ export default function CandidateFlow({ token }: { token: string }) {
     setErrorMsg(null);
     // Stop + flush the recorder BEFORE submitting: /ent/submit flips the invite
     // to "submitted", after which presigned-upload mints 409 — flushing first
-    // (bounded ~5s inside stop()) lands the final audio chunk + snapshot.
+    // (bounded ~5s inside stop()) lands the final audio chunk + snapshot. Null
+    // the ref so that if the submit FAILS and the candidate goes "Back to the
+    // task", the room effect re-creates a recorder (new epoch) rather than
+    // leaving the rest of the session unrecorded behind a dead instance.
     try {
       await recorderRef.current?.stop();
     } catch { /* recording teardown must never block a submit */ }
+    recorderRef.current = null;
     try {
       const res = await fetch("/api/submit", {
         method: "POST",
@@ -791,10 +795,20 @@ export default function CandidateFlow({ token }: { token: string }) {
           keepalive: true,
         }).catch(() => {});
       }
+      // Reconcile client state so a candidate who returns to a still-open tab
+      // sees the submitted state, not a live-looking reflection form whose text
+      // the idempotent engine would silently discard.
+      setInvite((prev) => (prev ? { ...prev, status: "submitted" } : prev));
+      setPhase("done");
     };
+    // pagehide = the page is actually going away (close/navigate) — submit so an
+    // expired session is never stranded. visibilitychange-hidden = a mere tab
+    // switch; only auto-submit from it once the grace deadline has ACTUALLY
+    // passed, so switching tabs during grace doesn't fire the irreversible
+    // submit up to 5 minutes early.
     const onPageHide = () => sendAutoSubmit();
     const onVisibility = () => {
-      if (document.visibilityState === "hidden") sendAutoSubmit();
+      if (document.visibilityState === "hidden" && Date.now() >= graceDeadline) sendAutoSubmit();
     };
     window.addEventListener("pagehide", onPageHide);
     document.addEventListener("visibilitychange", onVisibility);

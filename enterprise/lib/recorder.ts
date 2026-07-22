@@ -3,37 +3,37 @@
 /**
  * SessionRecorder — proctoring capture for the live candidate assessment.
  *
- * CYCLE-BASED: every cycle (15s normal / 30s degraded) produces
- *   - one STANDALONE audio file (MediaRecorder start→stop per cycle, so each
- *     blob has its own container header and is independently playable — a lost
- *     chunk never corrupts the rest, unlike timeslice fragments), and
- *   - one JPEG webcam snapshot drawn from the live video track.
- * Captures upload DIRECTLY to S3 via presigned PUTs from /api/rec/presign.
- * Because the cycle is driven by MediaRecorder's own onstop event (the media
- * pipeline), it keeps firing in a background tab while the candidate works in
- * the AWS-console tab — and Chrome exempts tabs with live capture from
- * intensive timer throttling anyway.
+ * CAPTURE EPOCH: on start() the recorder asks the engine (/api/rec/start) for a
+ * monotonic epoch and namespaces every upload under it. A page reload creates a
+ * new recorder → a new epoch → a fresh key space, so a reload can NEVER overwrite
+ * the earlier half of the recording (or the identity shot). The employer report
+ * shows extra epochs as re-entries instead of losing the first one.
  *
- * FAILURE POLICY (mirrors the product stance: fail-closed at start, fail-open
- * mid-session with an honest trail): uploads retry with backoff; repeated
- * failures degrade cadence/quality rather than interrupting the candidate;
- * every degrade/gap/denial is reported via /api/rec/event so the employer
- * report can show real coverage instead of pretending.
+ * CYCLE-BASED: every cycle (15s normal / 30s degraded) produces one STANDALONE
+ * audio file (MediaRecorder start→stop per cycle, so each blob is independently
+ * playable — a lost chunk never corrupts the rest) plus one JPEG snapshot.
+ * Uploads go DIRECTLY to S3 via presigned PUTs; each PUT is size-bound.
+ *
+ * FAILURE POLICY: fail-closed at start (the caller only starts the session once
+ * permission is granted), fail-open mid-session with an HONEST trail — uploads
+ * retry/backoff; repeated failures degrade cadence/quality; a device/permission
+ * loss pauses capture (loop fully stopped, no frozen frames) with a gap/denied
+ * event; the room offers one-click re-enable.
+ *
+ * All re-acquire paths are serialized (a single `reacquiring` guard) and every
+ * async continuation re-checks a monotonic `generation`, so a stop() or a
+ * concurrent track-loss can never resurrect capture or spawn a second loop.
  */
 
 type RecStatus = "recording" | "paused" | "degraded" | "stopped";
 
-type PresignItem = { kind: "id" | "snap" | "audio"; seq: number; contentType: string };
+type PresignItem = { kind: "id" | "snap" | "audio"; seq: number; contentType: string; size: number };
 type PresignedUpload = { kind: string; seq: number; url: string };
 
 const NORMAL_CYCLE_MS = 15_000;
 const DEGRADED_CYCLE_MS = 30_000;
-// Consecutive upload failures before degrading capture quality/cadence.
 const DEGRADE_AFTER_FAILURES = 3;
-// Bounded local queue: if the network is fully down we keep at most this many
-// pending blobs (~2 min of capture) and drop the oldest beyond it — recording
-// must never grow unbounded in the candidate's memory.
-const MAX_QUEUE = 16;
+const MAX_QUEUE = 16; // ~2 min of capture; drop-oldest beyond it (bounded memory)
 
 export class SessionRecorder {
   private inviteToken: string;
@@ -43,8 +43,12 @@ export class SessionRecorder {
   private recorder: MediaRecorder | null = null;
   private cycleTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
+  private stopped = false; // terminal: set by stop(); no path may re-activate after
+  private reacquiring = false; // serializes handleTrackLost + retry
+  private generation = 0; // bumped on every teardown; async continuations bail if it moved
   private degraded = false;
   private consecutiveFailures = 0;
+  private epoch: number | null = null;
   private snapSeq = 0;
   private audioSeq = 0;
   private audioMime: string | null = null;
@@ -57,47 +61,92 @@ export class SessionRecorder {
     this.onStatus = onStatus;
   }
 
-  /** Start capturing from an already-granted stream (fail-closed at start:
-   *  the caller acquires the stream and only starts the session once granted). */
+  /** Start capturing from an already-granted stream. Allocates a capture epoch
+   *  first; if that fails, stays paused with a gap event (the caller shows the
+   *  re-enable banner) rather than uploading to an unknown key space. */
   async start(stream: MediaStream): Promise<void> {
+    if (this.stopped) {
+      for (const t of stream.getTracks()) t.stop();
+      return;
+    }
+    const gen = this.generation;
     this.stream = stream;
     this.active = true;
 
-    // Hidden <video> feeding canvas snapshots.
+    const epoch = await this.allocateEpoch();
+    if (this.stopped || gen !== this.generation) {
+      for (const t of stream.getTracks()) t.stop();
+      return;
+    }
+    if (epoch === null) {
+      // Could not allocate an epoch (engine unreachable / session not writable).
+      this.onStatus("paused");
+      this.sendEvent("gap");
+      for (const t of stream.getTracks()) t.stop();
+      this.stream = null;
+      this.active = false;
+      return;
+    }
+    this.epoch = epoch;
+
     const v = document.createElement("video");
     v.muted = true;
     v.playsInline = true;
     v.srcObject = stream;
     await v.play().catch(() => {});
+    if (this.stopped || gen !== this.generation) {
+      // stop()/re-acquire happened during play(): abandon this attempt cleanly.
+      v.srcObject = null;
+      for (const t of stream.getTracks()) t.stop();
+      return;
+    }
     this.video = v;
 
-    // A dying track (device unplugged, permission pulled from the address bar)
-    // is a gap, not an error the candidate should suffer for: log it and try
-    // one silent re-acquire; if that fails, stay paused with an honest trail.
     for (const track of stream.getTracks()) {
       track.onended = () => this.handleTrackLost();
     }
 
-    // Audio container per browser: webm/opus (Chromium/Firefox), mp4 (Safari).
     if (typeof MediaRecorder !== "undefined") {
       if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) this.audioMime = "audio/webm";
       else if (MediaRecorder.isTypeSupported("audio/webm")) this.audioMime = "audio/webm";
       else if (MediaRecorder.isTypeSupported("audio/mp4")) this.audioMime = "audio/mp4";
     }
 
-    this.onStatus("recording");
+    this.onStatus(this.degraded ? "degraded" : "recording");
     this.sendEvent("start");
-    // Identity shot first (higher resolution, seq 0), then the cycle loop.
     void this.captureSnapshot(true);
     this.beginCycle();
   }
 
+  private async allocateEpoch(): Promise<number | null> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch("/api/rec/start", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ inviteToken: this.inviteToken }),
+        });
+        if (res.ok) {
+          const d = (await res.json()) as { epoch?: number };
+          if (typeof d.epoch === "number") return d.epoch;
+        } else if (res.status === 409) {
+          return null; // session not writable (submitted/erased) — don't retry
+        }
+      } catch {
+        /* network — retry */
+      }
+      if (attempt < 2) await this.sleep(attempt === 0 ? 1000 : 3000);
+    }
+    return null;
+  }
+
   private beginCycle() {
-    if (!this.active || !this.stream) return;
+    if (!this.active || this.stopped || !this.stream || this.epoch === null) return;
     const cycleMs = this.degraded ? DEGRADED_CYCLE_MS : NORMAL_CYCLE_MS;
+    const gen = this.generation;
 
     if (this.audioMime) {
-      const audioTracks = this.stream.getAudioTracks();
+      const audioTracks = this.stream.getAudioTracks().filter((t) => t.readyState === "live");
       if (audioTracks.length > 0) {
         try {
           const rec = new MediaRecorder(new MediaStream(audioTracks), {
@@ -109,19 +158,19 @@ export class SessionRecorder {
             if (e.data && e.data.size > 0) parts.push(e.data);
           };
           rec.onstop = () => {
+            // Bail if a teardown/stop happened while this recorder ran.
+            if (gen !== this.generation) return;
             if (parts.length > 0) {
               const blob = new Blob(parts, { type: this.audioMime! });
-              this.enqueue({ kind: "audio", seq: this.audioSeq++, contentType: this.audioMime! }, blob);
+              this.enqueue({ kind: "audio", seq: this.audioSeq++, contentType: this.audioMime!, size: blob.size }, blob);
             }
-            // Snapshot rides the cycle boundary; then next cycle. Driven from
-            // the media pipeline's own event → throttle-resistant.
             void this.captureSnapshot(false);
-            if (this.active) this.beginCycle();
+            if (this.active && !this.stopped) this.beginCycle();
           };
           rec.start();
           this.recorder = rec;
           this.cycleTimer = setTimeout(() => {
-            try { rec.state !== "inactive" && rec.stop(); } catch { /* already stopped */ }
+            try { if (rec.state !== "inactive") rec.stop(); } catch { /* already stopped */ }
           }, cycleMs);
           return;
         } catch {
@@ -132,15 +181,22 @@ export class SessionRecorder {
 
     // Snapshots-only fallback (no usable audio recorder): plain timer cadence.
     this.cycleTimer = setTimeout(() => {
+      if (gen !== this.generation) return;
       void this.captureSnapshot(false);
-      if (this.active) this.beginCycle();
+      if (this.active && !this.stopped) this.beginCycle();
     }, cycleMs);
   }
 
   private async captureSnapshot(isIdentity: boolean) {
     const v = this.video;
-    if (!v || !this.stream || (!this.active && !isIdentity)) return;
+    if (!v || !this.stream || this.epoch === null) return;
+    if (this.stopped || (!this.active && !isIdentity)) return;
     if (isIdentity && this.idUploaded) return;
+    // Only capture from a LIVE video track — a dead/ended track leaves the
+    // <video> painting a frozen last frame; uploading that as "current" would
+    // contradict the paused/gap trail.
+    const vtrack = this.stream.getVideoTracks()[0];
+    if (!vtrack || vtrack.readyState !== "live") return;
     const vw = v.videoWidth || 640;
     const vh = v.videoHeight || 480;
     if (vw === 0 || vh === 0) return;
@@ -154,15 +210,13 @@ export class SessionRecorder {
     if (!ctx) return;
     ctx.drawImage(v, 0, 0, w, h);
     const quality = isIdentity ? 0.85 : this.degraded ? 0.5 : 0.72;
-    const blob = await new Promise<Blob | null>((res) =>
-      canvas.toBlob(res, "image/jpeg", quality)
-    );
+    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, "image/jpeg", quality));
     if (!blob || blob.size === 0) return;
     if (isIdentity) {
       this.idUploaded = true;
-      this.enqueue({ kind: "id", seq: 0, contentType: "image/jpeg" }, blob);
+      this.enqueue({ kind: "id", seq: 0, contentType: "image/jpeg", size: blob.size }, blob);
     } else {
-      this.enqueue({ kind: "snap", seq: this.snapSeq++, contentType: "image/jpeg" }, blob);
+      this.enqueue({ kind: "snap", seq: this.snapSeq++, contentType: "image/jpeg", size: blob.size }, blob);
     }
   }
 
@@ -177,18 +231,21 @@ export class SessionRecorder {
     this.draining = true;
     try {
       while (this.queue.length > 0) {
-        const { item, blob } = this.queue[0];
-        const ok = await this.uploadOne(item, blob);
-        this.queue.shift();
+        const head = this.queue[0];
+        const ok = await this.uploadOne(head.item, head.blob);
+        // Identity-based removal: an overflow drop-oldest during the await may
+        // have shifted `head` out already, so never blindly shift() — remove the
+        // exact entry we uploaded, or nothing if it was already dropped.
+        const i = this.queue.indexOf(head);
+        if (i !== -1) this.queue.splice(i, 1);
         if (ok) {
           this.consecutiveFailures = 0;
-          if (this.degraded) this.onStatus("degraded");
         } else {
           this.consecutiveFailures++;
           this.sendEvent("upload_failed");
           if (!this.degraded && this.consecutiveFailures >= DEGRADE_AFTER_FAILURES) {
             this.degraded = true;
-            this.onStatus("degraded");
+            if (!this.stopped) this.onStatus("degraded");
             this.sendEvent("degraded");
           }
         }
@@ -200,15 +257,16 @@ export class SessionRecorder {
 
   /** presign + PUT with retry/backoff. Returns false only after final failure. */
   private async uploadOne(item: PresignItem, blob: Blob): Promise<boolean> {
+    if (this.epoch === null) return false;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const pres = await fetch("/api/rec/presign", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ inviteToken: this.inviteToken, items: [item] }),
+          body: JSON.stringify({ inviteToken: this.inviteToken, epoch: this.epoch, items: [item] }),
         });
         if (!pres.ok) {
-          // 409 (submitted/expired) and 429 (cap) are terminal — stop retrying.
+          // 409 (submitted/erased/stale-epoch) and 429 (cap) are terminal.
           if (pres.status === 409 || pres.status === 429) return false;
           throw new Error(`presign ${pres.status}`);
         }
@@ -223,46 +281,65 @@ export class SessionRecorder {
         if (!put.ok) throw new Error(`put ${put.status}`);
         return true;
       } catch {
-        if (attempt < 2) await new Promise((r) => setTimeout(r, attempt === 0 ? 1000 : 4000));
+        if (attempt < 2) await this.sleep(attempt === 0 ? 1000 : 4000);
       }
     }
     return false;
   }
 
   private async handleTrackLost() {
-    if (!this.active) return;
+    if (!this.active || this.stopped || this.reacquiring) return;
+    this.reacquiring = true;
     this.onStatus("paused");
     this.sendEvent("gap");
-    // One silent re-acquire (permission usually still granted — e.g. the OS
-    // switched default devices). More than one attempt would loop on hard denial.
+    // Fully stop the current (dead) capture loop so no frozen-frame snapshots or
+    // orphaned recorders survive while we try to recover.
+    this.teardownMedia();
+    const gen = this.generation;
     try {
       const fresh = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      this.teardownMedia();
+      if (this.stopped || gen !== this.generation) {
+        for (const t of fresh.getTracks()) t.stop();
+        return;
+      }
+      this.stopped = false;
       this.active = true;
       await this.start(fresh);
-      this.sendEvent("resume");
+      if (this.epoch !== null) this.sendEvent("resume");
     } catch {
       this.sendEvent("denied");
-      // Stay paused; the room banner asks the candidate to re-enable.
+      // Stay paused (loop already torn down); the room banner offers re-enable.
+    } finally {
+      this.reacquiring = false;
     }
   }
 
-  /** Try to restart after the candidate re-grants permission (room banner CTA). */
+  /** Room banner CTA: re-enable after a device/permission loss. */
   async retry(): Promise<boolean> {
+    if (this.stopped || this.reacquiring) return false;
+    this.reacquiring = true;
+    this.teardownMedia();
+    const gen = this.generation;
     try {
       const fresh = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      this.teardownMedia();
+      if (this.stopped || gen !== this.generation) {
+        for (const t of fresh.getTracks()) t.stop();
+        return false;
+      }
+      this.stopped = false;
       this.active = true;
       await this.start(fresh);
-      this.sendEvent("resume");
-      return true;
+      const ok = this.epoch !== null;
+      if (ok) this.sendEvent("resume");
+      return ok;
     } catch {
       return false;
+    } finally {
+      this.reacquiring = false;
     }
   }
 
   private sendEvent(type: string) {
-    // Fire-and-forget; keepalive so a stop event survives page teardown.
     fetch("/api/rec/event", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -279,23 +356,22 @@ export class SessionRecorder {
     }
   }
 
+  // Tears down the media pipeline WITHOUT marking the recorder terminal, and
+  // bumps `generation` so any in-flight cycle/continuation self-cancels.
   private teardownMedia() {
+    this.generation++;
     this.active = false;
     if (this.cycleTimer) {
       clearTimeout(this.cycleTimer);
       this.cycleTimer = null;
     }
-    try {
-      if (this.recorder) {
-        // Detach BEFORE stop: a re-acquire path calls start() right after this,
-        // and the old recorder's pending onstop must not spawn a second cycle
-        // loop (or enqueue into the fresh session) once `active` flips true again.
-        this.recorder.onstop = null;
-        this.recorder.ondataavailable = null;
-        if (this.recorder.state !== "inactive") this.recorder.stop();
-      }
-    } catch { /* already stopped */ }
-    this.recorder = null;
+    if (this.recorder) {
+      // Detach BEFORE stop so a pending onstop can't spawn a new cycle or enqueue.
+      this.recorder.onstop = null;
+      this.recorder.ondataavailable = null;
+      try { if (this.recorder.state !== "inactive") this.recorder.stop(); } catch { /* already */ }
+      this.recorder = null;
+    }
     if (this.video) {
       this.video.srcObject = null;
       this.video = null;
@@ -309,31 +385,58 @@ export class SessionRecorder {
     }
   }
 
-  /** Stop capturing, flush what we can (bounded wait), release the devices. */
+  /** Stop capturing, flush what we can (bounded), release the devices. Terminal. */
   async stop(): Promise<void> {
-    if (!this.active && !this.stream) return;
+    if (this.stopped) return;
+    this.stopped = true;
     const finalRecorder = this.recorder;
     this.active = false;
     if (this.cycleTimer) {
       clearTimeout(this.cycleTimer);
       this.cycleTimer = null;
     }
-    // Stop the in-flight recorder so its final chunk lands in the queue…
-    try {
-      if (finalRecorder && finalRecorder.state !== "inactive") finalRecorder.stop();
-    } catch { /* already stopped */ }
-    // …give the queue a bounded moment to drain, then release the camera.
+    // Deterministically wait for the final recorder's LAST chunk to land in the
+    // queue before draining — a fixed sleep could miss a slow stop event and
+    // drop up to a full cycle of the most dispute-relevant final audio.
+    if (finalRecorder && finalRecorder.state !== "inactive") {
+      await Promise.race([
+        new Promise<void>((res) => {
+          finalRecorder.addEventListener("stop", () => res(), { once: true });
+          try { finalRecorder.stop(); } catch { res(); }
+        }),
+        this.sleep(4000),
+      ]);
+    }
+    // Drain the queue (bounded), then release the camera.
     await Promise.race([
       (async () => {
-        await new Promise((r) => setTimeout(r, 300)); // let onstop enqueue
-        while (this.queue.length > 0 || this.draining) {
-          await new Promise((r) => setTimeout(r, 200));
-        }
+        while (this.queue.length > 0 || this.draining) await this.sleep(200);
       })(),
-      new Promise((r) => setTimeout(r, 5000)),
+      this.sleep(5000),
     ]);
     this.sendEvent("stop");
-    this.teardownMedia();
+    // Detach the final recorder's handlers and release devices.
+    this.generation++;
+    if (finalRecorder) {
+      finalRecorder.onstop = null;
+      finalRecorder.ondataavailable = null;
+    }
+    this.recorder = null;
+    if (this.video) {
+      this.video.srcObject = null;
+      this.video = null;
+    }
+    if (this.stream) {
+      for (const t of this.stream.getTracks()) {
+        t.onended = null;
+        t.stop();
+      }
+      this.stream = null;
+    }
     this.onStatus("stopped");
+  }
+
+  private sleep(ms: number) {
+    return new Promise<void>((r) => setTimeout(r, ms));
   }
 }

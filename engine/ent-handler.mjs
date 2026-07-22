@@ -97,6 +97,7 @@ import { gradeLab } from "./graders.mjs";
 // uploads during a live session, presigned playback for the candidate report,
 // and prefix deletion for the PII-erase cascade.
 import {
+  startRecEpoch,
   presignRecUploads,
   recordRecEvent,
   listRecordings,
@@ -111,7 +112,7 @@ import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3
 import { createWriteStream, readFileSync, existsSync } from "node:fs";
 import { chmod } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
-import { randomInt } from "node:crypto";
+import { randomInt, createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 // Azure lab lifecycle driver (Portal v2 multi-cloud). SAFE to import statically:
@@ -361,6 +362,13 @@ async function sendInviteLinkEmail({ candidateEmail, candidateName, inviteToken 
 const DOCS_BUCKET = "shieldsync-ent-docs-750294427884";
 const MAX_DOC_PDF_BYTES = 4 * 1024 * 1024;
 const DOC_EXPIRES_DAYS_DEFAULT = 30;
+
+// A non-reversible reference to an invite token for CloudWatch audit lines. The
+// full inviteToken is the candidate's LIVE bearer credential (it authenticates
+// /ent/rec/*, /ent/start, /ent/submit, consent/OTP) and must never be logged in
+// plaintext (CWE-532). The durable audit() record keys on the real token; these
+// console lines only need a stable, non-secret handle.
+const tokRef = (t) => "tok:" + createHash("sha256").update(String(t)).digest("hex").slice(0, 12);
 const DOC_EXPIRES_DAYS_MAX = 180;
 const DOC_RESEND_COOLDOWN_SEC = 45;
 // All doc-portal audit rows share one synthetic partition in ShieldSyncEntAudit
@@ -1209,23 +1217,34 @@ export async function handler(event) {
       if (!r.ok) return resp(404, { error: "INVITE_NOT_FOUND" });
       // Erase cascade: face images + voice audio are the most sensitive PII we
       // hold — delete the whole recording prefix. An S3 blip must not roll back
-      // the DDB redaction, so log-and-continue; the audit line records the count.
+      // the DDB redaction, so log-and-continue; the audit line records BOTH the
+      // deleted count AND any per-key failures (S3 DeleteObjects returns 200 even
+      // on partial failure) so an incomplete erasure is never recorded as clean.
       let recDeleted = 0;
+      let recFailed = 0;
       if (preErase?.assessmentId) {
         try {
-          recDeleted = (await deleteRecordings(preErase)).deleted;
+          const del = await deleteRecordings(preErase);
+          recDeleted = del.deleted;
+          recFailed = del.failed;
+          if (del.failed > 0) {
+            console.error(`[ent/erase] ${del.failed} recording object(s) NOT deleted (media may remain, re-run erase):`, del.errors.join(", "));
+          }
         } catch (e) {
+          recFailed = -1; // -1 = the delete call itself threw (whole prefix unverified)
           console.error("[ent/erase] recording deletion failed (media may remain, re-run erase):", e?.name, e?.message);
         }
       }
       console.log(
-        JSON.stringify({ audit: true, action: "candidate.erase", actor, inviteToken, at: Date.now() })
+        JSON.stringify({ audit: true, action: "candidate.erase", actor, invite: tokRef(inviteToken), recDeleted, recFailed, at: Date.now() })
       );
       // orgId is untouched by the erase (only name/email/reflection are redacted),
       // so a post-erase read gives the org to index this audit under.
       const erasedInvite = await getInvite(inviteToken);
-      await audit({ orgId: erasedInvite?.orgId, actor, action: "candidate.erase", target: inviteToken, detail: { recDeleted } });
-      return resp(200, { ok: true, erasedAt: r.erasedAt });
+      await audit({ orgId: erasedInvite?.orgId, actor, action: "candidate.erase", target: inviteToken, detail: { recDeleted, recFailed } });
+      // Surface an incomplete media erasure to the caller so staff can re-run it
+      // rather than trusting a green result over surviving biometric PII.
+      return resp(200, { ok: true, erasedAt: r.erasedAt, recDeleted, recFailed, recComplete: recFailed === 0 });
     }
 
     // ── employer portal (called by the enterprise app server-side) ────────
@@ -1593,21 +1612,39 @@ export async function handler(event) {
     }
 
     // ── session recording (candidate capture + employer playback) ─────────
-    // Candidate-side: presigned PUT batches, minted ONLY while the invite is
-    // "started" (a live session). Keys are server-generated inside the invite's
-    // own prefix; a per-invite atomic cap bounds total mints. See recinfra.mjs.
-    if (method === "POST" && path === "/ent/rec/presign") {
-      const { inviteToken, items } = parsed;
+    // A session is WRITABLE for recording only while it is a live, un-erased,
+    // un-revoked "started" invite. Gating on erasedAt/revokedAt (not just
+    // status) makes erasure DURABLE: a candidate holding the invite link cannot
+    // re-populate the just-deleted prefix after a data-subject erasure.
+    const recWritable = (inv) =>
+      inv && inv.status === "started" && !inv.erasedAt && !inv.candidateReportRevokedAt;
+
+    // Allocate a capture EPOCH for a fresh recorder session (each page load).
+    // Keys are namespaced by epoch, so a reload starts a new key space and can
+    // never overwrite the earlier half of the recording (or the identity shot).
+    if (method === "POST" && path === "/ent/rec/start") {
+      const { inviteToken } = parsed;
       const invite = await getInvite(inviteToken);
       if (!invite) return resp(404, { error: "not found" });
-      if (invite.status !== "started") {
-        return resp(409, { error: "NOT_RECORDABLE", status: invite.status });
-      }
+      if (!recWritable(invite)) return resp(409, { error: "NOT_RECORDABLE", status: invite.status });
+      const { epoch } = await startRecEpoch(inviteToken);
+      return resp(200, { epoch });
+    }
+
+    // Candidate-side: presigned PUT batches for the CURRENT epoch. Keys are
+    // server-generated inside the invite's own prefix; each is size-bounded and
+    // a per-invite atomic cap bounds total mints. See recinfra.mjs.
+    if (method === "POST" && path === "/ent/rec/presign") {
+      const { inviteToken, epoch, items } = parsed;
+      const invite = await getInvite(inviteToken);
+      if (!invite) return resp(404, { error: "not found" });
+      if (!recWritable(invite)) return resp(409, { error: "NOT_RECORDABLE", status: invite.status });
       try {
-        const out = await presignRecUploads(invite, items);
+        const out = await presignRecUploads(invite, epoch, items);
         return resp(200, out);
       } catch (e) {
         if (e.code === "REC_BAD_ITEMS") return resp(400, { error: "REC_BAD_ITEMS" });
+        if (e.code === "REC_STALE_EPOCH") return resp(409, { error: "REC_STALE_EPOCH" });
         if (e.code === "REC_CAP") return resp(429, { error: "REC_CAP" });
         throw e;
       }
@@ -1663,7 +1700,7 @@ export async function handler(event) {
         const inv = await revokeCandidateReport(inviteToken);
         if (!inv) return resp(404, { error: "not found" });
         console.log(
-          JSON.stringify({ audit: true, action: "report.revoke", actor, inviteToken, at: Date.now() })
+          JSON.stringify({ audit: true, action: "report.revoke", actor, invite: tokRef(inviteToken), at: Date.now() })
         );
         await audit({ orgId: inv.orgId, actor, action: "report.revoke", target: inviteToken, detail: { kind: "candidate" } });
         return resp(200, { ok: true, revokedAt: inv.candidateReportRevokedAt });
@@ -1687,7 +1724,7 @@ export async function handler(event) {
         const inv = await renewCandidateReport(inviteToken);
         if (!inv) return resp(404, { error: "not found" });
         console.log(
-          JSON.stringify({ audit: true, action: "report.renew", actor, inviteToken, at: Date.now() })
+          JSON.stringify({ audit: true, action: "report.renew", actor, invite: tokRef(inviteToken), at: Date.now() })
         );
         await audit({ orgId: inv.orgId, actor, action: "report.renew", target: inviteToken, detail: { kind: "candidate" } });
         return resp(200, { ok: true, reportExpiresAt: inv.candidateReportExpiresAt });
@@ -2411,6 +2448,10 @@ export async function handler(event) {
             sessionId: s.sessionId,
             status: s.status,
             consoleUrl,
+            // Carry the ORIGINAL scored deadline from the invite so a reconnected
+            // room re-arms its countdown (and the post-expiry grace/auto-submit)
+            // instead of freezing at "--:--" and losing the timer on refresh.
+            scoredExpiresAt: invite.scoredExpiresAt ?? null,
             expiresAt: s.expiresAt,
             reconnected: true,
           });
@@ -2431,7 +2472,7 @@ export async function handler(event) {
           if (s2 && ["leasing", "active"].includes(s2.status) && new Date(s2.expiresAt) > new Date()) {
             const a2 = await getAssessment(fresh.assessmentId);
             const consoleUrl2 = await mintConsoleUrl({ accountId: s2.accountId, labSlug: a2?.labSlug, durationSeconds: 3600 });
-            return resp(200, { sessionId: s2.sessionId, status: s2.status, consoleUrl: consoleUrl2, expiresAt: s2.expiresAt, reconnected: true });
+            return resp(200, { sessionId: s2.sessionId, status: s2.status, consoleUrl: consoleUrl2, scoredExpiresAt: fresh.scoredExpiresAt ?? null, expiresAt: s2.expiresAt, reconnected: true });
           }
         }
         return resp(409, { error: "START_IN_PROGRESS", retry: true });
