@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "main": ".open-next/worker.js",
+  "name": "shieldsync-hr",
+  "compatibility_date": "2024-12-30",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS",
+    // SECURITY: without this, Cloudflare serves static assets BEFORE the Worker
+    // runs — the pre-signed signature + company seal would be publicly
+    // fetchable at guessable paths. Routing /sealed/* through the Worker lets
+    // proxy.ts require an authenticated HR session. /brand (logo) stays public.
+    "run_worker_first": ["/sealed/*"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "routes": [
+    { "pattern": "employee.shieldsyncsecurity.com", "custom_domain": true }
+  ],
+  // NON-SECRET vars only. Secrets are set with `wrangler secret put`:
+  //   HR_ENGINE_SECRET      -> x-engine-token to the HR Lambda (must match it)
+  //   HR_SESSION_SECRET     -> HMAC key for the ss_hr session cookie (distinct
+  //                            from the enterprise SESSION_SECRET on purpose)
+  //   COGNITO_CLIENT_SECRET -> Cognito app-client secret
+  //
+  // Reuses the SAME Cognito pool/app-client as the enterprise app. GO-LIVE: add
+  //   https://employee.shieldsyncsecurity.com/api/auth/callback  (callback URL)
+  //   https://employee.shieldsyncsecurity.com                    (sign-out URL)
+  // to that app-client, and create the two allowlisted users in the pool.
+  "vars": {
+    "HR_ENGINE_URL": "https://HR-ENGINE-API-ID.execute-api.us-east-1.amazonaws.com",
+    "APP_URL": "https://employee.shieldsyncsecurity.com",
+    "COGNITO_REGION": "us-east-1",
+    "COGNITO_POOL_ID": "us-east-1_54vIGJe4R",
+    "COGNITO_CLIENT_ID": "4lri28sn4mn2u8bqpfjll1i8gc",
+    "COGNITO_DOMAIN": "shieldsync-enterprise.auth.us-east-1.amazoncognito.com",
+    "HR_ALLOWLIST": "admin@shieldsyncsecurity.com,hr@shieldsyncsecurity.com"
+  }
+}

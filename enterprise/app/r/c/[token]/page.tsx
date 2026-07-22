@@ -11,6 +11,7 @@ import {
   formatDate,
   verifiedStats,
 } from "../../_components/report-bits";
+import { RecordingSection } from "./recording-section";
 
 // Employer-facing single-candidate report — never indexed, never cached.
 export const metadata: Metadata = {
@@ -210,6 +211,10 @@ export default async function CandidateReportPage({
             <CompetencyProfile criteria={criteria} />
           )}
         </section>
+
+        {/* Session recording (webcam snapshots + mic) — renders nothing for
+            sessions recorded before this feature or with no captured media. */}
+        <RecordingSection token={token} />
 
         <section className="mb-8">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">

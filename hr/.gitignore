@@ -1,0 +1,25 @@
+# dependencies
+/node_modules
+
+# next / build
+/.next/
+/out/
+/build
+next-env.d.ts
+tsconfig.tsbuildinfo
+
+# opennext / cloudflare
+/.open-next/
+/.wrangler/
+
+# env / secrets (NEVER commit)
+.env
+.env*.local
+.dev.vars
+*.dev.vars
+
+# misc
+.DS_Store
+*.pem
+npm-debug.log*
+tests/.build

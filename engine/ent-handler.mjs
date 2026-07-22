@@ -93,6 +93,15 @@ import {
   releaseAccount,
 } from "./labinfra.mjs";
 import { gradeLab } from "./graders.mjs";
+// Session recording (webcam snapshots + mic audio): presigned direct-to-S3
+// uploads during a live session, presigned playback for the candidate report,
+// and prefix deletion for the PII-erase cascade.
+import {
+  presignRecUploads,
+  recordRecEvent,
+  listRecordings,
+  deleteRecordings,
+} from "./recinfra.mjs";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 // Transactional email no longer uses SES (prod-access request was denied for
 // this account). Sends go out via the Resend HTTP API through a drop-in
@@ -1193,15 +1202,29 @@ export async function handler(event) {
       const { inviteToken } = parsed;
       const actor = cleanActor(parsed.actor);
       if (!inviteToken) return resp(400, { error: "INVITE_TOKEN_REQUIRED" });
+      // Fetch BEFORE redaction — deleteRecordings needs assessmentId+token to
+      // address the S3 prefix (both survive redaction, but read-first is robust).
+      const preErase = await getInvite(inviteToken);
       const r = await eraseCandidatePii(inviteToken);
       if (!r.ok) return resp(404, { error: "INVITE_NOT_FOUND" });
+      // Erase cascade: face images + voice audio are the most sensitive PII we
+      // hold — delete the whole recording prefix. An S3 blip must not roll back
+      // the DDB redaction, so log-and-continue; the audit line records the count.
+      let recDeleted = 0;
+      if (preErase?.assessmentId) {
+        try {
+          recDeleted = (await deleteRecordings(preErase)).deleted;
+        } catch (e) {
+          console.error("[ent/erase] recording deletion failed (media may remain, re-run erase):", e?.name, e?.message);
+        }
+      }
       console.log(
         JSON.stringify({ audit: true, action: "candidate.erase", actor, inviteToken, at: Date.now() })
       );
       // orgId is untouched by the erase (only name/email/reflection are redacted),
       // so a post-erase read gives the org to index this audit under.
       const erasedInvite = await getInvite(inviteToken);
-      await audit({ orgId: erasedInvite?.orgId, actor, action: "candidate.erase", target: inviteToken, detail: {} });
+      await audit({ orgId: erasedInvite?.orgId, actor, action: "candidate.erase", target: inviteToken, detail: { recDeleted } });
       return resp(200, { ok: true, erasedAt: r.erasedAt });
     }
 
@@ -1567,6 +1590,57 @@ export async function handler(event) {
       }
       const result = await getResult(invite.assessmentId, invite.inviteToken);
       return resp(200, { candidateName: invite.candidateName, result });
+    }
+
+    // ── session recording (candidate capture + employer playback) ─────────
+    // Candidate-side: presigned PUT batches, minted ONLY while the invite is
+    // "started" (a live session). Keys are server-generated inside the invite's
+    // own prefix; a per-invite atomic cap bounds total mints. See recinfra.mjs.
+    if (method === "POST" && path === "/ent/rec/presign") {
+      const { inviteToken, items } = parsed;
+      const invite = await getInvite(inviteToken);
+      if (!invite) return resp(404, { error: "not found" });
+      if (invite.status !== "started") {
+        return resp(409, { error: "NOT_RECORDABLE", status: invite.status });
+      }
+      try {
+        const out = await presignRecUploads(invite, items);
+        return resp(200, out);
+      } catch (e) {
+        if (e.code === "REC_BAD_ITEMS") return resp(400, { error: "REC_BAD_ITEMS" });
+        if (e.code === "REC_CAP") return resp(429, { error: "REC_CAP" });
+        throw e;
+      }
+    }
+
+    // Candidate-side coverage trail (start/stop/gap/denied/degraded/...).
+    // Accepted while started AND briefly after submit (the final "stop" event
+    // rides the submit beacon). Best-effort: a failed append is not an error.
+    if (method === "POST" && path === "/ent/rec/event") {
+      const { inviteToken, type } = parsed;
+      const invite = await getInvite(inviteToken);
+      if (!invite) return resp(404, { error: "not found" });
+      if (!["started", "submitted"].includes(invite.status)) {
+        return resp(409, { error: "NOT_RECORDABLE", status: invite.status });
+      }
+      await recordRecEvent(inviteToken, typeof type === "string" ? type : "");
+      return resp(200, { ok: true });
+    }
+
+    // Employer-side playback: same auth + lifecycle contract as
+    // /ent/report/candidate — candidateReportToken, revocation-aware, 404
+    // oracle-free. Returns presigned GETs for <img>/<audio> tags.
+    if (method === "GET" && path === "/ent/rec/list") {
+      const invite = await getInviteByCandidateReportToken(qs.candidateReportToken);
+      if (!invite || reportDead(invite.candidateReportRevokedAt, invite.candidateReportExpiresAt)) {
+        return resp(404, { error: "not found" });
+      }
+      const media = await listRecordings(invite);
+      // recEvents rows are compact JSON strings (see recordRecEvent).
+      const events = (invite.recEvents ?? [])
+        .map((s) => { try { return JSON.parse(s); } catch { return null; } })
+        .filter(Boolean);
+      return resp(200, { ...media, events });
     }
 
     // Report-token lifecycle admin (E1): revoke kills the link now; renew clears

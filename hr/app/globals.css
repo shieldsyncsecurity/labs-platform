@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+/* Admin-UI palette (forms, nav, tables). The letterhead DOCUMENTS use their own
+   fixed print styles in components/letterhead.css so they stay pixel-faithful to
+   the signed originals regardless of this theme. */
+@theme {
+  --color-canvas: #f4f6fa;
+  --color-surface: #ffffff;
+  --color-ink: #1b2331;
+  --color-muted: #5b6676;
+  --color-line: #d9dfea;
+  --color-navy: #1f3a5f;
+  --color-brand: #2f4fb0;
+  --color-brand-strong: #22417a;
+}
+
+html {
+  color-scheme: light;
+}

@@ -100,6 +100,16 @@ export default function PrivacyPage() {
                   objective, the time taken, and a short written &ldquo;reflection&rdquo; the
                   candidate submits describing what they found and how they addressed it.
                 </li>
+                <li>
+                  <span className="font-medium text-ink">Session recording.</span> With the
+                  candidate&apos;s explicit consent given before the assessment starts, we capture
+                  periodic webcam snapshots (roughly every 15 seconds) and microphone audio while
+                  the assessment is in progress, to verify the work was performed by the invited
+                  candidate alone. The recording is stored encrypted in AWS S3, is visible only to
+                  the inviting employer alongside the candidate&apos;s results, follows the same
+                  24-month retention as assessment records, and is deleted immediately as part of
+                  any erasure request.
+                </li>
               </ul>
               <p className="mt-3">
                 For employer users, we collect the information needed to create and manage an

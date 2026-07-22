@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShieldMark } from "@/components/brand";
+import { SessionRecorder } from "@/lib/recorder";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -71,7 +72,9 @@ type Phase =
   | "reflection"
   | "done";
 
-const CONSENT_VERSION = "v1";
+// v2 (2026-07-22): adds explicit, itemized session-recording consent — webcam
+// periodic snapshots + microphone audio during the live assessment.
+const CONSENT_VERSION = "v2";
 
 // Hard grace period after the room timer expires: the candidate gets this long
 // on the reflection card before we auto-submit for them.
@@ -138,7 +141,16 @@ export default function CandidateFlow({ token }: { token: string }) {
 
   // consent
   const [consentChecked, setConsentChecked] = useState(false);
+  const [recordingChecked, setRecordingChecked] = useState(false);
   const [consentBusy, setConsentBusy] = useState(false);
+
+  // session recording (webcam snapshots + mic). Fail-closed at start: the
+  // Start button stays disabled until camera+mic permission is granted.
+  // Fail-open mid-session: a device/permission loss pauses recording with an
+  // honest event trail instead of interrupting the candidate's work.
+  const [camState, setCamState] = useState<"idle" | "requesting" | "granted" | "denied">("idle");
+  const [recStatus, setRecStatus] = useState<"off" | "recording" | "paused" | "degraded">("off");
+  const recorderRef = useRef<SessionRecorder | null>(null);
 
   // otp
   const [otpCode, setOtpCode] = useState("");
@@ -256,9 +268,100 @@ export default function CandidateFlow({ token }: { token: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // ── Session recording lifecycle ─────────────────────────────────────
+  // Preflight (ReadyCard): prove camera+mic permission BEFORE the clock can
+  // start, then release the devices immediately — the camera light must not
+  // burn while the candidate sits on the ready card. The grant persists per
+  // origin, so the room re-acquires silently when the session begins.
+  const requestMedia = async () => {
+    if (camState === "requesting") return;
+    setCamState("requesting");
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      for (const t of s.getTracks()) t.stop();
+      setCamState("granted");
+    } catch {
+      setCamState("denied");
+    }
+  };
+
+  // Recording requires the v2 (recording-specific) consent. An invite that
+  // consented under v1 BEFORE this feature shipped and resumes mid-flow never
+  // saw the recording disclosure — recording them anyway would be capture
+  // without consent, so those sessions run unrecorded (and show no strip).
+  // Every new consent is v2, so this cohort self-retires.
+  const recConsented = invite?.consentVersion !== "v1";
+
+  // Start capturing once the room is live. Also covers the RECONNECT path
+  // (refresh mid-assessment): permission was granted earlier, so the silent
+  // re-acquire succeeds; if the candidate meanwhile revoked it, we record the
+  // denial and show the paused banner rather than blocking their session.
+  useEffect(() => {
+    if (phase !== "room" || !session || session.status !== "active") return;
+    if (!recConsented) return;
+    if (recorderRef.current) return;
+    let cancelled = false;
+    (async () => {
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      } catch {
+        if (!cancelled) {
+          setRecStatus("paused");
+          fetch("/api/rec/event", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ inviteToken: token, type: "denied" }),
+          }).catch(() => {});
+        }
+        return;
+      }
+      if (cancelled) {
+        for (const t of stream.getTracks()) t.stop();
+        return;
+      }
+      const rec = new SessionRecorder(token, (s) =>
+        setRecStatus(s === "stopped" ? "off" : s)
+      );
+      recorderRef.current = rec;
+      await rec.start(stream);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, session?.status]);
+
+  // Paused-banner CTA: re-enable after a mid-session device/permission loss.
+  const retryRecording = async () => {
+    const rec = recorderRef.current;
+    if (rec) {
+      if (await rec.retry()) setRecStatus("recording");
+      return;
+    }
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const fresh = new SessionRecorder(token, (st) =>
+        setRecStatus(st === "stopped" ? "off" : st)
+      );
+      recorderRef.current = fresh;
+      await fresh.start(s);
+    } catch {
+      setRecStatus("paused");
+    }
+  };
+
+  // Release the camera/mic on unmount, whatever state the flow ended in.
+  useEffect(
+    () => () => {
+      void recorderRef.current?.stop();
+    },
+    []
+  );
+
   // ── Phase 2: consent ────────────────────────────────────────────────
   const handleConsent = async () => {
-    if (!consentChecked || consentBusy) return;
+    if (!consentChecked || !recordingChecked || consentBusy) return;
     setConsentBusy(true);
     setErrorMsg(null);
     try {
@@ -614,6 +717,12 @@ export default function CandidateFlow({ token }: { token: string }) {
     submitInFlightRef.current = true;
     setSubmitBusy(true);
     setErrorMsg(null);
+    // Stop + flush the recorder BEFORE submitting: /ent/submit flips the invite
+    // to "submitted", after which presigned-upload mints 409 — flushing first
+    // (bounded ~5s inside stop()) lands the final audio chunk + snapshot.
+    try {
+      await recorderRef.current?.stop();
+    } catch { /* recording teardown must never block a submit */ }
     try {
       const res = await fetch("/api/submit", {
         method: "POST",
@@ -664,6 +773,9 @@ export default function CandidateFlow({ token }: { token: string }) {
     const sendAutoSubmit = () => {
       if (beaconSentRef.current) return;
       beaconSentRef.current = true;
+      // Best-effort recording-stop notice: no async flush is possible in a
+      // pagehide handler, so the trail at least records that capture ended here.
+      recorderRef.current?.beaconStop();
       const payload = JSON.stringify({
         inviteToken: token,
         reflection: reflectionRef.current,
@@ -721,6 +833,8 @@ export default function CandidateFlow({ token }: { token: string }) {
             orgName={orgName}
             checked={consentChecked}
             onCheck={setConsentChecked}
+            recordingChecked={recordingChecked}
+            onRecordingCheck={setRecordingChecked}
             busy={consentBusy}
             error={errorMsg}
             onContinue={handleConsent}
@@ -757,6 +871,9 @@ export default function CandidateFlow({ token }: { token: string }) {
             onStart={handleStart}
             error={errorMsg}
             busy={starting}
+            camState={recConsented ? camState : "granted"}
+            onEnableMedia={requestMedia}
+            recRequired={recConsented}
           />
         )}
         {phase === "starting" && <StartingCard />}
@@ -769,6 +886,9 @@ export default function CandidateFlow({ token }: { token: string }) {
             countdown={countdown}
             waiting={!session || session.status !== "active"}
             onSubmit={() => setPhase("reflection")}
+            recStatus={recStatus}
+            recEnabled={recConsented}
+            onRetryRecording={retryRecording}
           />
         )}
         {phase === "resumeFailed" && (
@@ -841,6 +961,8 @@ function ConsentCard({
   orgName,
   checked,
   onCheck,
+  recordingChecked,
+  onRecordingCheck,
   busy,
   error,
   onContinue,
@@ -849,6 +971,8 @@ function ConsentCard({
   orgName: string;
   checked: boolean;
   onCheck: (v: boolean) => void;
+  recordingChecked: boolean;
+  onRecordingCheck: (v: boolean) => void;
   busy: boolean;
   error: string | null;
   onContinue: () => void;
@@ -876,6 +1000,13 @@ function ConsentCard({
           Cloudflare, and Google (Gemini).
         </p>
         <p className="mt-2">
+          <span className="font-medium text-ink">Your session is also recorded:</span> your webcam
+          (periodic snapshots, roughly every 15 seconds) and your microphone are captured while
+          you work, to verify the assessment was completed by you, alone. The recording is stored
+          encrypted, visible only to {orgName} alongside your results, retained for the same 24
+          months, and deleted on request. You will need a working camera and microphone to start.
+        </p>
+        <p className="mt-2">
           See our{" "}
           <a
             href="/privacy"
@@ -898,6 +1029,9 @@ function ConsentCard({
         </p>
       </div>
 
+      {/* Itemized consent (DPDP): data processing and session recording are
+          SEPARATE, specific checkboxes — one blanket tick is not informed
+          consent for biometric-adjacent capture. Both are required to proceed. */}
       <label className="flex items-start gap-3 text-sm text-ink-soft">
         <input
           type="checkbox"
@@ -905,12 +1039,29 @@ function ConsentCard({
           checked={checked}
           onChange={(e) => onCheck(e.target.checked)}
         />
-        <span>I understand and consent.</span>
+        <span>I understand and consent to my assessment activity and results being processed as described.</span>
+      </label>
+      <label className="flex items-start gap-3 text-sm text-ink-soft">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-line-strong"
+          checked={recordingChecked}
+          onChange={(e) => onRecordingCheck(e.target.checked)}
+        />
+        <span>
+          I consent to my webcam (periodic snapshots) and microphone being recorded during the
+          assessment and shared with {orgName}.
+        </span>
       </label>
 
       {error && <p className="text-sm text-rose-700">{error}</p>}
 
-      <button type="button" disabled={!checked || busy} onClick={onContinue} className={BTN_PRIMARY}>
+      <button
+        type="button"
+        disabled={!checked || !recordingChecked || busy}
+        onClick={onContinue}
+        className={BTN_PRIMARY}
+      >
         {busy ? "Saving..." : "Continue"}
       </button>
     </div>
@@ -1071,11 +1222,17 @@ function ReadyCard({
   onStart,
   error,
   busy,
+  camState,
+  onEnableMedia,
+  recRequired,
 }: {
   bookedSlot: string | null;
   onStart: () => void;
   error: string | null;
   busy: boolean;
+  camState: "idle" | "requesting" | "granted" | "denied";
+  onEnableMedia: () => void;
+  recRequired: boolean;
 }) {
   // slotKey is a slot key string (e.g. "2026-07-29T09:00"). Format it in the
   // candidate's local words; if parsing fails, stay honest and show the raw key.
@@ -1103,9 +1260,51 @@ function ReadyCard({
         </p>
       </div>
 
+      {/* Camera/mic preflight — fail-closed at start: the session is recorded,
+          so permission is proven BEFORE the clock can start (never during it).
+          The check releases the devices immediately; capture only begins with
+          the session itself. Hidden for pre-recording (v1-consent) invites. */}
+      {recRequired && (
+      <div className="rounded-lg border border-line bg-canvas p-4">
+        <p className="text-sm font-medium text-ink">Camera &amp; microphone check</p>
+        <p className="mt-1 text-sm text-ink-soft">
+          Your session is recorded (periodic webcam snapshots + microphone), as you consented.
+          Enable both to unlock Start — recording begins only when the assessment does.
+        </p>
+        {camState === "granted" ? (
+          <p className="mt-3 inline-flex items-center gap-2 rounded-md bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+            Camera and microphone ready
+          </p>
+        ) : (
+          <div className="mt-3 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={onEnableMedia}
+              disabled={camState === "requesting"}
+              className={BTN_SECONDARY}
+            >
+              {camState === "requesting" ? "Requesting..." : "Enable camera & microphone"}
+            </button>
+            {camState === "denied" && (
+              <p className="text-sm text-rose-700">
+                Permission was blocked. Allow camera and microphone for this site in your
+                browser&apos;s address-bar settings, then try again.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+      )}
+
       {error && <p className="text-sm text-rose-700">{error}</p>}
 
-      <button type="button" disabled={busy} onClick={onStart} className={BTN_PRIMARY}>
+      <button
+        type="button"
+        disabled={busy || camState !== "granted"}
+        onClick={onStart}
+        className={BTN_PRIMARY}
+      >
         {busy ? "Starting..." : "Start assessment"}
       </button>
     </div>
@@ -1157,6 +1356,9 @@ function RoomCard({
   countdown,
   waiting,
   onSubmit,
+  recStatus,
+  recEnabled,
+  onRetryRecording,
 }: {
   name?: string;
   hintsOn?: boolean;
@@ -1165,6 +1367,9 @@ function RoomCard({
   countdown: string;
   waiting: boolean;
   onSubmit: () => void;
+  recStatus: "off" | "recording" | "paused" | "degraded";
+  recEnabled: boolean;
+  onRetryRecording: () => void;
 }) {
   if (waiting) {
     return (
@@ -1185,6 +1390,49 @@ function RoomCard({
     </div>
   );
 
+  // Recording status strip — always visible in the room so the candidate is
+  // never recorded without an on-screen indicator, and a paused recording has
+  // an obvious one-click path back. "Keep this tab open" is load-bearing: the
+  // recorder lives HERE while the candidate works in the console tab.
+  // Hidden entirely for pre-recording (v1-consent) sessions, which never record.
+  const recordingStrip = !recEnabled ? null : (
+    <div
+      className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${
+        recStatus === "paused"
+          ? "border-amber-300 bg-amber-50 text-amber-800"
+          : "border-line bg-canvas text-ink-soft"
+      }`}
+    >
+      {recStatus === "paused" ? (
+        <>
+          <span className="font-medium">
+            Recording paused — your camera or microphone became unavailable.
+          </span>
+          <button
+            type="button"
+            onClick={onRetryRecording}
+            className={`rounded-md border border-amber-400 px-2.5 py-1 font-semibold text-amber-900 hover:bg-amber-100 ${FOCUS_RING}`}
+          >
+            Re-enable
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="inline-flex items-center gap-1.5 font-medium">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                recStatus === "off" ? "bg-line-strong" : "animate-pulse bg-red-500"
+              }`}
+              aria-hidden="true"
+            />
+            {recStatus === "off" ? "Recording starting..." : "Recording — snapshots + mic"}
+          </span>
+          <span>Keep this tab open while you work.</span>
+        </>
+      )}
+    </div>
+  );
+
   // Azure CLI-first: the candidate signs in with a session service-principal
   // credential (no Azure Portal login — they have no Entra identity) and works
   // from the Azure CLI, scoped to their own resource group.
@@ -1192,6 +1440,7 @@ function RoomCard({
     return (
       <div className="flex flex-col gap-5">
         {header}
+        {recordingStrip}
         <p className="text-sm text-ink-soft">
           Secure the Azure Storage account in your resource group, then submit. You work from the
           Azure CLI with the session credentials below.
@@ -1243,6 +1492,7 @@ function RoomCard({
   return (
     <div className="flex flex-col gap-5">
       {header}
+      {recordingStrip}
 
       <p className="text-sm text-ink-soft">
         Complete the security task in the AWS console, then submit.

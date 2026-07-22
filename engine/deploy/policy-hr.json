@@ -1,0 +1,51 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:us-east-1:750294427884:log-group:/aws/lambda/ShieldSyncHrEngine:*"
+    },
+    {
+      "Sid": "DynamoDBHrData",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrEmployees",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrDocuments"
+      ]
+    },
+    {
+      "Sid": "DynamoDBHrAuditAppendOnly",
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem", "dynamodb:Scan"],
+      "Resource": "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrAudit"
+    },
+    {
+      "Sid": "S3KycObjects",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:GetObjectVersion"],
+      "Resource": "arn:aws:s3:::shieldsync-hr-kyc-750294427884/*"
+    },
+    {
+      "Sid": "S3KycListVersions",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:ListBucketVersions"],
+      "Resource": "arn:aws:s3:::shieldsync-hr-kyc-750294427884"
+    },
+    {
+      "Sid": "KmsKycKey",
+      "Effect": "Allow",
+      "Action": ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"],
+      "Resource": "arn:aws:kms:us-east-1:750294427884:key/REPLACE_WITH_HR_KMS_KEY_ID"
+    }
+  ]
+}

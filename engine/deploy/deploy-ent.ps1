@@ -80,7 +80,8 @@ Compress-Archive -Path `
   "$SCRIPT_DIR\graders.mjs", `
   "$SCRIPT_DIR\metrics.mjs", `
   "$SCRIPT_DIR\azure-infra.mjs", `
-  "$SCRIPT_DIR\graders.azure.mjs" `
+  "$SCRIPT_DIR\graders.azure.mjs", `
+  "$SCRIPT_DIR\recinfra.mjs" `
   -DestinationPath $ZIP_PATH
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
