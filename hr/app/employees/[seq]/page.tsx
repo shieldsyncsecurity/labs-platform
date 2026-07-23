@@ -58,6 +58,29 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
     /* history is best-effort */
   }
 
+  // Leaves taken (derived from issued leave letters — no ledger bloat): sum the
+  // structured _meta each leave snapshot carries, grouped by calendar year.
+  const leaveGens = generated.filter((g) => g.docType === "leave");
+  const leavesByYear = new Map<string, { days: number; letters: number }>();
+  await Promise.all(
+    leaveGens.map(async (g) => {
+      try {
+        const snap = (await hrFetch<{ gen: { snapshot?: { _meta?: { leaveFrom?: string; totalDays?: number } } } }>(
+          `/hr/employees/${seq}/generated/${g.docId}`,
+        )).gen.snapshot;
+        const meta = snap?._meta;
+        if (!meta?.totalDays) return;
+        const year = (meta.leaveFrom ?? "").slice(0, 4) || "—";
+        const cur = leavesByYear.get(year) ?? { days: 0, letters: 0 };
+        cur.days += meta.totalDays;
+        cur.letters += 1;
+        leavesByYear.set(year, cur);
+      } catch {
+        /* best-effort */
+      }
+    }),
+  );
+
   const s = e.structure;
   const exited = e.status === "exited";
   const isIntern = /internship/i.test(e.employmentType);
@@ -83,7 +106,7 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16, marginTop: 20 }}>
         <div style={card}>
           <div style={groupTitle}>Record</div>
           {row("Department", e.department)}
@@ -94,6 +117,26 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
           {row("PAN", e.pan)}
           {row("Bank A/C", e.bankAccount)}
           {row("UAN / PF", e.uanPf)}
+          {leavesByYear.size > 0 ? (
+            <div style={{ marginTop: 10, borderTop: "1px solid #eef2f7", paddingTop: 8 }}>
+              <div style={{ fontSize: 10.5, color: "#8a94a3", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 4 }}>Leaves taken (issued letters)</div>
+              {[...leavesByYear.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([year, v]) => (
+                <div key={year} style={{ fontSize: 11.5, color: "#5b6676", padding: "2px 0" }}>
+                  {year}: <b style={{ color: "#1f3a5f" }}>{v.days} days</b> across {v.letters} letter{v.letters === 1 ? "" : "s"}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {(e.transitions ?? []).length > 0 ? (
+            <div style={{ marginTop: 10, borderTop: "1px solid #eef2f7", paddingTop: 8 }}>
+              <div style={{ fontSize: 10.5, color: "#8a94a3", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 4 }}>Transitions</div>
+              {(e.transitions ?? []).map((t, i) => (
+                <div key={i} style={{ fontSize: 11.5, color: "#5b6676", padding: "2px 0" }}>
+                  {t.from} → <b style={{ color: "#1f3a5f" }}>{t.to}</b> w.e.f. {t.effectiveDate}
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div style={card}>
           <div style={groupTitle}>Compensation</div>
@@ -123,7 +166,7 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
       </div>
 
       {/* Generate documents */}
-      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
         <div style={card}>
           <div style={cardTitle}>Letters</div>
           <p style={{ fontSize: 12, color: "#5b6676", margin: "6px 0 10px" }}>Branded, pre-signed letters from this record.</p>
@@ -156,8 +199,11 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
               </Link>
             )}
           </div>
-          <div style={{ marginTop: 12, borderTop: "1px solid #eef2f7", paddingTop: 10 }}>
-            <Link href={`/employees/${seq}/revise`} style={linkBtn}>Revise salary (issues revision letter) &rarr;</Link>
+          <div style={{ marginTop: 12, borderTop: "1px solid #eef2f7", paddingTop: 10, display: "flex", gap: 14, flexWrap: "wrap" }}>
+            <Link href={`/employees/${seq}/revise`} style={linkBtn}>Revise salary &rarr;</Link>
+            {isIntern && !exited ? (
+              <Link href={`/employees/${seq}/convert`} style={linkBtn}>Convert to full-time &rarr;</Link>
+            ) : null}
           </div>
         </div>
 

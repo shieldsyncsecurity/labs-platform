@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
+import { todayDisplay } from "@/lib/dates";
 import { buildVerificationLetter } from "@/lib/documents/letters";
 import type { Employee } from "@/lib/employee";
 import { SimpleLetterDoc } from "@/components/SimpleLetterDoc";
@@ -10,10 +11,6 @@ export const metadata = { title: "Employment verification", robots: { index: fal
 
 const cfgInput: React.CSSProperties = { padding: "6px 8px", fontSize: 12.5, border: "1px solid #d4dbe8", borderRadius: 6 };
 
-function today(): string {
-  const d = new Date();
-  return `${String(d.getDate()).padStart(2, "0")} ${d.toLocaleString("en-GB", { month: "short" })} ${d.getFullYear()}`;
-}
 
 export default async function GenerateVerification({
   params,
@@ -36,7 +33,7 @@ export default async function GenerateVerification({
   const ref = sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`;
   const letter = buildVerificationLetter(e, {
     ref,
-    date: today(),
+    date: todayDisplay(),
     purpose: sp.purpose,
     to: sp.to ? { name: sp.to } : undefined,
     includeSalary: sp.salary !== "0",

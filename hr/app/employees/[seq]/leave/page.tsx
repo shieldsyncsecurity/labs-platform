@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
+import { todayDisplay } from "@/lib/dates";
 import { buildLeaveLetter } from "@/lib/documents/letters";
 import type { Employee } from "@/lib/employee";
 import { SimpleLetterDoc } from "@/components/SimpleLetterDoc";
@@ -11,10 +12,6 @@ export const metadata = { title: "Leave approval letter", robots: { index: false
 
 const cfgInput: React.CSSProperties = { padding: "6px 8px", fontSize: 12.5, border: "1px solid #d4dbe8", borderRadius: 6 };
 
-function today(): string {
-  const d = new Date();
-  return `${String(d.getDate()).padStart(2, "0")} ${d.toLocaleString("en-GB", { month: "long" })} ${d.getFullYear()}`;
-}
 function disp(iso: string): string {
   const [y, m, dd] = iso.split("-").map(Number);
   if (!y || !m || !dd) return "";
@@ -80,7 +77,7 @@ export default async function GenerateLeave({
   const ref = sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`;
   const letter = buildLeaveLetter(e, {
     ref,
-    date: today(),
+    date: todayDisplay(),
     leaveFrom: disp(from),
     leaveTo: disp(to),
     totalDays: daysInclusive(from, to),
@@ -91,6 +88,13 @@ export default async function GenerateLeave({
     supportPurpose: (sp.support ?? "").trim() || undefined,
   });
 
+  // Structured meta rides INSIDE the snapshot (harmless to the renderer) so the
+  // employee page can total leaves taken without parsing letter prose.
+  const snapshotWithMeta = {
+    ...letter,
+    _meta: { kind: "leave", leaveFrom: from, leaveTo: to, totalDays: daysInclusive(from, to), paid: sp.unpaid !== "1" },
+  };
+
   return (
     <SimpleLetterDoc
       letter={letter}
@@ -99,7 +103,7 @@ export default async function GenerateLeave({
           <DocToolbar
             backHref={`/employees/${seq}`}
             backLabel={e.name}
-            save={{ seq, docType: "leave", title: "APPROVED LEAVE OF ABSENCE", refSeries: "hr", refYear: now.getFullYear(), snapshot: letter }}
+            save={{ seq, docType: "leave", title: "APPROVED LEAVE OF ABSENCE", refSeries: "hr", refYear: now.getFullYear(), snapshot: snapshotWithMeta }}
             email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Leave Approval Letter — ${e.name}` }}
           />
           {configBar}

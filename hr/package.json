@@ -13,6 +13,7 @@
     "dev:all": "node dev-all.mjs"
   },
   "dependencies": {
+    "@cloudflare/puppeteer": "^1.1.0",
     "jose": "^6.2.3",
     "next": "16.2.7",
     "qrcode-generator": "^1.5.2",

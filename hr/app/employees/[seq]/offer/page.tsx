@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
+import { todayDisplay } from "@/lib/dates";
 import { buildOfferLetter } from "@/lib/documents/offer-letter";
 import { DEFAULT_DUTIES, type Employee } from "@/lib/employee";
 import { OfferLetterDoc } from "@/components/OfferLetterDoc";
@@ -8,10 +9,6 @@ import { DocToolbar } from "@/components/DocToolbar";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Appointment letter", robots: { index: false, follow: false } };
 
-function today(): string {
-  const d = new Date();
-  return `${String(d.getDate()).padStart(2, "0")} ${d.toLocaleString("en-GB", { month: "short" })} ${d.getFullYear()}`;
-}
 
 export default async function GenerateOffer({
   params,
@@ -37,7 +34,7 @@ export default async function GenerateOffer({
   const ref = sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`;
   const letter = buildOfferLetter({
     ref,
-    date: today(),
+    date: todayDisplay(),
     employee: {
       name: e.name,
       address: e.address,

@@ -32,13 +32,16 @@ import {
   DeleteObjectCommand,
   ListObjectVersionsCommand,
 } from "@aws-sdk/client-s3";
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 const REGION = process.env.AWS_REGION ?? "us-east-1";
 const ACCOUNT = process.env.PLATFORM_ACCOUNT ?? "750294427884";
 const T_EMP = "ShieldSyncHrEmployees";
 const T_DOC = "ShieldSyncHrDocuments";
 const T_AUDIT = "ShieldSyncHrAudit";
+// Hiring records live in their OWN table: a candidate is not staff, and under
+// the DPDP Act their data has a different stated purpose and a shorter life.
+const T_CAND = "ShieldSyncHrCandidates";
 const BUCKET = process.env.HR_KYC_BUCKET ?? `shieldsync-hr-kyc-${ACCOUNT}`;
 // Dedicated CMK for KYC (alias created by create-hr-kyc-infra.mjs).
 const KMS_KEY = process.env.HR_KMS_KEY_ID ?? "alias/shieldsync-hr-kyc";
@@ -162,6 +165,15 @@ export async function handler(event) {
         await writeAudit(body.actor, "employee.create", employee.employeeId, { name: employee.name });
         return resp(200, { employee });
       }
+    }
+
+    // GUARD for every /hr/employees/:seq* route: seq must be a positive
+    // integer. seq=0 and negative seqs are COUNTER items (employee ids, letter
+    // series) — without this, DELETE /hr/employees/0 would destroy the id
+    // counter and restart SSS/EMP numbering into collisions.
+    if (parts[0] === "hr" && parts[1] === "employees" && parts.length >= 3) {
+      const s = Number(parts[2]);
+      if (!Number.isInteger(s) || s <= 0) return resp(404, { error: "NOT_FOUND" });
     }
 
     // ---- /hr/employees/:seq ----
@@ -318,16 +330,36 @@ export async function handler(event) {
     // ---- /hr/employees/:seq/status (offboard / reactivate) ----
     if (parts[0] === "hr" && parts[1] === "employees" && parts[3] === "status" && parts.length === 4 && method === "POST") {
       const seq = Number(parts[2]);
-      const cur = await ddb.send(new GetCommand({ TableName: T_EMP, Key: { seq } }));
-      if (!cur.Item) return resp(404, { error: "NOT_FOUND" });
       const status = body.status === "exited" ? "exited" : "active";
-      const employee = {
-        ...cur.Item,
-        status,
-        lastWorkingDay: status === "exited" ? body.lastWorkingDay || cur.Item.lastWorkingDay || "" : undefined,
-        updatedAt: new Date().toISOString(),
-      };
-      await ddb.send(new PutCommand({ TableName: T_EMP, Item: employee }));
+      // Field-scoped update: touch ONLY status/lastWorkingDay/updatedAt. A full
+      // get-then-Put here would silently write back stale values over a
+      // concurrent locked edit — the exact race the PUT route's optimistic
+      // lock exists to prevent.
+      let out;
+      try {
+        out = await ddb.send(
+          new UpdateCommand({
+            TableName: T_EMP,
+            Key: { seq },
+            ConditionExpression: "attribute_exists(#s)",
+            UpdateExpression:
+              status === "exited"
+                ? "SET #st = :st, lastWorkingDay = :lwd, updatedAt = :u"
+                : "SET #st = :st, updatedAt = :u REMOVE lastWorkingDay",
+            ExpressionAttributeNames: { "#st": "status", "#s": "seq" },
+            ExpressionAttributeValues: {
+              ":st": status,
+              ":u": new Date().toISOString(),
+              ...(status === "exited" ? { ":lwd": body.lastWorkingDay || "" } : {}),
+            },
+            ReturnValues: "ALL_NEW",
+          }),
+        );
+      } catch (e) {
+        if (e.name === "ConditionalCheckFailedException") return resp(404, { error: "NOT_FOUND" });
+        throw e;
+      }
+      const employee = out.Attributes;
       await writeAudit(body.actor, status === "exited" ? "employee.offboard" : "employee.reactivate", employee.employeeId, { lastWorkingDay: employee.lastWorkingDay });
       return resp(200, { employee });
     }
@@ -406,6 +438,13 @@ export async function handler(event) {
       const key = process.env.RESEND_API_KEY;
       if (!key) return resp(503, { error: "EMAIL_NOT_CONFIGURED" });
 
+      // Validate the employee BEFORE sending — an archive keyed to a bogus seq
+      // would orphan the sent-copy record.
+      const seqCheck = Number(body.employeeSeq);
+      if (!Number.isInteger(seqCheck) || seqCheck <= 0) return resp(400, { error: "BAD_SEQ" });
+      const empCheck = await ddb.send(new GetCommand({ TableName: T_EMP, Key: { seq: seqCheck } }));
+      if (!empCheck.Item) return resp(404, { error: "EMPLOYEE_NOT_FOUND" });
+
       const r = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
@@ -423,28 +462,305 @@ export async function handler(event) {
       }
 
       // Archive the exact sent bytes as the issued artifact (category "sent").
-      const seqNum = Number(body.employeeSeq) || 0;
+      // CRITICAL: the email is ALREADY DELIVERED past this point — an archive
+      // failure must return 200 with a warning, never an error the caller
+      // would retry (a retry emails the employee a duplicate).
+      const seqNum = seqCheck;
       const docId = `s_${Date.now()}_${randomUUID().slice(0, 8)}`;
       const s3key = `emp/${seqNum}/${docId}`;
-      await s3.send(
-        new PutObjectCommand({
-          Bucket: BUCKET, Key: s3key, Body: bytes, ContentType: "application/pdf",
-          ServerSideEncryption: "aws:kms", SSEKMSKeyId: KMS_KEY,
-        }),
-      );
-      await ddb.send(
-        new PutCommand({
-          TableName: T_DOC,
-          Item: {
-            employeeSeq: seqNum, docId, category: "sent", kind: "other",
-            label: `Emailed to ${to}: ${body.subject || ""}`.trim(),
-            fileName: body.fileName || "document.pdf", contentType: "application/pdf",
-            sizeBytes: bytes.length, sha256: sha256(bytes), s3Key: s3key,
-            uploadedBy: body.actor || "unknown", uploadedAt: new Date().toISOString(),
-          },
-        }),
-      );
+      try {
+        await s3.send(
+          new PutObjectCommand({
+            Bucket: BUCKET, Key: s3key, Body: bytes, ContentType: "application/pdf",
+            ServerSideEncryption: "aws:kms", SSEKMSKeyId: KMS_KEY,
+          }),
+        );
+        await ddb.send(
+          new PutCommand({
+            TableName: T_DOC,
+            Item: {
+              employeeSeq: seqNum, docId, category: "sent", kind: "other",
+              label: `Emailed to ${to}: ${body.subject || ""}`.trim(),
+              fileName: body.fileName || "document.pdf", contentType: "application/pdf",
+              sizeBytes: bytes.length, sha256: sha256(bytes), s3Key: s3key,
+              uploadedBy: body.actor || "unknown", uploadedAt: new Date().toISOString(),
+            },
+          }),
+        );
+      } catch (e) {
+        console.error("[hr] email sent but archive failed", e?.name, e?.message);
+        try {
+          await writeAudit(body.actor, "doc.email", `${seqNum}/-`, { to, subject: body.subject, archived: false });
+        } catch {}
+        return resp(200, { ok: true, simulated: false, archived: false, warning: "Email SENT, but archiving the copy failed — do not resend; save the PDF to the employee's documents manually." });
+      }
       await writeAudit(body.actor, "doc.email", `${seqNum}/${docId}`, { to, subject: body.subject });
+      return resp(200, { ok: true, simulated: false, archived: true });
+    }
+
+    // ---------------- CANDIDATES (hiring records — NOT employees) ----------------
+    // Counter item lives at seq=0, same pattern as employees.
+    if (parts[0] === "hr" && parts[1] === "candidates" && parts.length >= 3) {
+      const s = Number(parts[2]);
+      if (!Number.isInteger(s) || s <= 0) return resp(404, { error: "NOT_FOUND" });
+    }
+
+    if (parts[0] === "hr" && parts[1] === "candidates" && parts.length === 2) {
+      if (method === "GET") {
+        const items = [];
+        let startKey;
+        do {
+          const out = await ddb.send(new ScanCommand({ TableName: T_CAND, ExclusiveStartKey: startKey }));
+          items.push(...(out.Items ?? []));
+          startKey = out.LastEvaluatedKey;
+        } while (startKey);
+        return resp(200, { candidates: items.filter((i) => i.seq > 0).sort((a, b) => a.seq - b.seq) });
+      }
+      if (method === "POST") {
+        const c = await ddb.send(
+          new UpdateCommand({
+            TableName: T_CAND,
+            Key: { seq: 0 },
+            UpdateExpression: "ADD #c :one",
+            ExpressionAttributeNames: { "#c": "counter" },
+            ExpressionAttributeValues: { ":one": 1 },
+            ReturnValues: "UPDATED_NEW",
+          }),
+        );
+        const seq = c.Attributes.counter;
+        const now = new Date().toISOString();
+        const candidate = { ...body.candidate, candidateId: `SSS/CAND/${String(seq).padStart(4, "0")}`, seq, createdAt: now, updatedAt: now };
+        await ddb.send(new PutCommand({ TableName: T_CAND, Item: candidate }));
+        await writeAudit(body.actor, "candidate.create", candidate.candidateId, { name: candidate.name, role: candidate.roleAppliedFor });
+        return resp(200, { candidate });
+      }
+    }
+
+    if (parts[0] === "hr" && parts[1] === "candidates" && parts.length >= 3) {
+      const seq = Number(parts[2]);
+      const cur = (await ddb.send(new GetCommand({ TableName: T_CAND, Key: { seq } }))).Item;
+      if (!cur) return resp(404, { error: "NOT_FOUND" });
+
+      if (parts.length === 3 && method === "GET") return resp(200, { candidate: cur });
+
+      if (parts.length === 3 && method === "PUT") {
+        // Token + submission state are engine-owned — a form PUT can't forge them.
+        const candidate = {
+          ...cur,
+          ...body.candidate,
+          seq,
+          candidateId: cur.candidateId,
+          tokenHash: cur.tokenHash,
+          tokenIssuedAt: cur.tokenIssuedAt,
+          tokenExpiresAt: cur.tokenExpiresAt,
+          questionnaireSentTo: cur.questionnaireSentTo,
+          questionnaireSentAt: cur.questionnaireSentAt,
+          submittedAt: cur.submittedAt,
+          answers: cur.answers,
+          createdAt: cur.createdAt,
+          updatedAt: new Date().toISOString(),
+        };
+        await ddb.send(new PutCommand({ TableName: T_CAND, Item: candidate }));
+        await writeAudit(body.actor, "candidate.update", candidate.candidateId, { outcome: candidate.outcome });
+        return resp(200, { candidate });
+      }
+
+      if (parts.length === 3 && method === "DELETE") {
+        // Erasure must destroy the uploaded proof too — ALL versions, same as
+        // the KYC vault. The questionnaire promises deletion on request.
+        if (cur.salaryProof) await purgeAllVersions(`cand/${seq}/${cur.salaryProof.docId}`);
+        await ddb.send(new DeleteCommand({ TableName: T_CAND, Key: { seq } }));
+        await writeAudit(body.actor, "candidate.delete", cur.candidateId, { name: cur.name, removedProof: Boolean(cur.salaryProof) });
+        return resp(200, { ok: true });
+      }
+
+      // ---- /hr/candidates/:seq/proof — HR-side download ----
+      if (parts[3] === "proof" && parts.length === 4 && method === "GET") {
+        if (!cur.salaryProof) return resp(404, { error: "NOT_FOUND" });
+        const obj = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: `cand/${seq}/${cur.salaryProof.docId}` }));
+        const bytes = Buffer.from(await obj.Body.transformToByteArray());
+        await writeAudit(qs.actor, "candidate.proof.download", cur.candidateId, { fileName: cur.salaryProof.fileName });
+        return resp(200, { ...cur.salaryProof, base64: bytes.toString("base64") });
+      }
+
+      // ---- /hr/candidates/:seq/token — issue (or re-issue) the link ----
+      if (parts[3] === "token" && parts.length === 4 && method === "POST") {
+        const secret = randomBytes(24).toString("hex"); // 192-bit
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + (Number(body.validDays) || 14) * 86400000).toISOString();
+        await ddb.send(
+          new UpdateCommand({
+            TableName: T_CAND,
+            Key: { seq },
+            UpdateExpression: "SET tokenHash = :h, tokenIssuedAt = :i, tokenExpiresAt = :e, updatedAt = :u",
+            ExpressionAttributeValues: {
+              ":h": sha256(Buffer.from(secret)),
+              ":i": now.toISOString(),
+              ":e": expiresAt,
+              ":u": now.toISOString(),
+            },
+          }),
+        );
+        await writeAudit(body.actor, "candidate.link", cur.candidateId, { expiresAt });
+        // Raw token returned exactly once; only its hash is ever stored.
+        return resp(200, { token: `${seq}.${secret}`, expiresAt });
+      }
+
+      if (parts[3] === "sent" && parts.length === 4 && method === "POST") {
+        const now = new Date().toISOString();
+        await ddb.send(
+          new UpdateCommand({
+            TableName: T_CAND,
+            Key: { seq },
+            UpdateExpression: "SET questionnaireSentTo = :t, questionnaireSentAt = :a, updatedAt = :a",
+            ExpressionAttributeValues: { ":t": body.to ?? "", ":a": now },
+          }),
+        );
+        return resp(200, { ok: true });
+      }
+    }
+
+    // ---- /hr/questionnaire/:token — PUBLIC candidate surface ----
+    if (parts[0] === "hr" && parts[1] === "questionnaire" && (parts.length === 3 || parts.length === 4)) {
+      const raw = decodeURIComponent(parts[2]);
+      const dot = raw.indexOf(".");
+      const seq = Number(raw.slice(0, dot));
+      const secret = raw.slice(dot + 1);
+      if (!Number.isInteger(seq) || seq <= 0 || !secret) return resp(404, { error: "BAD_TOKEN" });
+      const cand = (await ddb.send(new GetCommand({ TableName: T_CAND, Key: { seq } }))).Item;
+      if (!cand?.tokenHash) return resp(404, { error: "BAD_TOKEN" });
+      const a = Buffer.from(cand.tokenHash, "hex");
+      const b = Buffer.from(sha256(Buffer.from(secret)), "hex");
+      if (a.length !== b.length || !timingSafeEqual(a, b)) return resp(404, { error: "BAD_TOKEN" });
+      if (cand.tokenExpiresAt && new Date(cand.tokenExpiresAt) < new Date()) return resp(410, { error: "EXPIRED" });
+
+      const publicView = (c) => ({
+        name: c.name,
+        roleAppliedFor: c.roleAppliedFor,
+        questionnaireRole: c.questionnaireRole,
+        submittedAt: c.submittedAt,
+        answers: c.submittedAt ? c.answers : undefined,
+        // Filename only — so the form can show "uploaded ✓" if they come back.
+        salaryProofName: c.salaryProof?.fileName,
+        expiresAt: c.tokenExpiresAt,
+        // If the HR user tailored the questionnaire for this candidate, the
+        // public page uses that snapshot instead of loading the default.
+        customQuestionnaire: c.customQuestionnaire,
+      });
+
+      if (method === "GET") {
+        await writeAudit("candidate", "questionnaire.view", cand.candidateId, {});
+        return resp(200, { candidate: publicView(cand) });
+      }
+      // ---- /hr/questionnaire/:token/upload — candidate's salary proof ----
+      // Public surface, so the same defences as the KYC vault: magic-byte
+      // sniffing, hard size cap, one file per candidate, closed after submit.
+      if (parts.length === 4 && parts[3] === "upload") {
+        if (cand.submittedAt) return resp(409, { error: "ALREADY_SUBMITTED" });
+        const key = (docId) => `cand/${seq}/${docId}`;
+
+        if (method === "POST") {
+          const bytes = Buffer.from(body.base64 || "", "base64");
+          if (bytes.length === 0) return resp(400, { error: "EMPTY" });
+          if (bytes.length > MAX_BYTES) return resp(400, { error: "TOO_LARGE" });
+          const sniffed = sniffType(bytes);
+          if (!sniffed) return resp(400, { error: "BAD_TYPE" });
+
+          if (cand.salaryProof) await purgeAllVersions(key(cand.salaryProof.docId)); // replace
+          const docId = `cand_${seq}_${Date.now()}_${randomUUID().slice(0, 8)}`;
+          await s3.send(
+            new PutObjectCommand({
+              Bucket: BUCKET,
+              Key: key(docId),
+              Body: bytes,
+              ContentType: sniffed,
+              ServerSideEncryption: "aws:kms",
+              SSEKMSKeyId: KMS_KEY,
+            }),
+          );
+          const salaryProof = {
+            docId,
+            fileName: String(body.fileName || "document").slice(0, 120),
+            contentType: sniffed,
+            sizeBytes: bytes.length,
+            sha256: sha256(bytes),
+            uploadedAt: new Date().toISOString(),
+          };
+          await ddb.send(
+            new UpdateCommand({
+              TableName: T_CAND,
+              Key: { seq },
+              UpdateExpression: "SET salaryProof = :p, updatedAt = :u",
+              ExpressionAttributeValues: { ":p": salaryProof, ":u": salaryProof.uploadedAt },
+            }),
+          );
+          await writeAudit("candidate", "questionnaire.upload", cand.candidateId, { fileName: salaryProof.fileName, bytes: bytes.length });
+          return resp(200, { salaryProofName: salaryProof.fileName });
+        }
+
+        if (method === "DELETE") {
+          if (cand.salaryProof) {
+            await purgeAllVersions(key(cand.salaryProof.docId));
+            await ddb.send(
+              new UpdateCommand({
+                TableName: T_CAND,
+                Key: { seq },
+                UpdateExpression: "REMOVE salaryProof SET updatedAt = :u",
+                ExpressionAttributeValues: { ":u": new Date().toISOString() },
+              }),
+            );
+            await writeAudit("candidate", "questionnaire.upload.remove", cand.candidateId, {});
+          }
+          return resp(200, { ok: true });
+        }
+      }
+
+      if (method === "POST") {
+        if (cand.submittedAt) return resp(409, { error: "ALREADY_SUBMITTED" });
+        const now = new Date().toISOString();
+        const answers = body.answers ?? {};
+        let out;
+        try {
+          out = await ddb.send(
+            new UpdateCommand({
+              TableName: T_CAND,
+              Key: { seq },
+              // attribute_not_exists is the real single-submit guard: two
+              // concurrent posts can both pass the read above.
+              ConditionExpression: "attribute_not_exists(submittedAt)",
+              UpdateExpression: "SET answers = :a, submittedAt = :s, updatedAt = :s",
+              ExpressionAttributeValues: { ":a": answers, ":s": now },
+              ReturnValues: "ALL_NEW",
+            }),
+          );
+        } catch (e) {
+          if (e.name === "ConditionalCheckFailedException") return resp(409, { error: "ALREADY_SUBMITTED" });
+          throw e;
+        }
+        await writeAudit("candidate", "questionnaire.submit", cand.candidateId, { fields: Object.keys(answers).length });
+        return resp(200, { candidate: publicView(out.Attributes) });
+      }
+    }
+
+    // ---- /hr/notify — plain HTML email (no attachment) ----
+    if (parts[0] === "hr" && parts[1] === "notify" && parts.length === 2 && method === "POST") {
+      const to = (body.toEmail || "").trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return resp(400, { error: "BAD_EMAIL" });
+      const key = process.env.RESEND_API_KEY;
+      if (!key) return resp(503, { error: "EMAIL_NOT_CONFIGURED" });
+      const r = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
+          to: [to],
+          subject: body.subject || "ShieldSync Security",
+          html: body.html,
+          text: body.text,
+        }),
+      });
+      if (!r.ok) return resp(502, { error: "SEND_FAILED", status: r.status });
+      await writeAudit(body.actor, body.action || "candidate.email", body.target || "", { to, subject: body.subject });
       return resp(200, { ok: true, simulated: false });
     }
 

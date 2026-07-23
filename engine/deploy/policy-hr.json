@@ -20,7 +20,8 @@
       ],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrEmployees",
-        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrDocuments"
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrDocuments",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrCandidates"
       ]
     },
     {

@@ -43,44 +43,54 @@ export default async function FySummary({ searchParams }: { searchParams: Promis
     );
   }
 
-  // Pull each employee's issued slips inside the FY window.
-  const perEmployee: Array<{ e: Employee; rows: MonthRow[] }> = [];
-  for (const e of employees) {
-    let gens: GenRow[] = [];
-    try {
-      gens = ((await hrFetch<{ generated: GenRow[] }>(`/hr/employees/${e.seq}/generated`)).generated ?? []).filter(
-        (g) => g.docType === "payslip" && months.has(g.ref.slice(-7)),
-      );
-    } catch {
-      continue;
-    }
-    // Newest-first; keep only the LATEST issued slip per month (a regenerated
-    // month supersedes the earlier issue).
-    const seen = new Set<string>();
-    const rows: MonthRow[] = [];
-    for (const g of gens) {
-      const month = g.ref.slice(-7);
-      if (seen.has(month)) continue;
-      seen.add(month);
+  // Pull each employee's issued slips inside the FY window — all employees and
+  // all month-snapshots CONCURRENTLY (serial awaits here were ~50 round-trips
+  // and the slowest page in the app).
+  const perEmployeeRaw = await Promise.all(
+    employees.map(async (e) => {
+      let gens: GenRow[] = [];
       try {
-        const snap = (await hrFetch<{ gen: { snapshot?: Payslip } }>(`/hr/employees/${e.seq}/generated/${g.docId}`)).gen.snapshot;
-        if (!snap) continue;
-        rows.push({
-          month,
-          gross: snap.earnings.gross,
-          pf: snap.deductions.pf,
-          esi: snap.deductions.esi,
-          pt: snap.deductions.pt,
-          tds: snap.deductions.tds,
-          total: snap.deductions.total,
-          net: snap.netPay,
-        });
+        gens = ((await hrFetch<{ generated: GenRow[] }>(`/hr/employees/${e.seq}/generated`)).generated ?? []).filter(
+          (g) => g.docType === "payslip" && months.has(g.ref.slice(-7)),
+        );
       } catch {
-        /* skip unreadable snapshot */
+        return { e, rows: [] as MonthRow[] };
       }
-    }
-    if (rows.length) perEmployee.push({ e, rows: rows.sort((a, b) => (a.month < b.month ? -1 : 1)) });
-  }
+      // Newest-first; keep only the LATEST issued slip per month (a regenerated
+      // month supersedes the earlier issue).
+      const seen = new Set<string>();
+      const latest = gens.filter((g) => {
+        const m = g.ref.slice(-7);
+        if (seen.has(m)) return false;
+        seen.add(m);
+        return true;
+      });
+      const rows = (
+        await Promise.all(
+          latest.map(async (g) => {
+            try {
+              const snap = (await hrFetch<{ gen: { snapshot?: Payslip } }>(`/hr/employees/${e.seq}/generated/${g.docId}`)).gen.snapshot;
+              if (!snap) return null;
+              return {
+                month: g.ref.slice(-7),
+                gross: snap.earnings.gross,
+                pf: snap.deductions.pf,
+                esi: snap.deductions.esi,
+                pt: snap.deductions.pt,
+                tds: snap.deductions.tds,
+                total: snap.deductions.total,
+                net: snap.netPay,
+              } as MonthRow;
+            } catch {
+              return null;
+            }
+          }),
+        )
+      ).filter((r): r is MonthRow => r !== null);
+      return { e, rows: rows.sort((a, b) => (a.month < b.month ? -1 : 1)) };
+    }),
+  );
+  const perEmployee = perEmployeeRaw.filter((x) => x.rows.length > 0);
 
   const monthLabel = (m: string) => {
     const [y, mm] = m.split("-").map(Number);
@@ -93,9 +103,9 @@ export default async function FySummary({ searchParams }: { searchParams: Promis
       <div className="ss-noprint" style={{ maxWidth: 840, margin: "0 auto 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
         <Link href="/payslips" style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; Payslips</Link>
         <form method="get" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <label style={{ fontSize: 12.5, color: "#e5e7eb" }}>
+          <label style={{ fontSize: 12.5, color: "#fff", fontWeight: 700, textShadow: "0 1px 2px rgba(0,0,0,.4)" }}>
             FY{" "}
-            <input name="fy" defaultValue={String(fy)} style={{ width: 70, padding: "6px 8px", fontSize: 12.5, border: "1px solid #d4dbe8", borderRadius: 6 }} />
+            <input name="fy" type="number" min={2020} max={2100} defaultValue={String(fy)} style={{ width: 84, padding: "6px 8px", fontSize: 12.5, border: "1px solid #d4dbe8", borderRadius: 6 }} />
           </label>
           <button type="submit" style={{ background: "#1f3a5f", color: "#fff", border: "none", borderRadius: 7, padding: "7px 13px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Show</button>
           <PrintButton />

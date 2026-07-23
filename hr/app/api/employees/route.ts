@@ -37,8 +37,11 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  if (employee.grossMonthly <= 0) {
-    return NextResponse.json({ error: "Gross monthly salary must be greater than zero." }, { status: 400 });
+  // Unpaid internships are legitimate (the internship offer explicitly renders
+  // "no stipend payable" at 0) — only paid roles require a positive gross.
+  const isInternship = /internship/i.test(employee.employmentType);
+  if (employee.grossMonthly <= 0 && !isInternship) {
+    return NextResponse.json({ error: "Gross monthly salary must be greater than zero (0 is allowed only for internships)." }, { status: 400 });
   }
 
   try {

@@ -14,7 +14,8 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { createHash } from "node:crypto";
+
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 const PORT = Number(process.env.HR_ENGINE_PORT ?? 4002);
 const SECRET = process.env.HR_ENGINE_SECRET ?? "dev-hr-engine-secret";
@@ -22,14 +23,43 @@ const DB = path.join(os.tmpdir(), "shieldsync-hr-dev-store.json");
 // KYC bytes live here in dev (prod: the SSE-KMS S3 bucket). Kept OUT of the repo.
 const KYC_DIR = path.join(os.tmpdir(), "shieldsync-hr-kyc");
 mkdirSync(KYC_DIR, { recursive: true });
+// Simulated emails (no RESEND_API_KEY) are written here as .html so you can
+// open and preview exactly what the recipient would receive.
+const MAIL_DIR = path.join(os.tmpdir(), "shieldsync-hr-mail");
 
+const EMPTY_DB = { employees: [], audit: [], documents: [], candidates: [], seq: 7, candidateSeq: 0, refs: { "hr-2026": 14 } }; // next id after Diya (0007)
 function load() {
-  if (!existsSync(DB)) return { employees: [], audit: [], documents: [], seq: 7, refs: { "hr-2026": 14 } }; // next id after Diya (0007)
+  if (!existsSync(DB)) return { ...EMPTY_DB };
   try {
-    return JSON.parse(readFileSync(DB, "utf8"));
+    return { ...EMPTY_DB, ...JSON.parse(readFileSync(DB, "utf8")) };
   } catch {
-    return { employees: [], audit: [], documents: [], seq: 7, refs: { "hr-2026": 14 } };
+    return { ...EMPTY_DB };
   }
+}
+
+// --- questionnaire-link primitives (mirrored in the prod Lambda) ---
+const randomToken = () => randomBytes(24).toString("hex"); // 192-bit, unguessable
+const sha256hex = (s) => createHash("sha256").update(s).digest("hex");
+function timingSafeEqualHex(a, b) {
+  const ba = Buffer.from(String(a), "hex");
+  const bb = Buffer.from(String(b), "hex");
+  return ba.length === bb.length && timingSafeEqual(ba, bb);
+}
+/** What the PUBLIC token surface may return — never the whole record. */
+function publicCandidate(c) {
+  return {
+    name: c.name,
+    roleAppliedFor: c.roleAppliedFor,
+    questionnaireRole: c.questionnaireRole,
+    submittedAt: c.submittedAt,
+    answers: c.submittedAt ? c.answers : undefined,
+    // Filename only — so the form can show "uploaded ✓" if they come back.
+    salaryProofName: c.salaryProof?.fileName,
+    expiresAt: c.tokenExpiresAt,
+    // If the HR user tailored the questionnaire for this candidate, the
+    // public page uses that snapshot instead of loading the default from code.
+    customQuestionnaire: c.customQuestionnaire,
+  };
 }
 function save(db) {
   writeFileSync(DB, JSON.stringify(db, null, 2));
@@ -184,19 +214,25 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // /hr/employees/:seq/status — offboard / reactivate (partial merge)
+    // Positive-integer seq guard (parity with the Lambda's counter protection).
+    if (parts[0] === "hr" && parts[1] === "employees" && parts.length >= 3) {
+      const s = Number(parts[2]);
+      if (!Number.isInteger(s) || s <= 0) return send(res, 404, { error: "NOT_FOUND" });
+    }
+
+    // /hr/employees/:seq/status — offboard / reactivate (touches ONLY these fields)
     if (parts[0] === "hr" && parts[1] === "employees" && parts[3] === "status" && parts.length === 4 && req.method === "POST") {
       const seq = Number(parts[2]);
       const idx = db.employees.findIndex((e) => e.seq === seq);
       if (idx < 0) return send(res, 404, { error: "NOT_FOUND" });
       const body = await readBody(req);
       const status = body.status === "exited" ? "exited" : "active";
-      db.employees[idx] = {
-        ...db.employees[idx],
-        status,
-        lastWorkingDay: status === "exited" ? body.lastWorkingDay || db.employees[idx].lastWorkingDay || "" : undefined,
-        updatedAt: new Date().toISOString(),
-      };
+      const cur = db.employees[idx];
+      cur.status = status;
+      if (status === "exited") cur.lastWorkingDay = body.lastWorkingDay || "";
+      else delete cur.lastWorkingDay;
+      cur.updatedAt = new Date().toISOString();
+      db.employees[idx] = cur;
       audit(db, body.actor, status === "exited" ? "employee.offboard" : "employee.reactivate", db.employees[idx].employeeId, {
         lastWorkingDay: db.employees[idx].lastWorkingDay,
       });
@@ -378,10 +414,243 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, ...delivery });
     }
 
+    // ---------------- CANDIDATES (hiring records — NOT employees) ----------------
+    // /hr/candidates
+    if (parts[0] === "hr" && parts[1] === "candidates" && parts.length === 2) {
+      if (req.method === "GET") return send(res, 200, { candidates: db.candidates });
+      if (req.method === "POST") {
+        const body = await readBody(req);
+        const seq = (db.candidateSeq || 0) + 1;
+        const now = new Date().toISOString();
+        const candidate = {
+          ...body.candidate,
+          candidateId: `SSS/CAND/${String(seq).padStart(4, "0")}`,
+          seq,
+          createdAt: now,
+          updatedAt: now,
+        };
+        db.candidates.push(candidate);
+        db.candidateSeq = seq;
+        audit(db, body.actor, "candidate.create", candidate.candidateId, { name: candidate.name, role: candidate.roleAppliedFor });
+        save(db);
+        return send(res, 200, { candidate });
+      }
+    }
+
+    // /hr/candidates/:seq  (+ /token, /submit)
+    if (parts[0] === "hr" && parts[1] === "candidates" && parts.length >= 3) {
+      const seq = Number(parts[2]);
+      if (!Number.isInteger(seq) || seq <= 0) return send(res, 404, { error: "NOT_FOUND" });
+      const idx = db.candidates.findIndex((c) => c.seq === seq);
+      if (idx < 0) return send(res, 404, { error: "NOT_FOUND" });
+      const cur = db.candidates[idx];
+
+      if (parts.length === 3 && req.method === "GET") return send(res, 200, { candidate: cur });
+
+      if (parts.length === 3 && req.method === "PUT") {
+        const body = await readBody(req);
+        // Token/submission state is engine-owned — a form PUT can never forge it.
+        const updated = {
+          ...cur,
+          ...body.candidate,
+          seq,
+          candidateId: cur.candidateId,
+          tokenHash: cur.tokenHash,
+          tokenIssuedAt: cur.tokenIssuedAt,
+          tokenExpiresAt: cur.tokenExpiresAt,
+          questionnaireSentTo: cur.questionnaireSentTo,
+          questionnaireSentAt: cur.questionnaireSentAt,
+          submittedAt: cur.submittedAt,
+          answers: cur.answers,
+          createdAt: cur.createdAt,
+          updatedAt: new Date().toISOString(),
+        };
+        db.candidates[idx] = updated;
+        audit(db, body.actor, "candidate.update", updated.candidateId, { outcome: updated.outcome });
+        save(db);
+        return send(res, 200, { candidate: updated });
+      }
+
+      if (parts.length === 3 && req.method === "DELETE") {
+        const body = await readBody(req);
+        // Erasure must take the uploaded bytes with it — the form promises it.
+        if (cur.salaryProof) {
+          try {
+            unlinkSync(path.join(KYC_DIR, cur.salaryProof.docId));
+          } catch {}
+        }
+        db.candidates.splice(idx, 1);
+        audit(db, body.actor, "candidate.delete", cur.candidateId, { name: cur.name, removedProof: Boolean(cur.salaryProof) });
+        save(db);
+        return send(res, 200, { ok: true });
+      }
+
+      // /hr/candidates/:seq/proof — HR-side download of the salary proof.
+      if (parts[3] === "proof" && parts.length === 4 && req.method === "GET") {
+        if (!cur.salaryProof) return send(res, 404, { error: "NOT_FOUND" });
+        let bytes;
+        try {
+          bytes = readFileSync(path.join(KYC_DIR, cur.salaryProof.docId));
+        } catch {
+          return send(res, 404, { error: "NOT_FOUND" });
+        }
+        audit(db, url.searchParams.get("actor") ?? "unknown", "candidate.proof.download", cur.candidateId, { fileName: cur.salaryProof.fileName });
+        save(db);
+        return send(res, 200, { ...cur.salaryProof, base64: bytes.toString("base64") });
+      }
+
+      // /hr/candidates/:seq/token — issue (or re-issue) the questionnaire link.
+      if (parts[3] === "token" && parts.length === 4 && req.method === "POST") {
+        const body = await readBody(req);
+        const secret = randomToken();
+        const now = new Date();
+        const expires = new Date(now.getTime() + (Number(body.validDays) || 14) * 86400000);
+        cur.tokenHash = sha256hex(secret);
+        cur.tokenIssuedAt = now.toISOString();
+        cur.tokenExpiresAt = expires.toISOString();
+        cur.updatedAt = now.toISOString();
+        db.candidates[idx] = cur;
+        audit(db, body.actor, "candidate.link", cur.candidateId, { expiresAt: cur.tokenExpiresAt });
+        save(db);
+        // The RAW token is returned exactly once — only its hash is stored.
+        return send(res, 200, { token: `${seq}.${secret}`, expiresAt: cur.tokenExpiresAt });
+      }
+
+      if (parts[3] === "sent" && parts.length === 4 && req.method === "POST") {
+        const body = await readBody(req);
+        cur.questionnaireSentTo = body.to;
+        cur.questionnaireSentAt = new Date().toISOString();
+        cur.updatedAt = cur.questionnaireSentAt;
+        db.candidates[idx] = cur;
+        save(db);
+        return send(res, 200, { ok: true });
+      }
+    }
+
+    // /hr/questionnaire/:token  — PUBLIC surface (candidate). GET = view, POST = submit.
+    if (parts[0] === "hr" && parts[1] === "questionnaire" && (parts.length === 3 || parts.length === 4)) {
+      const raw = decodeURIComponent(parts[2]);
+      const [seqStr, secret] = raw.split(".");
+      const seq = Number(seqStr);
+      if (!Number.isInteger(seq) || seq <= 0 || !secret) return send(res, 404, { error: "BAD_TOKEN" });
+      const idx = db.candidates.findIndex((c) => c.seq === seq);
+      if (idx < 0) return send(res, 404, { error: "BAD_TOKEN" });
+      const cand = db.candidates[idx];
+      if (!cand.tokenHash || !timingSafeEqualHex(cand.tokenHash, sha256hex(secret))) return send(res, 404, { error: "BAD_TOKEN" });
+      if (cand.tokenExpiresAt && new Date(cand.tokenExpiresAt) < new Date()) return send(res, 410, { error: "EXPIRED" });
+
+      if (req.method === "GET") {
+        audit(db, "candidate", "questionnaire.view", cand.candidateId, {});
+        save(db);
+        return send(res, 200, { candidate: publicCandidate(cand) });
+      }
+      // /hr/questionnaire/:token/upload — candidate's salary proof (one file).
+      // Same defences as the KYC vault: magic-byte sniffing (never trust the
+      // declared type), hard size cap, and it stops once they've submitted.
+      if (parts.length === 4 && parts[3] === "upload") {
+        if (cand.submittedAt) return send(res, 409, { error: "ALREADY_SUBMITTED" });
+        if (req.method === "POST") {
+          const body = await readBody(req);
+          const bytes = Buffer.from(body.base64 || "", "base64");
+          if (bytes.length === 0) return send(res, 400, { error: "EMPTY" });
+          if (bytes.length > MAX_KYC) return send(res, 400, { error: "TOO_LARGE" });
+          const sniffed = sniffType(bytes);
+          if (!sniffed) return send(res, 400, { error: "BAD_TYPE" });
+          // One file per candidate: replace any previous upload.
+          if (cand.salaryProof) {
+            try {
+              unlinkSync(path.join(KYC_DIR, cand.salaryProof.docId));
+            } catch {}
+          }
+          const docId = `cand_${seq}_${Date.now()}`;
+          mkdirSync(KYC_DIR, { recursive: true });
+          writeFileSync(path.join(KYC_DIR, docId), bytes);
+          cand.salaryProof = {
+            docId,
+            fileName: String(body.fileName || "document").slice(0, 120),
+            contentType: sniffed,
+            sizeBytes: bytes.length,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+            uploadedAt: new Date().toISOString(),
+          };
+          cand.updatedAt = cand.salaryProof.uploadedAt;
+          db.candidates[idx] = cand;
+          audit(db, "candidate", "questionnaire.upload", cand.candidateId, { fileName: cand.salaryProof.fileName, bytes: bytes.length });
+          save(db);
+          return send(res, 200, { salaryProofName: cand.salaryProof.fileName });
+        }
+        if (req.method === "DELETE") {
+          if (cand.salaryProof) {
+            try {
+              unlinkSync(path.join(KYC_DIR, cand.salaryProof.docId));
+            } catch {}
+            delete cand.salaryProof;
+            cand.updatedAt = new Date().toISOString();
+            db.candidates[idx] = cand;
+            audit(db, "candidate", "questionnaire.upload.remove", cand.candidateId, {});
+            save(db);
+          }
+          return send(res, 200, { ok: true });
+        }
+      }
+
+      if (req.method === "POST") {
+        if (cand.submittedAt) return send(res, 409, { error: "ALREADY_SUBMITTED" });
+        const body = await readBody(req);
+        cand.answers = body.answers ?? {};
+        cand.submittedAt = new Date().toISOString();
+        cand.updatedAt = cand.submittedAt;
+        db.candidates[idx] = cand;
+        audit(db, "candidate", "questionnaire.submit", cand.candidateId, { fields: Object.keys(cand.answers).length });
+        save(db);
+        return send(res, 200, { candidate: publicCandidate(cand) });
+      }
+    }
+
+    // /hr/notify — plain HTML email (no attachment): questionnaire invites etc.
+    if (parts[0] === "hr" && parts[1] === "notify" && parts.length === 2 && req.method === "POST") {
+      const body = await readBody(req);
+      const to = (body.toEmail || "").trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return send(res, 400, { error: "BAD_EMAIL" });
+      const key = process.env.RESEND_API_KEY;
+      let delivery = { simulated: true };
+      if (key) {
+        const r = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+          body: JSON.stringify({
+            from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
+            to: [to],
+            subject: body.subject || "ShieldSync Security",
+            html: body.html,
+            text: body.text,
+          }),
+        });
+        if (!r.ok) return send(res, 502, { error: "SEND_FAILED", status: r.status });
+        delivery = { simulated: false };
+      } else {
+        // DEV ONLY: write the simulated email to disk so you can open it and
+        // see exactly what the recipient would get. Prod never reaches here.
+        const file = path.join(MAIL_DIR, `${Date.now()}-${to.replace(/[^a-z0-9]/gi, "_")}.html`);
+        mkdirSync(MAIL_DIR, { recursive: true });
+        writeFileSync(
+          file,
+          `<!doctype html><meta charset="utf-8"><title>${body.subject ?? ""}</title>` +
+            `<div style="font:13px system-ui;background:#eef2f8;padding:10px 14px;border-bottom:1px solid #ccd5e4">` +
+            `<b>SIMULATED</b> — To: ${to} · Subject: ${body.subject ?? ""}</div>` +
+            (body.html ?? `<pre>${body.text ?? ""}</pre>`),
+        );
+        console.log(`[hr-dev-engine] SIMULATED email to ${to}: ${body.subject}\n  preview: ${file}`);
+      }
+      audit(db, body.actor, body.action || "candidate.email", body.target || "", { to, subject: body.subject, simulated: delivery.simulated });
+      save(db);
+      return send(res, 200, { ok: true, ...delivery });
+    }
+
     // /hr/audit
     if (parts[0] === "hr" && parts[1] === "audit" && parts.length === 2) {
       if (req.method === "GET") {
-        const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 200);
+        const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 500); // parity with the Lambda
         return send(res, 200, { audit: db.audit.slice(0, limit) });
       }
       if (req.method === "POST") {

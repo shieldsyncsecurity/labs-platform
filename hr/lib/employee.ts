@@ -43,6 +43,14 @@ export type Employee = {
   structure: SalaryStructure; // Basic/HRA/Conveyance/Special (editable)
   /** Compensation history, oldest first. Appended by the revise-salary flow. */
   revisions?: CompRevision[];
+  /** Engagement transitions (e.g. internship -> full-time), oldest first. */
+  transitions?: Array<{
+    from: string; // e.g. "Internship (Security Intern)"
+    to: string; // e.g. "Full-time, permanent (Security Analyst)"
+    effectiveDate: string;
+    convertedBy: string;
+    convertedAt: string; // ISO
+  }>;
 
   // probation / internship terms (drive the confirmation + internship letters)
   probationMonths?: number; // default 3 (full-time roles)
@@ -152,6 +160,7 @@ export function normalizeEmployee(input: Partial<Employee>): Omit<Employee, "emp
     annualCTC,
     structure,
     revisions: Array.isArray(input.revisions) ? input.revisions : undefined,
+    transitions: Array.isArray(input.transitions) ? input.transitions : undefined,
     probationMonths: Number(input.probationMonths) > 0 ? Math.round(Number(input.probationMonths)) : undefined,
     internshipMonths: Number(input.internshipMonths) > 0 ? Math.round(Number(input.internshipMonths)) : undefined,
     bankAccount: input.bankAccount?.trim() || undefined,
@@ -166,6 +175,26 @@ export function normalizeEmployee(input: Partial<Employee>): Omit<Employee, "emp
     status: input.status === "exited" ? "exited" : "active",
     lastWorkingDay: input.status === "exited" ? input.lastWorkingDay?.trim() || undefined : undefined,
   };
+}
+
+/**
+ * The salary structure in force for a given pay month. Each revisions[] entry
+ * stores the comp that applied BEFORE its effectiveDate — so for a slip month
+ * ending before a revision took effect, that revision's stored (old) structure
+ * is the right one; otherwise the current structure applies. Prevents "apply a
+ * raise, then generate last month's slip" from paying old months at new rates.
+ */
+export function structureForMonth(e: Employee, monthEndIso: string): { structure: SalaryStructure; historical: boolean } {
+  const monthEnd = new Date(monthEndIso);
+  if (!Number.isNaN(monthEnd.getTime())) {
+    for (const r of e.revisions ?? []) {
+      const eff = new Date(r.effectiveDate);
+      if (!Number.isNaN(eff.getTime()) && monthEnd < eff) {
+        return { structure: r.structure, historical: true };
+      }
+    }
+  }
+  return { structure: e.structure, historical: false };
 }
 
 /** Map an employee onto the payslip's employee block. */

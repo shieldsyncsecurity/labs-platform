@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
+import { todayDisplay } from "@/lib/dates";
 import { buildExperienceLetter } from "@/lib/documents/letters";
 import type { Employee } from "@/lib/employee";
 import { SimpleLetterDoc } from "@/components/SimpleLetterDoc";
@@ -9,10 +10,6 @@ import { DocToolbar } from "@/components/DocToolbar";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Experience / relieving letter", robots: { index: false, follow: false } };
 
-function today(): string {
-  const d = new Date();
-  return `${String(d.getDate()).padStart(2, "0")} ${d.toLocaleString("en-GB", { month: "short" })} ${d.getFullYear()}`;
-}
 
 export default async function GenerateExperience({
   params,
@@ -47,7 +44,7 @@ export default async function GenerateExperience({
   const now = new Date();
   const letter = buildExperienceLetter(e, {
     ref: sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`,
-    date: today(),
+    date: todayDisplay(),
   });
 
   return (

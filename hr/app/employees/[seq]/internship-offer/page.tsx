@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
+import { todayDisplay } from "@/lib/dates";
 import { buildInternshipOffer } from "@/lib/documents/internship";
 import type { Employee } from "@/lib/employee";
 import { InternshipOfferDoc } from "@/components/InternshipOfferDoc";
@@ -9,10 +10,6 @@ import { DocToolbar } from "@/components/DocToolbar";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Internship offer", robots: { index: false, follow: false } };
 
-function today(): string {
-  const d = new Date();
-  return `${String(d.getDate()).padStart(2, "0")} ${d.toLocaleString("en-GB", { month: "short" })} ${d.getFullYear()}`;
-}
 
 export default async function GenerateInternshipOffer({
   params,
@@ -47,7 +44,7 @@ export default async function GenerateInternshipOffer({
 
   const now = new Date();
   const ref = sp.ref ?? `SSS/INT/${now.getFullYear()}/•••`;
-  const offer = buildInternshipOffer(e, { ref, date: today(), mentor: sp.mentor });
+  const offer = buildInternshipOffer(e, { ref, date: todayDisplay(), mentor: sp.mentor });
 
   return (
     <InternshipOfferDoc

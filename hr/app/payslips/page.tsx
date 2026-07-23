@@ -36,14 +36,16 @@ export default async function PayslipsPage({ searchParams }: { searchParams: Pro
   }
   const active = employees.filter((e) => e.status !== "exited");
 
-  // Month status: an issued payslip carries ref "<employeeId> <YYYY-MM>", so a
-  // per-employee history check shows who already got this month's slip.
-  const issued = new Map<number, boolean>();
+  // Month status: an issued payslip carries ref "<employeeId> <YYYY-MM>". Keep
+  // the docId so "Issued" links to the ARCHIVED slip, not a fresh regeneration
+  // that could differ after a revision/LOP change.
+  const issued = new Map<number, string>();
   await Promise.all(
     active.map(async (e) => {
       try {
-        const gens = (await hrFetch<{ generated: Array<{ docType: string; ref: string }> }>(`/hr/employees/${e.seq}/generated`)).generated ?? [];
-        issued.set(e.seq, gens.some((g) => g.docType === "payslip" && g.ref.endsWith(` ${month}`)));
+        const gens = (await hrFetch<{ generated: Array<{ docId: string; docType: string; ref: string }> }>(`/hr/employees/${e.seq}/generated`)).generated ?? [];
+        const hit = gens.find((g) => g.docType === "payslip" && g.ref.endsWith(` ${month}`)); // newest-first
+        if (hit) issued.set(e.seq, hit.docId);
       } catch {
         /* marker is best-effort */
       }
@@ -93,11 +95,17 @@ export default async function PayslipsPage({ searchParams }: { searchParams: Pro
                 <td style={{ padding: "10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{formatINR(e.grossMonthly)}</td>
                 <td style={{ padding: "10px", textAlign: "right", whiteSpace: "nowrap" }}>
                   {issued.get(e.seq) ? (
-                    <span style={{ color: "#1a7a45", fontWeight: 700, fontSize: 12, marginRight: 10 }}>✓ Issued</span>
-                  ) : null}
-                  <Link href={`/employees/${e.seq}/payslip?month=${month}`} style={{ color: "#2f4fb0", fontWeight: 600 }}>
-                    {issued.get(e.seq) ? "Re-open / regenerate →" : "Generate →"}
-                  </Link>
+                    <>
+                      <Link href={`/employees/${e.seq}/issued/${issued.get(e.seq)}`} style={{ color: "#1a7a45", fontWeight: 700, fontSize: 12.5, marginRight: 12 }}>
+                        ✓ Issued — open →
+                      </Link>
+                      <Link href={`/employees/${e.seq}/payslip?month=${month}`} style={{ color: "#8a94a3", fontWeight: 600, fontSize: 12 }}>
+                        regenerate
+                      </Link>
+                    </>
+                  ) : (
+                    <Link href={`/employees/${e.seq}/payslip?month=${month}`} style={{ color: "#2f4fb0", fontWeight: 600 }}>Generate →</Link>
+                  )}
                 </td>
               </tr>
             ))}

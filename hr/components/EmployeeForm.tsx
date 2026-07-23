@@ -17,65 +17,15 @@ import {
 } from "@/lib/employee";
 import { DateField } from "./DateField";
 
-const labelStyle: React.CSSProperties = { display: "block", fontSize: 11.5, fontWeight: 700, color: "#41506a", marginBottom: 4 };
-const input: React.CSSProperties = { width: "100%", padding: "8px 10px", fontSize: 13, border: "1px solid #d4dbe8", borderRadius: 7, background: "#fff", boxSizing: "border-box" };
-const group: React.CSSProperties = { border: "1px solid #e2e8f2", borderRadius: 10, padding: 16, marginTop: 14 };
-const groupTitle: React.CSSProperties = { fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", color: "#8a94a3", fontWeight: 800, marginBottom: 10 };
-const grid: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
-
-function Field({ name, label, required, placeholder, defaultValue, full }: { name: string; label: string; required?: boolean; placeholder?: string; defaultValue?: string; full?: boolean }) {
-  return (
-    <div style={full ? { gridColumn: "1 / -1" } : undefined}>
-      <label style={labelStyle} htmlFor={name}>
-        {label} {required ? <span style={{ color: "#c0344c" }}>*</span> : null}
-      </label>
-      {/* required is enforced at the browser level too — the marker alone lets empty submits through */}
-      <input id={name} name={name} required={required} style={input} placeholder={placeholder} defaultValue={defaultValue} />
-    </div>
-  );
-}
-
-// Dropdown of predefined options + an "Other (specify)" text entry. Emits a
-// single value under `name` (a hidden input), so it drops into the FormData flow
-// unchanged. In edit mode, a value not in the list opens in custom mode.
-function SelectOrCustom({ name, label, options, defaultValue = "", required, placeholder, full }: { name: string; label: string; options: string[]; defaultValue?: string; required?: boolean; placeholder?: string; full?: boolean }) {
-  const isPreset = defaultValue !== "" && options.includes(defaultValue);
-  const startCustom = defaultValue !== "" && !isPreset;
-  const [mode, setMode] = useState<"preset" | "custom">(startCustom ? "custom" : "preset");
-  const [sel, setSel] = useState(isPreset ? defaultValue : "");
-  const [custom, setCustom] = useState(startCustom ? defaultValue : "");
-  const value = mode === "custom" ? custom : sel;
-
-  return (
-    <div style={full ? { gridColumn: "1 / -1" } : undefined}>
-      <label style={labelStyle} htmlFor={name}>
-        {label} {required ? <span style={{ color: "#c0344c" }}>*</span> : null}
-      </label>
-      <input type="hidden" name={name} value={value} />
-      {mode === "preset" ? (
-        <select
-          id={name}
-          value={sel}
-          onChange={(e) => (e.target.value === "__custom__" ? setMode("custom") : setSel(e.target.value))}
-          style={input}
-        >
-          <option value="">Select…</option>
-          {options.map((o) => (
-            <option key={o} value={o}>{o}</option>
-          ))}
-          <option value="__custom__">Other (specify)…</option>
-        </select>
-      ) : (
-        <div style={{ display: "flex", gap: 6 }}>
-          <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder={placeholder ?? "Type a custom value"} style={input} autoFocus />
-          <button type="button" title="Back to list" onClick={() => { setMode("preset"); setCustom(""); }} style={{ border: "1px solid #d4dbe8", background: "#fff", borderRadius: 7, padding: "0 11px", cursor: "pointer", fontSize: 13, color: "#41506a" }}>
-            ↩
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
+import {
+  Field,
+  SelectOrCustom,
+  labelStyle,
+  inputStyle as input,
+  groupStyle as group,
+  groupTitleStyle as groupTitle,
+  gridStyle as grid,
+} from "./fields";
 
 export function EmployeeForm({ seq, initial }: { seq?: string; initial?: Partial<Employee> }) {
   const router = useRouter();

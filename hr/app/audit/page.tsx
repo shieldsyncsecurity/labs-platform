@@ -17,7 +17,18 @@ const ACTION_LABEL: Record<string, string> = {
   "kyc.delete": "Deleted KYC document",
   "doc.generate": "Issued document",
   "doc.email": "Emailed document",
+  "doc.pdf": "Downloaded PDF",
   "audit.export": "Exported audit log",
+  "data.export": "Exported data backup",
+  "employee.convert": "Converted intern to full-time",
+  "candidate.create": "Added candidate",
+  "candidate.update": "Updated candidate",
+  "candidate.delete": "Deleted candidate + responses",
+  "candidate.link": "Issued questionnaire link",
+  "candidate.invite": "Emailed questionnaire link",
+  "candidate.hire": "Hired candidate",
+  "questionnaire.view": "Candidate opened questionnaire",
+  "questionnaire.submit": "Candidate submitted questionnaire",
 };
 
 function fmtWhen(iso?: string): string {
@@ -54,12 +65,21 @@ export default async function AuditPage() {
           <h1 style={{ fontSize: 20, fontWeight: 800, color: "#1f3a5f", marginTop: 6 }}>Audit log</h1>
           <p style={{ fontSize: 12.5, color: "#5b6676" }}>Every action in the portal — who did what, when. Most recent first (last 200).</p>
         </div>
-        <a
-          href="/api/audit/export"
-          style={{ fontSize: 12.5, fontWeight: 700, color: "#1f3a5f", border: "1px solid #c3cee0", borderRadius: 8, padding: "7px 12px", textDecoration: "none", whiteSpace: "nowrap" }}
-        >
-          Export CSV
-        </a>
+        <div style={{ display: "flex", gap: 8 }}>
+          <a
+            href="/api/audit/export"
+            style={{ fontSize: 12.5, fontWeight: 700, color: "#1f3a5f", border: "1px solid #c3cee0", borderRadius: 8, padding: "7px 12px", textDecoration: "none", whiteSpace: "nowrap" }}
+          >
+            Export CSV
+          </a>
+          <a
+            href="/api/export"
+            title="Full JSON backup: employees, issued-document snapshots, KYC metadata, audit trail"
+            style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", background: "#1f3a5f", border: "none", borderRadius: 8, padding: "8px 12px", textDecoration: "none", whiteSpace: "nowrap" }}
+          >
+            Full data backup
+          </a>
+        </div>
       </div>
 
       {error ? (
