@@ -10,9 +10,11 @@ resources. Local dev needs none of it (see the bottom).
   for `HR_MAIL_FROM` (default `hr@shieldsyncsecurity.com`) — unverified domains 403 and every send
   fails as `SEND_FAILED`. (Already verified if the enterprise e-sign portal sends from this domain.)
 - AWS CLI logged in with access to assume `OrganizationAccountAccessRole` in platform account `750294427884`.
-- **Dev-data hygiene:** local dev stores data unencrypted in `%TEMP%`. Before go-live, purge it —
+- **Dev-data hygiene:** local dev stores data unencrypted under `engine/.dev-data/`
+  (project-local, git-ignored — NOT `%TEMP%`, which Windows periodically wipes and
+  once silently destroyed a real candidate's record). Before go-live, purge it —
   ```powershell
-  Remove-Item -Recurse -Force "$env:TEMP\shieldsync-hr-kyc","$env:TEMP\shieldsync-hr-dev-store.json" -ErrorAction SilentlyContinue
+  Remove-Item -Recurse -Force "engine\.dev-data" -ErrorAction SilentlyContinue
   ```
   and keep only **synthetic** data in dev from now on (never real Aadhaar/PAN scans).
 
@@ -123,7 +125,7 @@ npm run cf:deploy      # opennextjs-cloudflare build (webpack) + wrangler deploy
 
 ## Local development (no AWS, no cost)
 ```powershell
-# terminal 1 — the dev data plane (file store in %TEMP%; SYNTHETIC data only)
+# terminal 1 — the dev data plane (file store in engine/.dev-data/, project-local; SYNTHETIC data only)
 node engine/hr-server.mjs
 # terminal 2 — the app
 cd hr; npm run dev        # http://localhost:3003  (dev sign-in enabled via HR_DEV_LOGIN)

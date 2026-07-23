@@ -20,6 +20,11 @@ app/.env.local
 AUDIT_*.md
 MONETIZATION_ROADMAP.md
 
+# Dev-only local data stores — persisted IN the project (not OS temp, which
+# Windows periodically wipes and once destroyed real candidate data). Never
+# committed: candidate PII, uploaded KYC bytes, simulated outbound email.
+engine/.dev-data/
+
 # Build artifacts
 engine/deploy/engine.zip
 engine/bin/aws-nuke-linux

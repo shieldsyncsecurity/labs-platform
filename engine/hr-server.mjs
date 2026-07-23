@@ -1,6 +1,6 @@
 // LOCAL DEV HR engine (no AWS). A tiny dependency-free Node HTTP server that
 // implements the same /hr/* contract the production ShieldSyncHrEngine Lambda
-// will serve, backed by a JSON file in the OS temp dir. Lets the HR portal run
+// will serve, backed by a JSON file INSIDE THE REPO. Lets the HR portal run
 // end-to-end on localhost before any AWS provisioning.
 //
 //   node engine/hr-server.mjs           # listens on :4002
@@ -9,9 +9,14 @@
 // authenticates with x-engine-token: HR_ENGINE_SECRET (dev value below).
 // NOTE: this is DEV-ONLY scaffolding; prod data lives in DynamoDB + S3 (SSE-KMS)
 // via the Lambda — never this file store.
+//
+// STORAGE LOCATION: deliberately NOT os.tmpdir() — Windows periodically wipes
+// %TEMP%, which silently destroyed a real candidate's data once (2026-07-24).
+// Everything dev-only lives under engine/.dev-data/ instead, which persists
+// across reboots and %TEMP% cleanups. It's git-ignored (see .gitignore) so it
+// never gets committed, but it survives on disk like any other project file.
 
 import http from "node:http";
-import os from "node:os";
 import path from "node:path";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 
@@ -19,13 +24,17 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 const PORT = Number(process.env.HR_ENGINE_PORT ?? 4002);
 const SECRET = process.env.HR_ENGINE_SECRET ?? "dev-hr-engine-secret";
-const DB = path.join(os.tmpdir(), "shieldsync-hr-dev-store.json");
-// KYC bytes live here in dev (prod: the SSE-KMS S3 bucket). Kept OUT of the repo.
-const KYC_DIR = path.join(os.tmpdir(), "shieldsync-hr-kyc");
+const DEV_DATA_DIR = path.join(import.meta.dirname, ".dev-data");
+mkdirSync(DEV_DATA_DIR, { recursive: true });
+const DB = path.join(DEV_DATA_DIR, "hr-dev-store.json");
+// KYC bytes live here in dev (prod: the SSE-KMS S3 bucket). Kept OUT of git
+// via .gitignore, but IN the project folder so it isn't at the mercy of OS
+// temp-cleanup.
+const KYC_DIR = path.join(DEV_DATA_DIR, "kyc");
 mkdirSync(KYC_DIR, { recursive: true });
 // Simulated emails (no RESEND_API_KEY) are written here as .html so you can
 // open and preview exactly what the recipient would receive.
-const MAIL_DIR = path.join(os.tmpdir(), "shieldsync-hr-mail");
+const MAIL_DIR = path.join(DEV_DATA_DIR, "mail");
 
 const EMPTY_DB = { employees: [], audit: [], documents: [], candidates: [], seq: 7, candidateSeq: 0, refs: { "hr-2026": 14 } }; // next id after Diya (0007)
 function load() {
