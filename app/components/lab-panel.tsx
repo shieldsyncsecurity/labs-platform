@@ -224,7 +224,7 @@ function EndingCard() {
 
 export function LabPanel({ slug, objectives, ready }: { slug: string; objectives: Objective[]; ready: boolean }) {
   const { user, loading, hasAccess, refreshEntitlements } = useAuth();
-  const { setLaunched, setObjectiveStatus, setGradePassed, sessionStartedAt, setSessionStartedAt } = useLabWorkspace();
+  const { setLaunched, setObjectiveStatus, setGradePassed, sessionStartedAt, setSessionStartedAt, setCheckWork, setChecking } = useLabWorkspace();
   const key = `lab:${slug}`;
   const [showCheckout, setShowCheckout] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -595,6 +595,19 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
 
   const checkWork = () => runGrade({ silent: false });
 
+  // Register the grade trigger + in-flight state with the workspace context so
+  // the Mission HUD's "Check my work" drives the SAME grading pipeline as the
+  // panel's own button. Ref-stabilised so the registration effect runs once.
+  const checkWorkRef = useRef(checkWork);
+  checkWorkRef.current = checkWork;
+  useEffect(() => {
+    setCheckWork(() => () => checkWorkRef.current());
+    return () => setCheckWork(null);
+  }, [setCheckWork]);
+  useEffect(() => {
+    setChecking(grading || autoGrading);
+  }, [grading, autoGrading, setChecking]);
+
   // Dev-only preview hatch (paired with lab-workspace.tsx's ?ssgrade parsing): once
   // that hatch has seeded objectiveStatus from the URL, decide whether it covered
   // ALL of this lab's objectives — if so, flip gradePassed too, so the completion
@@ -837,11 +850,35 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
   }
 
   if (!user) {
+    // Signed-out = the conversion moment for ad traffic: same card quality as the
+    // signed-in idle state (trust bullets + launch policy), not a bare button.
     return (
-      <div className={card}>
-        <p className="text-base font-extrabold text-ink">Start this lab</p>
-        <p className="mt-1 text-base text-ink-soft">Sign in to spin up your own isolated AWS lab.</p>
-        <Link href={`/sign-in?returnTo=${encodeURIComponent(`/labs/${slug}`)}`} className={`mt-4 block ${btnPrimary}`}>Sign in to start</Link>
+      <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+        <div className="h-[3px] w-full bg-gradient-to-r from-brand to-cyan" aria-hidden />
+        <div className="p-5">
+          <p className="text-base font-extrabold text-ink">Start this lab</p>
+          <ul className="mt-3 grid gap-2">
+            {[
+              { i: "🔐", t: "Your own real, isolated AWS account" },
+              { i: "✓", t: "Auto-graded against your live fixes" },
+              { i: "🧹", t: "Auto-wiped when you're done" },
+              ...(lab?.free ? [{ i: "💳", t: "Free — no card needed" }] : []),
+            ].map((c) => (
+              <li key={c.t} className="flex items-start gap-2 text-sm text-ink-soft">
+                <span aria-hidden className="mt-0.5 flex-none">{c.i}</span>
+                {c.t}
+              </li>
+            ))}
+          </ul>
+          <Link href={`/sign-in?returnTo=${encodeURIComponent(`/labs/${slug}`)}`} className={`mt-4 block ${btnPrimary}`}>
+            {lab?.free ? "Sign in & launch — free" : "Sign in to start"}
+          </Link>
+          {rule && (
+            <p className="mt-2 text-center text-xs text-muted">
+              {lab?.free ? "Free lab" : lab?.level} · {launchPolicy} · ~{lab?.estimatedActiveMinutes ?? 30} min
+            </p>
+          )}
+        </div>
       </div>
     );
   }

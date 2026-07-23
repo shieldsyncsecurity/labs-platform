@@ -24,16 +24,13 @@
 :root {
   color-scheme: light;
   /* Chrome above + below the workspace grid on lg+ desktop, used to size the
-     no-page-scroll workspace region (see --ss-workspace-h below). Measured at
-     1280x800 with the intro banner shown + "About" collapsed:
+     no-page-scroll workspace region (see --ss-workspace-h below). LAUNCHED state
+     only — pre-launch the page scrolls naturally and this var is unused (see
+     components/lab-shell.tsx). Budget at 1280x800 with the C+J shell:
        66px  sticky site header
        32px  page container top padding (py-8)
-       42px  slim hero band
-        8px  gap (mt-2) to the About disclosure
-       34px  About disclosure (collapsed)
-        8px  gap (mt-2) to the intro banner
-       34px  intro banner (one line; dismissing it only shrinks this, never
-             causing scroll, since the grid height reserves worst-case space)
+       40px  slim one-row header (breadcrumb + title + badges)
+       58px  Mission HUD strip (mt-3 + one row)
        16px  gap (mt-4) to the workspace grid
        32px  page container bottom padding (lg:pb-8)
        69px  site-wide <footer> rendered below <main> by app/layout.tsx (not a
@@ -45,7 +42,7 @@
      an unusually tall combination can still scroll the outer page on lg+ --
      acceptable, since the inner step-content region is what must never need
      scrolling to reach Back/Next. */
-  --ss-chrome-h: 347px;
+  --ss-chrome-h: 319px;
   --ss-workspace-h: calc(100dvh - var(--ss-chrome-h));
 }
 
@@ -77,23 +74,6 @@ body {
   outline: 2px solid color-mix(in srgb, var(--color-brand) 70%, transparent);
   outline-offset: 2px;
   border-radius: 2px;
-}
-
-/* "About this lab" disclosure under the slim hero band -- collapsed by default;
-   a small rotating chevron replaces the native marker (hidden via list-none on
-   the summary in JSX). */
-.ss-about summary::before {
-  content: "";
-  display: inline-block;
-  margin-right: 6px;
-  border-style: solid;
-  border-width: 4px 0 4px 6px;
-  border-color: transparent transparent transparent currentColor;
-  transition: transform 0.15s ease;
-  vertical-align: middle;
-}
-.ss-about[open] summary::before {
-  transform: rotate(90deg);
 }
 
 /* level badge colours */

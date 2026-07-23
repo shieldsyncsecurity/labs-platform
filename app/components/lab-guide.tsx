@@ -818,7 +818,9 @@ export function LabGuide({
         className={
           showPlayer
             ? "lg:grid lg:h-full lg:min-h-0 lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-6"
-            : "lg:h-full lg:min-h-0"
+            : launched
+            ? "lg:h-full lg:min-h-0"
+            : ""
         }
       >
         {showPlayer && (
@@ -833,11 +835,16 @@ export function LabGuide({
         )}
         <article
           ref={articleRef}
-          className="lab-md ss-guide relative flex flex-col overflow-hidden rounded-2xl border border-line bg-surface lg:h-full lg:min-h-0"
+          className={`lab-md ss-guide relative flex flex-col overflow-hidden rounded-2xl border border-line bg-surface ${
+            launched ? "lg:h-full lg:min-h-0" : ""
+          }`}
           data-track={track}
         >
           {!hasWalkthrough || !launched ? (
-            <div className="overflow-y-auto p-6 sm:p-7 lg:min-h-0 lg:flex-1 lg:overscroll-contain">
+            /* Pre-launch: NO inner scrollbox — the overview flows at natural height
+               and the PAGE scrolls (design C landing state). The scroll container
+               only exists once the fixed-height workspace is active. */
+            <div className={launched ? "overflow-y-auto p-6 sm:p-7 lg:min-h-0 lg:flex-1 lg:overscroll-contain" : "p-6 sm:p-7"}>
               {/* Cap the pre-launch prose to a readable measure (~70ch) so it reads
                   like a briefing, not a full-width wall; the launch-gate card below
                   and the post-launch walkthrough (with wide code blocks) stay full width. */}

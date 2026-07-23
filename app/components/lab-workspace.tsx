@@ -23,6 +23,13 @@ type LabWorkspace = {
   setGradePassed: (v: boolean) => void;
   sessionStartedAt: string | null;
   setSessionStartedAt: (v: string | null) => void;
+  // "Check my work" bridge for the Mission HUD: the panel OWNS grading and
+  // registers its trigger here (null when no live session); `checking` mirrors
+  // the panel's in-flight state so the HUD button can disable itself.
+  checkWork: (() => void) | null;
+  setCheckWork: (f: (() => void) | null) => void;
+  checking: boolean;
+  setChecking: (v: boolean) => void;
 };
 
 const Ctx = createContext<LabWorkspace>({
@@ -34,6 +41,10 @@ const Ctx = createContext<LabWorkspace>({
   setGradePassed: () => {},
   sessionStartedAt: null,
   setSessionStartedAt: () => {},
+  checkWork: null,
+  setCheckWork: () => {},
+  checking: false,
+  setChecking: () => {},
 });
 
 export function LabWorkspaceProvider({ children }: { children: ReactNode }) {
@@ -41,6 +52,8 @@ export function LabWorkspaceProvider({ children }: { children: ReactNode }) {
   const [objectiveStatus, setObjectiveStatus] = useState<Record<string, ObjectiveStatus>>({});
   const [gradePassed, setGradePassed] = useState(false);
   const [sessionStartedAt, setSessionStartedAt] = useState<string | null>(null);
+  const [checkWork, setCheckWork] = useState<(() => void) | null>(null);
+  const [checking, setChecking] = useState(false);
 
   // Dev-only preview hatches — both are dead-code-eliminated from the production
   // bundle (`process.env.NODE_ENV` is inlined at build):
@@ -82,6 +95,10 @@ export function LabWorkspaceProvider({ children }: { children: ReactNode }) {
         setGradePassed,
         sessionStartedAt,
         setSessionStartedAt,
+        checkWork,
+        setCheckWork,
+        checking,
+        setChecking,
       }}
     >
       {children}

@@ -1,16 +1,16 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { LABS, getLab } from "@/lib/labs";
 import { labInstructions, labObjectives } from "@/lib/lab-content";
 import { LabPanel } from "@/components/lab-panel";
 import { LabGuide } from "@/components/lab-guide";
-import { LabIntro } from "@/components/lab-intro";
+import { LabShell } from "@/components/lab-shell";
 import { LabWorkspaceProvider } from "@/components/lab-workspace";
 import { EntitlementStatus } from "@/components/entitlement-status";
 import { getServerUser } from "@/lib/auth/session";
 import { listEntitlements } from "@/lib/server/store";
 import { priceFor } from "@/lib/payments/pricing";
+import { rulesSummary } from "@/lib/access-rules";
 
 type Objective = { id: string; description: string };
 
@@ -134,57 +134,21 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
           }),
         }}
       />
-      {/* Slim hero — ONE row on lg+ (breadcrumb+title left, badges+back right) so the
-          band costs ~56px of vertical budget instead of the old ~180px h1+summary
-          block. The full title/summary duplicate now lives in the "About this lab"
-          disclosure below (collapsed by default — the Overview step covers it too). */}
-      <div className="ss-hero rounded-2xl bg-gradient-to-r from-brand to-cyan px-5 py-3 text-white sm:px-8 lg:py-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-sm">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-            <Link href="/" className="flex-none font-semibold text-white/75 hover:text-white">
-              Labs
-            </Link>
-            <span aria-hidden className="flex-none text-white/40">›</span>
-            <span className="min-w-0 truncate font-bold text-white" title={lab.title}>{lab.title}</span>
-          </div>
-          <div className="flex flex-none flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="rounded-md border border-white/30 bg-white/15 px-2 py-0.5 text-xs font-bold text-white">{lab.level}</span>
-            {lab.free && <span className="rounded-md border border-white/30 bg-white/15 px-2 py-0.5 text-xs font-bold text-white">FREE</span>}
-            <span className="inline-flex items-center gap-1 text-xs font-semibold text-white/85">
-              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 7v5l3 3" />
-              </svg>
-              ~{lab.estimatedActiveMinutes} min
-            </span>
-            <span aria-hidden className="mx-0.5 hidden text-white/30 sm:inline">|</span>
-            <a href="https://shieldsyncsecurity.com/labs-wizard" className="text-xs font-medium text-white/75 hover:text-white">
-              Back to plans
-            </a>
-          </div>
-        </div>
-      </div>
-
-      <details className="ss-about mt-2 rounded-lg border border-line bg-canvas text-sm text-ink-soft">
-        <summary className="cursor-pointer select-none list-none px-3 py-1.5 font-semibold text-ink-soft hover:text-ink">
-          About this lab
-        </summary>
-        <p className="px-3 pb-2.5 pt-0.5 text-sm text-ink-soft">
-          {lab.summary} <span className="text-muted">— AWS Security Lab</span>
-        </p>
-      </details>
-
-      <EntitlementStatus entitlement={entitlement} labSlug={lab.slug} />
-
-      {lab.ready && <LabIntro />}
-
+      {/* State-aware shell (design C + J): pre-launch = landing page with the full
+          title/summary + natural scroll; launched = slim header + Mission HUD +
+          the fixed-height split workspace. See components/lab-shell.tsx. */}
       <LabWorkspaceProvider>
-        <div className="mt-4 grid grid-cols-1 gap-6 lg:h-[var(--ss-workspace-h)] lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-5 xl:grid-cols-[minmax(0,1fr)_24rem] xl:gap-8">
-          {/* guide — min-w-0 lets long <pre> scroll instead of stretching the column;
-              min-h-0 lets the flex column inside LabGuide actually shrink to fit
-              the grid row instead of growing to content height. */}
-          <div className="min-w-0 lg:min-h-0">
-            {lab.ready && instructions ? (
+        <LabShell
+          title={lab.title}
+          summary={lab.summary}
+          level={lab.level}
+          free={!!lab.free}
+          minutes={lab.estimatedActiveMinutes}
+          policy={lab.ready ? rulesSummary(lab.level, !!lab.free) : ""}
+          objectives={objectives}
+          statusSlot={<EntitlementStatus entitlement={entitlement} labSlug={lab.slug} />}
+          guideSlot={
+            lab.ready && instructions ? (
               <LabGuide
                 slug={lab.slug}
                 instructions={instructions}
@@ -195,14 +159,10 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
               <div className="rounded-2xl border border-line bg-canvas p-6 text-base text-ink-soft">
                 {lab.ready ? "Guide not available yet." : "This lab is coming soon."}
               </div>
-            )}
-          </div>
-
-          {/* sticky workspace rail — cap to viewport height + scroll internally so the
-              bottom controls stay reachable on short windows; overscroll-contain stops
-              the page from chain-scrolling when the rail hits its end */}
-          <div className="min-w-0 lg:min-h-0">
-            <aside className="lg:sticky lg:top-[4.5rem] lg:max-h-[var(--ss-workspace-h)] lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
+            )
+          }
+          panelSlot={
+            <>
               <LabPanel slug={lab.slug} objectives={objectives} ready={lab.ready} />
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {lab.tags.map((t) => (
@@ -211,9 +171,9 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
                   </span>
                 ))}
               </div>
-            </aside>
-          </div>
-        </div>
+            </>
+          }
+        />
       </LabWorkspaceProvider>
     </div>
   );
