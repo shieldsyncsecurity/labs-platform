@@ -1460,6 +1460,34 @@ export async function getResult(assessmentId, inviteToken) {
   return itemToObjectDeep(r.Item);
 }
 
+/**
+ * setResultTimeline(): cache the CloudTrail work timeline onto a stored result.
+ * The timeline is fetched LAZILY on first report view (CloudTrail needs ~5-15
+ * min to make events queryable, so we can't get it before teardown) — this
+ * memoises it so every later view is a plain read. Conditional on the result
+ * existing so a stray call can't create a phantom row.
+ */
+export async function setResultTimeline(assessmentId, inviteToken, timeline) {
+  const db = await ddb();
+  try {
+    await db.send(
+      new UpdateItemCommand({
+        TableName: RESULTS_TABLE,
+        Key: { assessmentId: S(assessmentId), inviteToken: S(inviteToken) },
+        UpdateExpression: "SET timeline = :t, timelineAt = :now",
+        ConditionExpression: "attribute_exists(assessmentId)",
+        ExpressionAttributeValues: {
+          ":t": marshalValue(timeline ?? {}),
+          ":now": S(new Date().toISOString()),
+        },
+      })
+    );
+    return true;
+  } catch {
+    return false; // caching is best-effort; the caller still returns live data
+  }
+}
+
 /** listResults(): every stored report for an assessment (Query on pk=assessmentId,
  *  no index needed — this is the base table's own key). Powers the employer's
  *  side-by-side comparison view. */

@@ -51,6 +51,7 @@ import {
   releaseSlot,
   putResult,
   getResult,
+  setResultTimeline,
   listResults,
   createOrder,
   getOrder,
@@ -103,6 +104,7 @@ import {
   listRecordings,
   deleteRecordings,
 } from "./recinfra.mjs";
+import { fetchWorkTimeline } from "./timeline.mjs";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 // Transactional email no longer uses SES (prod-access request was denied for
 // this account). Sends go out via the Resend HTTP API through a drop-in
@@ -1131,7 +1133,13 @@ export async function handler(event) {
 
   try {
     if (method === "GET" && path === "/health") {
-      return resp(200, { ok: true, engine: "enterprise" });
+      // `caps` reports optional SDK clients that may or may not ship in the Lambda
+      // runtime (same uncertainty as @aws-sdk/client-bedrock). The work timeline
+      // degrades gracefully without CloudTrail, so this is how we confirm whether
+      // the feature is actually live rather than silently returning "unavailable".
+      let cloudtrail = false;
+      try { await import("@aws-sdk/client-cloudtrail"); cloudtrail = true; } catch { /* not in runtime */ }
+      return resp(200, { ok: true, engine: "enterprise", caps: { cloudtrail } });
     }
 
     // ── admin/org (called by ShieldSync admin UI) ─────────────────────────
@@ -1678,6 +1686,29 @@ export async function handler(event) {
         .map((s) => { try { return JSON.parse(s); } catch { return null; } })
         .filter(Boolean);
       return resp(200, { ...media, events });
+    }
+
+    // Work timeline ("process evidence"): the candidate's ordered control-plane
+    // actions from CloudTrail, authed by the same revocable candidateReportToken
+    // as the report page. Fetched LAZILY on first view (CloudTrail needs ~5-15
+    // min to make events queryable, so it can't be captured before teardown) and
+    // then cached onto the result row, so later views are a plain read.
+    if (method === "GET" && path === "/ent/timeline") {
+      const invite = await getInviteByCandidateReportToken(qs.candidateReportToken);
+      if (!invite || reportDead(invite.candidateReportRevokedAt, invite.candidateReportExpiresAt)) {
+        return resp(404, { error: "not found" });
+      }
+      const stored = await getResult(invite.assessmentId, invite.inviteToken);
+      if (stored?.timeline) return resp(200, { ...stored.timeline, cached: true });
+      const tl = await fetchWorkTimeline({
+        execRoleArn: invite.execRoleArn,
+        startedAt: invite.startedAt,
+        submittedAt: invite.submittedAt,
+      });
+      // Only memoise a SUCCESSFUL fetch — caching an "unavailable" (e.g. queried
+      // inside CloudTrail's lag window) would freeze the report on a false empty.
+      if (tl.available) await setResultTimeline(invite.assessmentId, invite.inviteToken, tl);
+      return resp(200, { ...tl, cached: false });
     }
 
     // Report-token lifecycle admin (E1): revoke kills the link now; renew clears

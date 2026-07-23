@@ -73,16 +73,41 @@ if (Test-Path $ZIP_PATH) { Remove-Item $ZIP_PATH -Force }
 
 # ent-handler is the entry; it imports entinfra + labinfra (needs graders + metrics)
 # and azure-infra (needs graders.azure for the "azure"-track labs).
-Compress-Archive -Path `
-  "$SCRIPT_DIR\ent-handler.mjs", `
-  "$SCRIPT_DIR\entinfra.mjs", `
-  "$SCRIPT_DIR\labinfra.mjs", `
-  "$SCRIPT_DIR\graders.mjs", `
-  "$SCRIPT_DIR\metrics.mjs", `
-  "$SCRIPT_DIR\azure-infra.mjs", `
-  "$SCRIPT_DIR\graders.azure.mjs", `
-  "$SCRIPT_DIR\recinfra.mjs" `
-  -DestinationPath $ZIP_PATH
+$ENGINE_MODULES = @(
+  "ent-handler.mjs",
+  "entinfra.mjs",
+  "labinfra.mjs",
+  "graders.mjs",
+  "metrics.mjs",
+  "azure-infra.mjs",
+  "graders.azure.mjs",
+  "recinfra.mjs",
+  "timeline.mjs"
+)
+
+# IMPORT-CLOSURE GUARD. This list is hand-maintained, and a NEW module imported by
+# the handler but missing here does not fail the build -- it ships a Lambda that
+# throws MODULE_NOT_FOUND at load, so EVERY route (including /health) 500s. That
+# has happened. So: walk the local `from "./x.mjs"` imports of every bundled
+# module and refuse to deploy if any of them is not in the list above.
+$missing = @()
+foreach ($m in $ENGINE_MODULES) {
+    $p = Join-Path $SCRIPT_DIR $m
+    if (-not (Test-Path $p)) { $missing += "$m (file not found)"; continue }
+    foreach ($line in (Get-Content $p)) {
+        if ($line -match 'from\s+"\./([A-Za-z0-9._-]+\.mjs)"') {
+            $dep = $Matches[1]
+            if ($ENGINE_MODULES -notcontains $dep) { $missing += "$dep (imported by $m)" }
+        }
+    }
+}
+if ($missing.Count -gt 0) {
+    Write-Error ("Deploy refused: these local modules are imported but NOT bundled -- add them to `$ENGINE_MODULES:`n  " + (($missing | Select-Object -Unique) -join "`n  "))
+    exit 1
+}
+Write-Host "  import-closure OK ($($ENGINE_MODULES.Count) modules)"
+
+Compress-Archive -Path ($ENGINE_MODULES | ForEach-Object { Join-Path $SCRIPT_DIR $_ }) -DestinationPath $ZIP_PATH
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open($ZIP_PATH, "Update")
