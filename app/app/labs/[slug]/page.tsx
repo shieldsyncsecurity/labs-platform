@@ -154,6 +154,7 @@ export default async function LabPage({ params }: { params: Promise<{ slug: stri
                 instructions={instructions}
                 gatedSlug={gated ? lab.slug : undefined}
                 stepTitles={stepTitles}
+                signedIn={!!user}
               />
             ) : (
               <div className="rounded-2xl border border-line bg-canvas p-6 text-base text-ink-soft">

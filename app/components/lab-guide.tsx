@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth/context";
 import { useLabWorkspace } from "@/components/lab-workspace";
+import { LockedWorkspacePreview } from "@/components/locked-workspace-preview";
 import { getLab, nextLab } from "@/lib/labs";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -619,6 +620,7 @@ export function LabGuide({
   instructions,
   gatedSlug,
   stepTitles: stepTitlesProp,
+  signedIn = false,
 }: {
   slug: string;
   instructions: string;
@@ -626,6 +628,10 @@ export function LabGuide({
   gatedSlug?: string;
   /** Server-provided step headings for the launch-gate preview (works even when gated). */
   stepTitles?: string[];
+  /** Server-known auth state. This route renders per-request (dynamic — it reads the
+   *  session cookie), so seeding from the server means the signed-out lock / signed-in
+   *  gate is correct in the FIRST paint instead of flashing when client auth resolves. */
+  signedIn?: boolean;
 }) {
   const { user, hasAccess, loading } = useAuth();
   const { launched, objectiveStatus, gradePassed, sessionStartedAt } = useLabWorkspace();
@@ -849,7 +855,18 @@ export function LabGuide({
                   like a briefing, not a full-width wall; the launch-gate card below
                   and the post-launch walkthrough (with wide code blocks) stay full width. */}
               <div className="max-w-2xl">{overviewRendered.overviewNodes}</div>
-              {!hasWalkthrough ? null : <LaunchGate steps={stepTitles} />}
+              {/* Signed OUT → tease the real workspace behind a lock (design E); signed
+                  in but not launched → the plain step-list gate (they just press Launch).
+                  The overview above stays readable in both cases, so crawlers and
+                  undecided visitors still get the actual scenario. */}
+              {!hasWalkthrough ? null : (loading ? signedIn : !!user) ? (
+                /* Trust the SERVER's auth state until client auth resolves, then the
+                   client's — so neither a signed-in user nor a visitor sees the wrong
+                   state flash on first paint. */
+                <LaunchGate steps={stepTitles} />
+              ) : (
+                <LockedWorkspacePreview steps={stepTitles} slug={slug} free={!!getLab(slug)?.free} />
+              )}
             </div>
           ) : wtSource === null ? (
             <div className="overflow-y-auto p-6 sm:p-7 lg:min-h-0 lg:flex-1 lg:overscroll-contain">
