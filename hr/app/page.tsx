@@ -46,12 +46,12 @@ export default function Home() {
         <div style={sectionLabel}><span style={dot("#2f4fb0")} />Recruiting</div>
         <div style={grid}>
           <Link href="/candidates" style={card}>
-            <div style={h}>Interview someone</div>
-            <div style={p}>Add a candidate, or send/resend the questionnaire link to anyone already in your pipeline — then hire in one click.</div>
+            <div style={h}>Add or manage candidates</div>
+            <div style={p}>Add someone you&rsquo;ve interviewed and send the questionnaire, or follow up with anyone already in your pipeline — then hire in one click.</div>
           </Link>
           <Link href="/employees/new" style={card}>
-            <div style={h}>Hire someone</div>
-            <div style={p}>Add the employee record, then issue their appointment or internship offer letter.</div>
+            <div style={h}>Add a new employee</div>
+            <div style={p}>Create the employee record directly, then issue their appointment or internship offer letter.</div>
           </Link>
         </div>
       </section>
