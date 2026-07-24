@@ -11,6 +11,15 @@ import type { Answers, Questionnaire } from "./questionnaire";
 
 export const CANDIDATE_RETENTION_MONTHS = 12;
 
+/**
+ * How long a questionnaire link stays valid after it's sent. ONE constant,
+ * imported by both the send route (mints the token + writes the email copy)
+ * and the public /q/[token] page (writes the on-page notice) — they drifted
+ * out of sync once already (email said 24h, page still hardcoded 36h) when
+ * this was two separate hardcoded numbers. Never hardcode this elsewhere.
+ */
+export const QUESTIONNAIRE_LINK_HOURS = 48;
+
 export type CandidateOutcome = "pending" | "shortlisted" | "hired" | "rejected" | "withdrawn";
 
 export const OUTCOME_OPTIONS: Array<{ value: CandidateOutcome; label: string }> = [

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { OUTCOME_OPTIONS, type Candidate, type CandidateOutcome } from "@/lib/candidate";
+import { OUTCOME_OPTIONS, QUESTIONNAIRE_LINK_HOURS, type Candidate, type CandidateOutcome } from "@/lib/candidate";
 import { ghostBtn, primaryBtn, inputStyle, labelStyle } from "./fields";
 
 const card: React.CSSProperties = { border: "1px solid #e2e8f2", borderRadius: 10, padding: 16, marginTop: 16 };
@@ -74,7 +74,7 @@ export function SendQuestionnaire({ candidate }: { candidate: Candidate }) {
         <div style={{ flex: 1, minWidth: 220 }}>
           <label style={labelStyle} htmlFor="qto">Send to</label>
           <input id="qto" type="email" value={to} onChange={(e) => setTo(e.target.value)} style={inputStyle} />
-          <div style={{ fontSize: 11, color: "#8a94a3", marginTop: 4 }}>The link is valid for 36 hours after we send it.</div>
+          <div style={{ fontSize: 11, color: "#8a94a3", marginTop: 4 }}>The link is valid for {QUESTIONNAIRE_LINK_HOURS} hours after we send it.</div>
         </div>
         <button type="button" onClick={() => go(true)} disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }}>
           {busy ? "Working…" : alreadySent ? "Re-send link" : "Email the link"}

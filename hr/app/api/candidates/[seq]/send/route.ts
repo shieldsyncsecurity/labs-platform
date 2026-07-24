@@ -3,7 +3,7 @@ import { getHrActor } from "@/lib/server/hr-session";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
 import { COMPANY } from "@/lib/company";
 import { getQuestionnaire } from "@/lib/questionnaire";
-import type { Candidate } from "@/lib/candidate";
+import { QUESTIONNAIRE_LINK_HOURS, type Candidate } from "@/lib/candidate";
 
 export const dynamic = "force-dynamic";
 
@@ -19,10 +19,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
   if (!actor) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   const { seq } = await params;
 
-  // Link lifetime is fixed at 36 hours (owner's decision, 2026-07-23) — the
-  // candidate is expected to fill it while the interview is fresh, and a long
-  // window mostly means the link sits forgotten in an inbox.
-  const LINK_HOURS = 24;
+  // Link lifetime — see QUESTIONNAIRE_LINK_HOURS in lib/candidate.ts (shared
+  // with the public /q/[token] page so the email and the on-page notice can
+  // never drift out of sync again).
+  const LINK_HOURS = QUESTIONNAIRE_LINK_HOURS;
 
   let body: { to?: string; send?: boolean };
   try {
@@ -47,7 +47,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
     return NextResponse.json({ error: "A valid email address is required." }, { status: 400 });
   }
   // Mint the token (the engine stores only its hash and returns the raw value once).
-  // The engine accepts validDays; 36 hours = 1.5 days keeps the wire contract unchanged.
+  // The engine accepts validDays, not hours — convert (may be fractional; the engine rounds).
   let token: string;
   let expiresAt: string;
   try {
@@ -91,35 +91,74 @@ HR Team
 ${COMPANY.legalName}
 ${COMPANY.hrEmail}`;
 
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#1b2331">
-  <div style="background:#1f3a5f;padding:18px 20px;border-radius:10px 10px 0 0">
-    <div style="color:#fff;font-weight:800;font-size:15px">${esc(COMPANY.legalName)}</div>
-    <div style="color:#a9bcd8;font-size:11.5px;margin-top:2px">${esc(COMPANY.tagline)}</div>
-  </div>
-  <div style="border:1px solid #e2e8f2;border-top:none;border-radius:0 0 10px 10px;padding:24px 22px">
-    <p style="font-size:15px;margin:0 0 12px">Hello ${esc(firstName)},</p>
-    <p style="font-size:14px;line-height:1.65;margin:0 0 14px">
-      Thank you for taking the time to interview with us for the <b>${esc(role)}</b> role. We enjoyed speaking with you.
-    </p>
-    <p style="font-size:14px;line-height:1.65;margin:0 0 18px">
-      To help us get to know you properly &mdash; your experience, how you like to work, and a little about you outside work &mdash;
-      please fill in this short questionnaire. It takes about <b>15 minutes</b>.
-    </p>
-    <p style="margin:0 0 18px">
-      <a href="${esc(link)}" style="background:#1f3a5f;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:13px 26px;border-radius:8px;display:inline-block">Open my questionnaire</a>
-    </p>
-    <p style="font-size:12.5px;color:#5b6676;line-height:1.6;margin:0 0 14px">
-      Your answers are saved on your device as you type, and once you submit you'll be able to see everything you sent.
-      This link is personal to you. Please fill it in within the next <b>${LINK_HOURS} hours</b> &mdash; after that it will stop working.
-    </p>
-    <p style="font-size:12px;color:#8a94a3;line-height:1.6;margin:0 0 16px;word-break:break-all">
-      If the button doesn't work, paste this into your browser:<br>${esc(link)}
-    </p>
-    <div style="border-top:1px solid #eef2f7;padding-top:14px;font-size:12.5px;color:#5b6676;line-height:1.6">
-      Warm regards,<br><b>HR Team</b><br>${esc(COMPANY.legalName)}<br>
-      <a href="mailto:${esc(COMPANY.hrEmail)}" style="color:#2f4fb0">${esc(COMPANY.hrEmail)}</a>
-    </div>
-  </div>
+  // Table-based layout on purpose: plain <div>s with max-width/border-radius
+  // render inconsistently across webmail (Outlook.com in particular ignored
+  // the width constraint and shipped the navy header edge-to-edge — confirmed
+  // from a real delivered email). This version fixes a second real bug found
+  // the same way: the button's rounded corners were getting lost in Outlook's
+  // renderer because bgcolor+border-radius on a bare <td> isn't reliable —
+  // nesting an inner table INSIDE the button cell (the standard "bulletproof
+  // button" pattern) is what actually survives Outlook.com's engine.
+  const logoUrl = `${base}/brand/cipher-s-mark.png`;
+  const html = `<div style="margin:0;padding:32px 16px;background:#eef1f6;font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+<tr><td align="center">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:560px;max-width:560px;background:#ffffff;border:1px solid #e1e6ee;border-radius:14px;">
+<tr>
+<td bgcolor="#1f3a5f" style="background:#1f3a5f;padding:24px 28px;border-radius:14px 14px 0 0;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td valign="middle" style="padding-right:12px;"><img src="${esc(logoUrl)}" width="34" height="34" alt="" style="display:block;border-radius:8px;" /></td>
+<td valign="middle">
+<span style="color:#ffffff;font-weight:bold;font-size:16px;font-family:Arial,Helvetica,sans-serif;line-height:1.3;">${esc(COMPANY.legalName)}</span><br>
+<span style="color:#a9bcd8;font-size:12px;font-family:Arial,Helvetica,sans-serif;">${esc(COMPANY.tagline)}</span>
+</td>
+</tr></table>
+</td>
+</tr>
+<tr>
+<td style="padding:32px 30px 8px;font-family:Arial,Helvetica,sans-serif;color:#1b2331;">
+<p style="margin:0 0 16px;font-size:15px;line-height:1.5;">Hello ${esc(firstName)},</p>
+<p style="margin:0 0 16px;font-size:14px;line-height:1.7;">
+Thank you for taking the time to interview with us for the <b>${esc(role)}</b> role. We enjoyed speaking with you.
+</p>
+<p style="margin:0 0 28px;font-size:14px;line-height:1.7;">
+To help us get to know you properly &mdash; your experience, how you like to work, and a little about you outside work &mdash;
+please fill in this short questionnaire. It takes about <b>15 minutes</b>.
+</p>
+</td>
+</tr>
+<tr>
+<td align="center" style="padding:0 30px 28px;">
+<!-- Bulletproof button: an inner table so the rounded, coloured pill survives Outlook.com's renderer -->
+<table role="presentation" cellpadding="0" cellspacing="0" border="0">
+<tr>
+<td align="center" bgcolor="#1f3a5f" style="background:#1f3a5f;border-radius:999px;">
+<a href="${esc(link)}" target="_blank" style="display:inline-block;padding:15px 34px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:999px;">Open my questionnaire</a>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+<tr>
+<td style="padding:0 30px 28px;font-family:Arial,Helvetica,sans-serif;">
+<p style="margin:0 0 14px;font-size:12.5px;line-height:1.6;color:#5b6676;">
+Your answers are saved on your device as you type, and once you submit you'll be able to see everything you sent.
+This link is personal to you. Please fill it in within the next <b>${LINK_HOURS} hours</b> &mdash; after that it will stop working.
+</p>
+<p style="margin:0;font-size:12px;line-height:1.6;color:#8a94a3;word-break:break-all;">
+If the button doesn't work, paste this into your browser:<br>${esc(link)}
+</p>
+</td>
+</tr>
+<tr>
+<td style="padding:22px 30px 28px;border-top:1px solid #eef2f7;font-family:Arial,Helvetica,sans-serif;font-size:12.5px;line-height:1.6;color:#5b6676;">
+Warm regards,<br><b>HR Team</b><br>${esc(COMPANY.legalName)}<br>
+<a href="mailto:${esc(COMPANY.hrEmail)}" style="color:#2f4fb0;">${esc(COMPANY.hrEmail)}</a>
+</td>
+</tr>
+</table>
+</td></tr>
+</table>
 </div>`;
 
   let simulated = false;

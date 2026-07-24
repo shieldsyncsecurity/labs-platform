@@ -2,7 +2,7 @@ import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
 import { getQuestionnaire } from "@/lib/questionnaire";
 import { COMPANY } from "@/lib/company";
 import { QuestionnaireForm, AnswersView } from "@/components/QuestionnaireForm";
-import type { PublicCandidateView } from "@/lib/candidate";
+import { QUESTIONNAIRE_LINK_HOURS, type PublicCandidateView } from "@/lib/candidate";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Candidate questionnaire — ShieldSync Security", robots: { index: false, follow: false } };
@@ -99,7 +99,7 @@ export default async function QuestionnairePage({ params }: { params: Promise<{ 
       {/* One-time link — say it plainly and up front, not after they lose work. */}
       <div style={{ marginTop: 12, background: "#fdf4e3", border: "1px solid #f0dfb8", borderRadius: 10, padding: "13px 16px", fontSize: 13, color: "#7a5714", lineHeight: 1.65 }}>
         <b>Please read before you start.</b> This is a personal, one-time link: you can submit this form
-        <b> once</b>, so please review your answers before sending. It stops working <b>36 hours</b> after we
+        <b> once</b>, so please review your answers before sending. It stops working <b>{QUESTIONNAIRE_LINK_HOURS} hours</b> after we
         sent it, so please fill it in soon. Your answers are saved on this device as you type, so you can take a
         break and come back.
       </div>
