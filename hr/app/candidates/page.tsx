@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { hrFetch } from "@/lib/server/hr-engine";
 import { isRetentionDue, OUTCOME_OPTIONS, type Candidate } from "@/lib/candidate";
+import { CandidateRowActions } from "@/components/CandidateRowActions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Candidates — ShieldSync HR", robots: { index: false, follow: false } };
@@ -63,6 +64,9 @@ export default async function CandidatesPage() {
                 {OUTCOME_OPTIONS.find((o) => o.value === c.outcome)?.label ?? c.outcome}
               </span>
             </td>
+            <td style={{ padding: "10px", textAlign: "right" }}>
+              <CandidateRowActions candidate={c} />
+            </td>
           </tr>
         );
       });
@@ -76,6 +80,7 @@ export default async function CandidatesPage() {
           <th style={{ padding: "8px 10px" }}>Interviewed</th>
           <th style={{ padding: "8px 10px" }}>Questionnaire</th>
           <th style={{ padding: "8px 10px", textAlign: "right" }}>Outcome</th>
+          <th style={{ padding: "8px 10px" }}></th>
         </tr>
       </thead>
       <tbody>{rows(list)}</tbody>
