@@ -17,3 +17,10 @@
 html {
   color-scheme: light;
 }
+
+/* TopNav's "+ New" menu uses <details>/<summary> (no click-outside JS
+   needed) — WebKit's default disclosure triangle can only be removed via
+   this pseudo-element, inline styles don't reach it. */
+summary::-webkit-details-marker {
+  display: none;
+}
