@@ -47,4 +47,5 @@ app/.claude/
 .open-next/
 app/.open-next/
 engine/deploy/ent-engine.zip
+engine/deploy/hr-engine.zip
 infra/backup/backup-exporter.zip

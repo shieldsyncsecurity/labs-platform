@@ -1,6 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { HR_COOKIE, verifyHrSession } from "@/lib/server/hr-token";
 
+// NOTE: this file is `middleware.ts`, not Next 16's newer `proxy.ts` —
+// deliberately. `proxy.ts` is HARD-LOCKED to the Node.js runtime (Next
+// refuses a `runtime` override there: "Proxy always runs on Node.js
+// runtime"), and Cloudflare Workers via @opennextjs/cloudflare 1.20.1 does
+// not support Node.js middleware at all — `cf:deploy` fails outright. The
+// older `middleware.ts` convention still works in Next 16 and defaults to
+// the Edge runtime, which IS supported. Revisit once opennextjs-cloudflare
+// adds Node-middleware support; until then, do not rename this to proxy.ts.
+
 // Deny-by-default gate for the whole portal (Next 16 "proxy"). Public surface is
 // EXACTLY: /login, /api/auth/*, the candidate questionnaire (/q/* + /api/q/*),
 // and the logo. Everything else — pages, /api/*, and the /sealed/* signature+seal
@@ -19,7 +28,7 @@ import { HR_COOKIE, verifyHrSession } from "@/lib/server/hr-token";
 // CSRF: SameSite=Lax stops cross-site posts, but sibling *.shieldsyncsecurity.com
 // apps are same-SITE — so every state-changing /api request must also originate
 // from THIS origin (Origin header when present, else Sec-Fetch-Site).
-export async function proxy(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   const isApi = pathname.startsWith("/api/");

@@ -46,7 +46,7 @@
       "Sid": "KmsKycKey",
       "Effect": "Allow",
       "Action": ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"],
-      "Resource": "arn:aws:kms:us-east-1:750294427884:key/REPLACE_WITH_HR_KMS_KEY_ID"
+      "Resource": "arn:aws:kms:us-east-1:750294427884:key/4da25b0f-747a-4eb1-b305-64677ee965e7"
     }
   ]
 }

@@ -37,11 +37,11 @@
   // replaced with the NEW client's id — never the enterprise client's
   // (separate secret + callback list = no cross-app blast radius).
   "vars": {
-    "HR_ENGINE_URL": "https://HR-ENGINE-API-ID.execute-api.us-east-1.amazonaws.com",
+    "HR_ENGINE_URL": "https://gwkfcf0ii3.execute-api.us-east-1.amazonaws.com",
     "APP_URL": "https://employee.shieldsyncsecurity.com",
     "COGNITO_REGION": "us-east-1",
     "COGNITO_POOL_ID": "us-east-1_54vIGJe4R",
-    "COGNITO_CLIENT_ID": "REPLACE_WITH_DEDICATED_HR_CLIENT_ID",
+    "COGNITO_CLIENT_ID": "7pei9flt4qnoercbb4lqb00bqf",
     "COGNITO_DOMAIN": "shieldsync-enterprise.auth.us-east-1.amazoncognito.com",
     "HR_ALLOWLIST": "admin@shieldsyncsecurity.com,hr@shieldsyncsecurity.com"
   }
