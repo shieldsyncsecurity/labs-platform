@@ -22,7 +22,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
   // Link lifetime is fixed at 36 hours (owner's decision, 2026-07-23) — the
   // candidate is expected to fill it while the interview is fresh, and a long
   // window mostly means the link sits forgotten in an inbox.
-  const LINK_HOURS = 36;
+  const LINK_HOURS = 24;
 
   let body: { to?: string; send?: boolean };
   try {
