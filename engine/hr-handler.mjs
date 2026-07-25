@@ -108,6 +108,87 @@ async function writeAudit(actor, action, target, detail) {
   );
 }
 
+const esc = (s) =>
+  String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+/**
+ * Email the owner a candidate's questionnaire answers the moment they submit.
+ *
+ * Sends the ANSWERS, not a "you have a new submission" nudge — a notification
+ * that only tells you to go and log in is a notification you postpone. The
+ * question ids are rendered as-is rather than resolved to their labels: the
+ * labels live in the Next app's questionnaire definition, and duplicating them
+ * here would create a second copy to drift out of sync every time the owner
+ * edits a question.
+ *
+ * Failure here must never fail the submission — the candidate has already
+ * pressed submit and their answers are stored; a mail outage is our problem,
+ * not a reason to show them an error.
+ */
+async function notifySubmission(cand, answers) {
+  try {
+    const to = (process.env.HR_SUBMISSION_TO || process.env.HR_REMINDER_TO || "").trim();
+    const key = process.env.RESEND_API_KEY;
+    if (!to || !key) {
+      console.warn(`[hr] questionnaire submitted by ${cand.candidateId} but ${!to ? "HR_SUBMISSION_TO" : "RESEND_API_KEY"} is unset`);
+      return;
+    }
+    const portal = process.env.HR_PORTAL_URL || "https://employee.shieldsyncsecurity.com";
+    const entries = Object.entries(answers ?? {});
+
+    const rows = entries
+      .map(([q, a]) => {
+        const value = Array.isArray(a) ? a.join(", ") : String(a ?? "");
+        return (
+          `<tr>` +
+          `<td style="padding:9px 12px;border-bottom:1px solid #eef2f7;font-size:12px;color:#5b6676;vertical-align:top;width:34%">${esc(q)}</td>` +
+          `<td style="padding:9px 12px;border-bottom:1px solid #eef2f7;font-size:13px;color:#1b2331;white-space:pre-wrap">${esc(value) || "<i>(blank)</i>"}</td>` +
+          `</tr>`
+        );
+      })
+      .join("");
+
+    const html =
+      `<div style="font-family:Arial,Helvetica,sans-serif;max-width:680px">` +
+      `<h2 style="color:#1f3a5f;font-size:18px;margin:0 0 4px">${esc(cand.name)} completed the questionnaire</h2>` +
+      `<p style="font-size:13px;color:#5b6676;margin:0 0 14px">` +
+      `${esc(cand.candidateId)} · ${esc(cand.roleAppliedFor)} · ${esc(cand.email)}` +
+      `${cand.salaryProof ? ` · salary proof attached in the portal (${esc(cand.salaryProof.fileName)})` : " · no salary proof uploaded"}` +
+      `</p>` +
+      `<table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f2;border-radius:8px">${rows}</table>` +
+      `<p style="font-size:13px;margin:16px 0 0">` +
+      `<a href="${portal}/manage-candidates/${cand.seq}" style="color:#2f4fb0;font-weight:700">Open ${esc(cand.name.split(" ")[0])} in the portal &rarr;</a>` +
+      `</p>` +
+      `<p style="font-size:11px;color:#8a94a3;margin-top:18px">${entries.length} answers · submitted ${new Date().toISOString()}</p>` +
+      `</div>`;
+
+    const text =
+      `${cand.name} completed the questionnaire\n${cand.candidateId} · ${cand.roleAppliedFor} · ${cand.email}\n\n` +
+      entries.map(([q, a]) => `${q}:\n${Array.isArray(a) ? a.join(", ") : a}\n`).join("\n") +
+      `\n${portal}/manage-candidates/${cand.seq}\n`;
+
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
+        to: to.split(",").map((s) => s.trim()).filter(Boolean),
+        subject: `${cand.name} completed the questionnaire — ${cand.roleAppliedFor}`,
+        html,
+        text,
+      }),
+    });
+    if (!r.ok) console.warn(`[hr] submission notification failed: ${r.status}`);
+    else await writeAudit("system", "candidate.submission.notify", cand.candidateId, { to });
+  } catch (e) {
+    console.warn(`[hr] submission notification threw: ${e?.message ?? e}`);
+  }
+}
+
 /**
  * Daily "someone hasn't been paid" reminder.
  *
@@ -936,6 +1017,11 @@ export async function handler(event) {
           throw e;
         }
         await writeAudit("candidate", "questionnaire.submit", cand.candidateId, { fields: Object.keys(answers).length });
+        // Tell the owner, with the answers in the mail. A submission the owner
+        // has to remember to go and look for is one that sits unread for days;
+        // the whole point of the questionnaire is to act on it while the
+        // interview is still fresh.
+        await notifySubmission(out.Attributes, answers);
         return resp(200, { candidate: publicView(out.Attributes) });
       }
     }

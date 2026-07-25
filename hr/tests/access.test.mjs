@@ -132,6 +132,11 @@ test("scheduling and cancelling an interview are candidate writes", () => {
   assert.deepEqual(req("/api/candidates/1/interviews/iv_1", "DELETE"), { kind: "area", area: "candidates", need: "write" });
 });
 
+test("the Graph diagnostic is administrator-only", () => {
+  // It reports the tenant id and which Graph roles were consented.
+  assert.equal(req("/api/graph-check").kind, "admin");
+});
+
 test("the bulk export is administrator-only, not merely employee-read", () => {
   // It returns every employee, every issued payslip snapshot and all KYC
   // metadata in one file. Anything less than admin would make the salary and

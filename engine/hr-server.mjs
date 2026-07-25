@@ -696,6 +696,10 @@ const server = http.createServer(async (req, res) => {
         cand.updatedAt = cand.submittedAt;
         db.candidates[idx] = cand;
         audit(db, "candidate", "questionnaire.submit", cand.candidateId, { fields: Object.keys(cand.answers).length });
+        // Prod emails the owner the answers here (notifySubmission in the
+        // Lambda). Dev has no mail transport, so log it instead — the point is
+        // that a dev run behaves observably the same way.
+        console.log(`[hr-dev-engine] would email submission for ${cand.candidateId} to ${process.env.HR_SUBMISSION_TO || process.env.HR_REMINDER_TO || "(HR_SUBMISSION_TO unset)"}`);
         save(db);
         return send(res, 200, { candidate: publicCandidate(cand) });
       }

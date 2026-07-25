@@ -49,6 +49,17 @@
     // self-lockout impossible and stops anyone granting themselves admin.
     // Everyone else on HR_ALLOWLIST starts with NOTHING until granted at
     // /access. Changing this list requires a deploy, on purpose.
-    "HR_ADMIN_EMAILS": "admin@shieldsyncsecurity.com"
+    "HR_ADMIN_EMAILS": "admin@shieldsyncsecurity.com",
+    // Microsoft Graph — creates the Teams meeting and sends the candidate a
+    // real Outlook invite. Client ID and tenant ID are NOT secrets (they're
+    // visible in any OAuth request); MS_CLIENT_SECRET is, and is set with
+    // `wrangler secret put` so it never lands in this file or in git.
+    //
+    // MS_ORGANISER_UPN is the mailbox meetings are created ON. It must be a
+    // real licensed mailbox in the tenant — the app has app-only permission,
+    // so it acts on that user's calendar rather than "its own".
+    "MS_CLIENT_ID": "bc9861ae-295d-4009-b1d2-20671704405e",
+    "MS_TENANT_ID": "6ea399a4-14cd-4b02-a780-6d77f51fd00f",
+    "MS_ORGANISER_UPN": "himanshu@shieldsyncsecurity.com"
   }
 }

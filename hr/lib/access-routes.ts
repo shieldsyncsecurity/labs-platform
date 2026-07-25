@@ -47,6 +47,8 @@ export function requirementFor(pathname: string, method: string): Requirement {
 
   // --- Administrator only ---
   if (p === "/access" || p.startsWith("/api/access")) return ADMIN;
+  // Names the tenant and the granted Graph roles — owner-only diagnostics.
+  if (p === "/api/graph-check") return ADMIN;
 
   // --- Banking ---
   if (p === "/banking" || p.startsWith("/banking/")) return area("banking", "read");
