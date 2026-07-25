@@ -14,7 +14,11 @@ export type Requirement =
   | { kind: "public" } // no session at all (login, questionnaire, auth callbacks)
   | { kind: "any" } // any signed-in user, no specific permission
   | { kind: "admin" } // administrator only
-  | { kind: "area"; area: Area; need: "read" | "write" };
+  /** `alsoSeeSalary` closes the obvious hole in field-level masking: a page
+   * whose whole purpose is entering or changing pay cannot be protected by
+   * blanking the figures on it. Those pages require the salary permission on
+   * top of the area permission. */
+  | { kind: "area"; area: Area; need: "read" | "write"; alsoSeeSalary?: true };
 
 const PUBLIC: Requirement = { kind: "public" };
 const ANY: Requirement = { kind: "any" };
@@ -75,14 +79,17 @@ export function requirementFor(pathname: string, method: string): Requirement {
     if (/\/generated(\/|$)/.test(p) || /\/issued(\/|$)/.test(p) || /\/email$/.test(p)) return byMethod("documents", method);
     return byMethod("employees", method);
   }
+  // Creating or revising an employee means setting their pay, so these need the
+  // salary permission as well — masking a figure on a form you can type into is
+  // no protection at all.
   if (p === "/employees") return area("employees", "read");
-  if (p === "/employees/new") return area("employees", "write");
+  if (p === "/employees/new") return { kind: "area", area: "employees", need: "write", alsoSeeSalary: true };
   if (p.startsWith("/employees/")) {
     // Letter builders write a document; the payslip builder runs payroll.
-    if (/\/payslip$/.test(p)) return area("payroll", "write");
+    if (/\/payslip$/.test(p)) return { kind: "area", area: "payroll", need: "write", alsoSeeSalary: true };
     if (/\/(offer|internship-offer|leave|verification|confirmation|experience|completion)$/.test(p)) return area("documents", "write");
     if (/\/issued\//.test(p)) return area("documents", "read");
-    if (/\/(edit|revise|convert)$/.test(p)) return area("employees", "write");
+    if (/\/(edit|revise|convert)$/.test(p)) return { kind: "area", area: "employees", need: "write", alsoSeeSalary: true };
     return area("employees", "read"); // /employees/:seq
   }
 

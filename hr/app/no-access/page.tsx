@@ -11,7 +11,13 @@ export default async function NoAccess({ searchParams }: { searchParams: Promise
   const { area } = await searchParams;
   const { actor } = await getViewer();
   const known = (AREAS as readonly string[]).includes(area ?? "") ? (area as Area) : null;
-  const what = known ? AREA_META[known].label : area === "admin" ? "Administrator settings" : "This section";
+  const what = known
+    ? AREA_META[known].label
+    : area === "admin"
+      ? "Administrator settings"
+      : area === "salary"
+        ? "Pay and salary"
+        : "This section";
 
   return (
     <main style={{ maxWidth: 620, margin: "0 auto", padding: "64px 24px", fontFamily: "Arial, Helvetica, 'Segoe UI', sans-serif" }}>
@@ -21,7 +27,12 @@ export default async function NoAccess({ searchParams }: { searchParams: Promise
         </div>
         <h1 style={{ fontSize: 19, fontWeight: 800, color: "#1f3a5f", marginTop: 8 }}>{what} isn&rsquo;t part of your access</h1>
         <p style={{ fontSize: 13.5, color: "#41506a", lineHeight: 1.6, marginTop: 10 }}>
-          {known ? AREA_META[known].blurb : "This area is restricted."} Your account
+          {known
+            ? AREA_META[known].blurb
+            : area === "salary"
+              ? "This page sets or changes what someone is paid, so it needs permission to see salary figures."
+              : "This area is restricted."}{" "}
+          Your account
           {actor ? <> (<b style={{ color: "#1b2331" }}>{actor}</b>)</> : null} hasn&rsquo;t been given it.
         </p>
         <p style={{ fontSize: 13, color: "#5b6676", lineHeight: 1.6, marginTop: 10 }}>

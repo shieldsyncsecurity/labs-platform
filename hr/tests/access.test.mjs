@@ -96,9 +96,20 @@ test("the ID vault is its own permission, separate from employee records", () =>
 test("letters and payroll are separate from the employee record itself", () => {
   assert.deepEqual(req("/employees/7/offer"), { kind: "area", area: "documents", need: "write" });
   assert.deepEqual(req("/employees/7/leave"), { kind: "area", area: "documents", need: "write" });
-  assert.deepEqual(req("/employees/7/payslip"), { kind: "area", area: "payroll", need: "write" });
+  assert.deepEqual(req("/employees/7/payslip"), { kind: "area", area: "payroll", need: "write", alsoSeeSalary: true });
   assert.deepEqual(req("/payslips"), { kind: "area", area: "payroll", need: "read" });
   assert.deepEqual(req("/employees/7"), { kind: "area", area: "employees", need: "read" });
+});
+
+test("pages that SET pay require the salary permission, not just the area", () => {
+  // Masking a figure on a form someone can type into is no protection at all.
+  for (const p of ["/employees/new", "/employees/7/edit", "/employees/7/revise", "/employees/7/convert", "/employees/7/payslip"]) {
+    assert.equal(req(p).alsoSeeSalary, true, `${p} must require salary visibility`);
+  }
+  // Reading a record, or writing a non-pay letter, must not.
+  for (const p of ["/employees/7", "/employees", "/employees/7/leave", "/employees/7/verification"]) {
+    assert.equal(req(p).alsoSeeSalary, undefined, `${p} should not require salary visibility`);
+  }
 });
 
 test("uploading a statement for review counts as changing banking, not reading it", () => {

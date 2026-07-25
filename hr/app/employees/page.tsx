@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { hrFetch } from "@/lib/server/hr-engine";
+import { getViewer } from "@/lib/server/hr-access";
+import { can, MASKED } from "@/lib/access";
 import type { Employee } from "@/lib/employee";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +10,10 @@ export const metadata = { title: "Employees — ShieldSync HR", robots: { index:
 const fmtINR = (n: number) => "INR " + (Number(n) || 0).toLocaleString("en-IN");
 
 export default async function EmployeesPage() {
+  const { isAdmin, access } = await getViewer();
+  const showSalary = isAdmin || access.seeSalary;
+  const canAdd = isAdmin || can(access, "employees", "write");
+
   let employees: Employee[] = [];
   let error: string | null = null;
   try {
@@ -27,12 +33,14 @@ export default async function EmployeesPage() {
           <Link href="/" style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; Dashboard</Link>
           <h1 style={{ fontSize: 20, fontWeight: 800, color: "#1f3a5f", marginTop: 6 }}>Employees</h1>
         </div>
-        <Link
-          href="/employees/new"
-          style={{ background: "#1f3a5f", color: "#fff", textDecoration: "none", fontSize: 13, fontWeight: 700, borderRadius: 8, padding: "9px 14px" }}
-        >
-          + Add employee
-        </Link>
+        {canAdd ? (
+          <Link
+            href="/employees/new"
+            style={{ background: "#1f3a5f", color: "#fff", textDecoration: "none", fontSize: 13, fontWeight: 700, borderRadius: 8, padding: "9px 14px" }}
+          >
+            + Add employee
+          </Link>
+        ) : null}
       </div>
 
       {error ? (
@@ -64,7 +72,9 @@ export default async function EmployeesPage() {
                     {e.status === "exited" ? "Exited" : "Active"}
                   </span>
                 </td>
-                <td style={{ padding: "10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmtINR(e.grossMonthly)}</td>
+                <td style={{ padding: "10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: showSalary ? undefined : "#a9b2c1" }}>
+                  {showSalary ? fmtINR(e.grossMonthly) : MASKED}
+                </td>
                 <td style={{ padding: "10px", textAlign: "right" }}>
                   <Link href={`/employees/${e.seq}`} style={{ color: "#2f4fb0", fontWeight: 600 }}>Open</Link>
                 </td>

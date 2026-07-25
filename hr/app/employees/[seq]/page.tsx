@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
+import { getViewer } from "@/lib/server/hr-access";
+import { can, MASKED } from "@/lib/access";
 import { formatINR } from "@/lib/payslip";
 import type { Employee } from "@/lib/employee";
 import { KycSection } from "@/components/KycSection";
@@ -85,6 +87,15 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
   const exited = e.status === "exited";
   const isIntern = /internship/i.test(e.employmentType);
 
+  // Field-level visibility. Opening a colleague's record and knowing what they
+  // earn are separate decisions, so these are separate permissions — and the
+  // masking has to happen HERE, on the server, because the middleware can only
+  // gate whole URLs, not individual fields.
+  const { isAdmin, access } = await getViewer();
+  const showSalary = isAdmin || access.seeSalary;
+  const showBank = isAdmin || access.seeBankDetails;
+  const money = (n: number) => (showSalary ? formatINR(n) : MASKED);
+
   return (
     <main style={{ maxWidth: 820, margin: "0 auto", padding: "36px 24px", fontFamily: "Arial, Helvetica, 'Segoe UI', sans-serif" }}>
       <Link href="/employees" style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; Employees</Link>
@@ -114,8 +125,8 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
           {exited ? row("Last working day", e.lastWorkingDay) : null}
           {row("Employment", e.employmentType)}
           {row("Location", e.baseLocation)}
-          {row("PAN", e.pan)}
-          {row("Bank A/C", e.bankAccount)}
+          {row("PAN", showBank ? e.pan : MASKED)}
+          {row("Bank A/C", showBank ? e.bankAccount : MASKED)}
           {row("UAN / PF", e.uanPf)}
           {leavesByYear.size > 0 ? (
             <div style={{ marginTop: 10, borderTop: "1px solid #eef2f7", paddingTop: 8 }}>
@@ -140,13 +151,18 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
         </div>
         <div style={card}>
           <div style={groupTitle}>Compensation</div>
-          {row("Gross / month", formatINR(e.grossMonthly))}
-          {row("Annual CTC", formatINR(e.annualCTC))}
-          {row("Basic", formatINR(s.basic))}
-          {row("HRA", formatINR(s.hra))}
-          {row("Conveyance", formatINR(s.conveyance))}
-          {row("Special", formatINR(s.special))}
-          {(e.revisions ?? []).length > 0 ? (
+          {!showSalary ? (
+            <div style={{ fontSize: 11.5, color: "#8a94a3", lineHeight: 1.5, marginBottom: 6 }}>
+              Salary figures aren&rsquo;t part of your access.
+            </div>
+          ) : null}
+          {row("Gross / month", money(e.grossMonthly))}
+          {row("Annual CTC", money(e.annualCTC))}
+          {row("Basic", money(s.basic))}
+          {row("HRA", money(s.hra))}
+          {row("Conveyance", money(s.conveyance))}
+          {row("Special", money(s.special))}
+          {showSalary && (e.revisions ?? []).length > 0 ? (
             <div style={{ marginTop: 10, borderTop: "1px solid #eef2f7", paddingTop: 8 }}>
               <div style={{ fontSize: 10.5, color: "#8a94a3", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 4 }}>History</div>
               {(e.revisions ?? []).map((r, i) => (
@@ -246,7 +262,10 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
         )}
       </div>
 
-      <KycSection seq={seq} />
+      {/* The ID vault is its own permission — opening someone's record must not
+          imply access to their Aadhaar and PAN. The API 403s regardless, but
+          rendering an upload box that can only fail is worse than hiding it. */}
+      {isAdmin || can(access, "kyc", "read") ? <KycSection seq={seq} /> : null}
     </main>
   );
 }

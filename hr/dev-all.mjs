@@ -9,7 +9,15 @@ const __dir = path.dirname(fileURLToPath(import.meta.url));
 const procs = [];
 
 function run(name, cmd, args, cwd, color) {
-  const p = spawn(cmd, args, { cwd, shell: process.platform === "win32" });
+  // Windows needs shell:true to resolve `npm` (a .cmd shim), but a shell spawn
+  // CONCATENATES args instead of passing them as a vector — so an unquoted path
+  // containing a space is truncated at the space. The repo lives under
+  // "...\ShieldSync Unified Website\...", so the engine used to die with
+  // `Cannot find module 'C:\...\ShieldSync'` and dev:all never started.
+  // Quote args that need it whenever we're going through a shell.
+  const useShell = process.platform === "win32";
+  const safeArgs = useShell ? args.map((a) => (/[\s"]/.test(a) ? `"${a}"` : a)) : args;
+  const p = spawn(cmd, safeArgs, { cwd, shell: useShell });
   const tag = `\x1b[${color}m[${name}]\x1b[0m `;
   const pipe = (stream) =>
     stream.on("data", (d) =>

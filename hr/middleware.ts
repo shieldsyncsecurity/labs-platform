@@ -80,6 +80,7 @@ export async function middleware(req: NextRequest) {
   if (need.kind === "admin") return deny(req, isApi, "admin");
 
   const access = await grantsFor(session.email);
+  if (need.alsoSeeSalary && !access.seeSalary) return deny(req, isApi, "salary");
   if (can(access, need.area, need.need)) return NextResponse.next();
   return deny(req, isApi, need.area);
 }
