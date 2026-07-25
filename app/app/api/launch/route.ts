@@ -138,12 +138,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "LIMIT_REACHED", ...detail }, { status: 429 });
   }
   if (r.status === 409) {
-    // H3: user already has a live lab (one live session per user) — relay which.
-    // NOTE: do NOT rollback here — the user already has an active session, which
-    // means a prior successful reservation/launch is still in flight; rolling back
-    // would corrupt their counter. The current reserve is a duplicate they paid
-    // for in error; failing it without decrement is the correct conservative move
-    // until product decides otherwise.
+    // User already holds a live lab (one live session per user) — relay which.
+    // The engine only 409s when the live lock is on a DIFFERENT lab: a same-lab
+    // race reconnects with 200 {resumed:true} instead (engine handler.mjs). So the
+    // reserve we just made was against THIS lab's entitlement row and bought the
+    // user nothing — roll it back. (The previous comment claimed rolling back would
+    // "corrupt their counter" by undoing an in-flight launch for the same lab; that
+    // case never reaches here, so the reserve was simply being burned.)
+    await maybeRollback();
     const detail = await r.json().catch(() => ({}));
     return NextResponse.json({ error: detail.error ?? "ALREADY_ACTIVE", ...detail }, { status: 409 });
   }
@@ -153,6 +155,19 @@ export async function POST(req: Request) {
   }
 
   const engineJson = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+
+  // RECONNECT, not a new run: the engine found the user's existing live session for
+  // this lab and handed it back ({resumed:true}) without provisioning anything. We
+  // already reserved a launch above, so keeping it would charge a paid learner for a
+  // lab they were ALREADY in — reachable by simply opening the lab in a second tab,
+  // or after a failed session-restore leaves the Launch card showing. Give it back.
+  if (engineJson.resumed === true && reserved) {
+    await maybeRollback();
+    // The reserved figures are stale after the rollback; let the UI re-read live
+    // state rather than render a count that just went back up.
+    return NextResponse.json(engineJson);
+  }
+
   // Surface the v2 fields when we have them so the UI can display
   // "N launches left, window ends <date>".
   const extra: Record<string, unknown> = {};

@@ -786,7 +786,7 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
             : limitReason === "FREE_IP_LIMIT"
             ? "The free lab is one run per person — and it's been used several times from your network already. Try again later, or unlock a paid lab for instant access. Monthly members skip these limits."
             : limitReason === "USER_DAILY_LIMIT"
-            ? "To keep labs fast and fair for everyone, each account can launch up to 5 labs a day. Your next launch frees up within 24 hours of your earliest one today."
+            ? "To keep labs fast and fair for everyone, each account can launch up to 8 labs a day. Your next launch frees up within 24 hours of your earliest one today."
             : limitReason === "USER_MONTHLY_LIMIT"
             ? "To keep labs fast and fair for everyone, each account can launch up to 100 labs a month. Your allowance frees up as launches from the last 30 days age out."
             : (() => {
