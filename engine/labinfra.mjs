@@ -567,7 +567,11 @@ export async function launchCount(userId, labSlug, windowHours) {
 // 7 days) users rarely reach these, so in practice they bound subscribers.
 // Enforced in handler /launch. Requires session rows to outlive the 30-day
 // lookback — see the lease TTL (37 days) below.
-export const USER_DAILY_MAX_LAUNCHES = 5;
+// 8, not 5: the two free labs allow 2 launches/24h EACH, so a learner can legitimately
+// spend 4 before touching anything they paid for — a 5/day ceiling left a paying
+// customer just 1 of their 3 purchased launches and showed them a fair-use warning for
+// using what they bought. 8 still bounds a runaway subscriber (the real target here).
+export const USER_DAILY_MAX_LAUNCHES = 8;
 export const USER_MONTHLY_MAX_LAUNCHES = 100;
 
 /** userLaunchCounts(): this user's launches across ALL labs in the trailing 24h
@@ -1656,14 +1660,70 @@ export const PAYPERLAB_BACKSTOP_DAYS = 90;
  * ⚠️ Idempotency: the v2 budget descriptors + counters (type, maxLaunches,
  * launchCount, version) are written with if_not_exists so a webhook RETRY for
  * the SAME purchase can NOT reset a user's already-consumed launches (would be a
- * free-budget-refill exploit). A genuine re-purchase that should refill the
- * budget is a separate concern — see RE-PURCHASE note in the runbook. The grant
- * is exactly-once per entitlement row.
+ * free-budget-refill exploit).
+ *
+ * RE-PURCHASE (fixed): idempotency is now keyed on the ORDER, not on the row
+ * existing. A grant carrying an orderId that differs from the one already stored
+ * is a genuinely new purchase, so it REFILLS the budget (launchCount → 0, fresh
+ * maxLaunches, window cleared so it re-stamps on the next first launch). Before
+ * this, a customer who exhausted a lab could pay ₹249 again and receive nothing:
+ * every counter was if_not_exists, so reserveLaunch kept failing its
+ * `launchCount < maxLaunches` condition forever. Same orderId replayed → the
+ * condition fails and we fall through to the non-destructive upsert below, so
+ * webhook retries stay exactly-once.
  */
 export async function grantEntitlement(userId, e = {}) {
   const { labSlug, kind, accessUntil, type, maxLaunches, orderId } = e;
   const db = await ddb();
   const now = new Date().toISOString();
+
+  if (type === "PAY_PER_LAB" && orderId) {
+    const refillSets = [
+      "launchCount = :z",
+      "#ty = :ty",
+      "orderId = :oid",
+      "grantedAt = if_not_exists(grantedAt, :now)",
+      "kind = :k",
+      "updatedAt = :now",
+      // version is a CAS counter, never reset — only ever moves forward.
+      "#ver = if_not_exists(#ver, :z)",
+    ];
+    const refillVals = {
+      ":z": { N: "0" },
+      ":ty": { S: String(type) },
+      ":oid": { S: String(orderId) },
+      ":now": { S: now },
+      ":k": { S: String(kind ?? "per-lab") },
+    };
+    if (maxLaunches != null) {
+      refillSets.push("maxLaunches = :ml");
+      refillVals[":ml"] = { N: String(maxLaunches) };
+    }
+    if (accessUntil) {
+      refillSets.push("accessUntil = :au");
+      refillVals[":au"] = { S: String(accessUntil) };
+    }
+    try {
+      await db.send(
+        new UpdateItemCommand({
+          TableName: ENTITLEMENTS_TABLE,
+          Key: { userId: { S: String(userId) }, labSlug: { S: String(labSlug) } },
+          // Clearing the window makes the new budget's 7 days start on the NEXT
+          // first launch, exactly like a first-time purchase.
+          UpdateExpression: "SET " + refillSets.join(", ") + " REMOVE windowStartedAt, windowExpiresAt",
+          // First grant (no orderId yet) OR a different order = real purchase.
+          // Same order = webhook retry → refuse, fall through untouched.
+          ConditionExpression: "attribute_not_exists(orderId) OR orderId <> :oid",
+          ExpressionAttributeNames: { "#ty": "type", "#ver": "version" },
+          ExpressionAttributeValues: refillVals,
+        })
+      );
+      return;
+    } catch (err) {
+      if (err.name !== "ConditionalCheckFailedException") throw err;
+      // Replay of the same order — fall through to the idempotent upsert.
+    }
+  }
   const sets = ["grantedAt = if_not_exists(grantedAt, :t)", "kind = :k", "updatedAt = :now"];
   const vals = { ":t": { S: now }, ":k": { S: String(kind ?? "per-lab") }, ":now": { S: now } };
   const names = {};
@@ -1779,11 +1839,31 @@ export async function rollbackLaunch(userId, labSlug) {
         UpdateExpression: "SET launchCount = launchCount - :one, updatedAt = :now",
         ConditionExpression: "launchCount > :z",
         ExpressionAttributeValues: { ":one": { N: "1" }, ":z": { N: "0" }, ":now": { S: new Date().toISOString() } },
+        ReturnValues: "UPDATED_NEW",
       })
     );
   } catch (e) {
     if (e.name === "ConditionalCheckFailedException") return; // nothing to roll back
     throw e;
+  }
+
+  // If that rollback undid the customer's FIRST launch, also un-stamp the window
+  // reserveLaunch lazily set. Otherwise a launch that failed to provision (pool
+  // full, engine blip) silently starts their irreversible 7-day clock — they paid
+  // for 3 launches in 7 days and lost a day of it to our outage, having run nothing.
+  // Guarded on launchCount = 0 so a mid-budget rollback leaves a running window alone.
+  try {
+    await db.send(
+      new UpdateItemCommand({
+        TableName: ENTITLEMENTS_TABLE,
+        Key: { userId: { S: String(userId) }, labSlug: { S: String(labSlug) } },
+        UpdateExpression: "REMOVE windowStartedAt, windowExpiresAt",
+        ConditionExpression: "launchCount = :z",
+        ExpressionAttributeValues: { ":z": { N: "0" } },
+      })
+    );
+  } catch (e) {
+    if (e.name !== "ConditionalCheckFailedException") throw e; // still had launches used — keep the window
   }
 }
 
