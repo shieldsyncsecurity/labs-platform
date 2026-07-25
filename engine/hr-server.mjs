@@ -24,7 +24,10 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 const PORT = Number(process.env.HR_ENGINE_PORT ?? 4002);
 const SECRET = process.env.HR_ENGINE_SECRET ?? "dev-hr-engine-secret";
-const DEV_DATA_DIR = path.join(import.meta.dirname, ".dev-data");
+// Overridable so the E2E suite can run against a throwaway directory instead of
+// the developer's working data — a test that wipes your real dev store to prove
+// a point is a test nobody runs twice.
+const DEV_DATA_DIR = process.env.HR_DEV_DATA_DIR || path.join(import.meta.dirname, ".dev-data");
 mkdirSync(DEV_DATA_DIR, { recursive: true });
 const DB = path.join(DEV_DATA_DIR, "hr-dev-store.json");
 // KYC bytes live here in dev (prod: the SSE-KMS S3 bucket). Kept OUT of git
@@ -36,7 +39,7 @@ mkdirSync(KYC_DIR, { recursive: true });
 // open and preview exactly what the recipient would receive.
 const MAIL_DIR = path.join(DEV_DATA_DIR, "mail");
 
-const EMPTY_DB = { employees: [], audit: [], documents: [], candidates: [], banking: [], seq: 7, candidateSeq: 0, refs: { "hr-2026": 14 } }; // next id after Diya (0007)
+const EMPTY_DB = { employees: [], audit: [], documents: [], candidates: [], banking: [], grants: {}, seq: 7, candidateSeq: 0, refs: { "hr-2026": 14 } }; // next id after Diya (0007)
 function load() {
   if (!existsSync(DB)) return { ...EMPTY_DB };
   try {
@@ -484,6 +487,11 @@ const server = http.createServer(async (req, res) => {
           questionnaireSentAt: cur.questionnaireSentAt,
           submittedAt: cur.submittedAt,
           answers: cur.answers,
+          // Open tracking is engine-owned too — editing a candidate's details
+          // must not silently reset the evidence of whether they opened the link.
+          firstViewedAt: cur.firstViewedAt,
+          lastViewedAt: cur.lastViewedAt,
+          viewCount: cur.viewCount,
           createdAt: cur.createdAt,
           updatedAt: new Date().toISOString(),
         };
@@ -538,6 +546,25 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { token: `${seq}.${secret}`, expiresAt: cur.tokenExpiresAt });
       }
 
+      // ---- /hr/candidates/:seq/token DELETE — kill a link already sent ----
+      // Deletes the hash rather than back-dating the expiry, so a revoked link
+      // is indistinguishable from an expired one and no token can match it.
+      // Submitted answers are deliberately untouched.
+      if (parts[3] === "token" && parts.length === 4 && req.method === "DELETE") {
+        const body = await readBody(req);
+        delete cur.tokenHash;
+        delete cur.tokenIssuedAt;
+        delete cur.tokenExpiresAt;
+        cur.updatedAt = new Date().toISOString();
+        db.candidates[idx] = cur;
+        audit(db, body.actor, "candidate.link.revoke", cur.candidateId, {
+          hadSubmitted: Boolean(cur.submittedAt),
+          sentTo: cur.questionnaireSentTo ?? null,
+        });
+        save(db);
+        return send(res, 200, { ok: true });
+      }
+
       if (parts[3] === "sent" && parts.length === 4 && req.method === "POST") {
         const body = await readBody(req);
         cur.questionnaireSentTo = body.to;
@@ -562,6 +589,18 @@ const server = http.createServer(async (req, res) => {
       if (cand.tokenExpiresAt && new Date(cand.tokenExpiresAt) < new Date()) return send(res, 410, { error: "EXPIRED" });
 
       if (req.method === "GET") {
+        // ?preview=1 = an authenticated HR user checking their own link; it must
+        // never look like the candidate arriving. Mirrors the Lambda.
+        if (url.searchParams.get("preview") === "1") {
+          audit(db, "hr-preview", "questionnaire.preview", cand.candidateId, {});
+          save(db);
+          return send(res, 200, { candidate: publicCandidate(cand) });
+        }
+        const now = new Date().toISOString();
+        cand.firstViewedAt = cand.firstViewedAt ?? now;
+        cand.lastViewedAt = now;
+        cand.viewCount = (cand.viewCount ?? 0) + 1;
+        db.candidates[idx] = cand;
         audit(db, "candidate", "questionnaire.view", cand.candidateId, {});
         save(db);
         return send(res, 200, { candidate: publicCandidate(cand) });
@@ -744,6 +783,24 @@ const server = http.createServer(async (req, res) => {
     }
 
     // /hr/audit
+    // ---- /hr/access (per-user permissions) — mirrors the Lambda ----
+    // Admins are NOT stored here; admin identity comes from HR_ADMIN_EMAILS in
+    // the app, so nothing written through this route can grant admin rights.
+    if (parts[0] === "hr" && parts[1] === "access" && parts.length === 2) {
+      if (req.method === "GET") return send(res, 200, { grants: db.grants ?? {} });
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        const email = String(body.email ?? "").trim().toLowerCase();
+        if (!email) return send(res, 400, { error: "EMAIL_REQUIRED" });
+        db.grants = { ...(db.grants ?? {}) };
+        if (body.access === null) delete db.grants[email];
+        else db.grants[email] = body.access;
+        audit(db, body.actor, "access.update", email, { access: body.access ?? null });
+        save(db);
+        return send(res, 200, { grants: db.grants });
+      }
+    }
+
     if (parts[0] === "hr" && parts[1] === "audit" && parts.length === 2) {
       if (req.method === "GET") {
         const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 500); // parity with the Lambda

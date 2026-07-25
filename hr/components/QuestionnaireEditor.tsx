@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Questionnaire, Section, Field, FieldType } from "@/lib/questionnaire";
 import type { Candidate } from "@/lib/candidate";
@@ -34,8 +34,29 @@ export function QuestionnaireEditor({ candidate, initial }: { candidate: Candida
   const [q, setQ] = useState<Questionnaire>(clone(initial));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  // Snapshot of what is actually PERSISTED. Editing here is pure local state
+  // with no autosave, so without this the page looks identical whether or not
+  // Save was ever pressed — an edited questionnaire that was never stored is
+  // indistinguishable from a stored one, and the candidate silently receives
+  // the old questions. (That happened for real: a full round of edits was lost
+  // because the tab was closed before saving, and the only evidence was the
+  // ABSENCE of a candidate.update entry in the audit log.)
+  const [savedJson, setSavedJson] = useState(() => JSON.stringify(clone(initial)));
+  const dirty = JSON.stringify(q) !== savedJson;
 
   const totalQuestions = q.sections.reduce((n, s) => n + s.fields.length, 0);
+
+  // Browser-level guard: closing the tab or hitting back with unsaved edits
+  // now prompts instead of discarding silently.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
 
   const setSection = (idx: number, patch: Partial<Section>) =>
     setQ((cur) => ({ ...cur, sections: cur.sections.map((s, i) => (i === idx ? { ...s, ...patch } : s)) }));
@@ -113,6 +134,9 @@ export function QuestionnaireEditor({ candidate, initial }: { candidate: Candida
         setBusy(false);
         return;
       }
+      // Only now is the on-screen version the stored version.
+      setSavedJson(JSON.stringify(cleaned));
+      setQ(cleaned);
       setMsg({ kind: "ok", text: "Saved — this is what she will see." });
       router.refresh();
     } catch {
@@ -150,6 +174,22 @@ export function QuestionnaireEditor({ candidate, initial }: { candidate: Candida
         <div style={{ fontSize: 12, color: "#5b6676" }}>
           {q.sections.length} sections · <b style={{ color: "#1f3a5f" }}>{totalQuestions}</b> questions
         </div>
+        {dirty ? (
+          <span
+            style={{
+              fontSize: 11.5,
+              fontWeight: 700,
+              color: "#8a5a00",
+              background: "#fdf4e3",
+              border: "1px solid #f0d9a8",
+              borderRadius: 999,
+              padding: "3px 10px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Unsaved changes — she still sees the old questions
+          </span>
+        ) : null}
         <div style={{ flex: 1 }} />
         {candidate.customQuestionnaire ? (
           <button type="button" onClick={reset} disabled={busy} style={{ ...danger, opacity: busy ? 0.5 : 1 }}>
@@ -161,9 +201,11 @@ export function QuestionnaireEditor({ candidate, initial }: { candidate: Candida
           onClick={save}
           disabled={busy}
           style={{
-            background: "#1f3a5f",
-            color: "#fff",
-            border: "none",
+            // Muted once everything on screen is stored, so "is my work saved?"
+            // is answerable at a glance rather than by memory.
+            background: dirty ? "#1f3a5f" : "#eef2f8",
+            color: dirty ? "#fff" : "#5b6676",
+            border: dirty ? "none" : "1px solid #d4dbe8",
             borderRadius: 8,
             padding: "9px 18px",
             fontSize: 13,
@@ -172,7 +214,7 @@ export function QuestionnaireEditor({ candidate, initial }: { candidate: Candida
             opacity: busy ? 0.6 : 1,
           }}
         >
-          {busy ? "Saving…" : "Save"}
+          {busy ? "Saving…" : dirty ? "Save" : "Saved ✓"}
         </button>
       </div>
 

@@ -571,6 +571,11 @@ export async function handler(event) {
           questionnaireSentAt: cur.questionnaireSentAt,
           submittedAt: cur.submittedAt,
           answers: cur.answers,
+          // Open tracking is engine-owned too — editing a candidate's details
+          // must not silently reset the evidence of whether they opened the link.
+          firstViewedAt: cur.firstViewedAt,
+          lastViewedAt: cur.lastViewedAt,
+          viewCount: cur.viewCount,
           createdAt: cur.createdAt,
           updatedAt: new Date().toISOString(),
         };
@@ -620,6 +625,27 @@ export async function handler(event) {
         return resp(200, { token: `${seq}.${secret}`, expiresAt });
       }
 
+      // ---- /hr/candidates/:seq/token DELETE — kill a link already sent ----
+      // REMOVE the hash rather than back-dating the expiry: an expired link and
+      // a revoked one must be indistinguishable to whoever holds it, and an
+      // absent hash cannot be matched by any token at all. Answers must survive,
+      // so only the link dies — not what they already told us.
+      if (parts[3] === "token" && parts.length === 4 && method === "DELETE") {
+        await ddb.send(
+          new UpdateCommand({
+            TableName: T_CAND,
+            Key: { seq },
+            UpdateExpression: "REMOVE tokenHash, tokenIssuedAt, tokenExpiresAt SET updatedAt = :u",
+            ExpressionAttributeValues: { ":u": new Date().toISOString() },
+          }),
+        );
+        await writeAudit(body.actor, "candidate.link.revoke", cur.candidateId, {
+          hadSubmitted: Boolean(cur.submittedAt),
+          sentTo: cur.questionnaireSentTo ?? null,
+        });
+        return resp(200, { ok: true });
+      }
+
       if (parts[3] === "sent" && parts.length === 4 && method === "POST") {
         const now = new Date().toISOString();
         await ddb.send(
@@ -663,6 +689,27 @@ export async function handler(event) {
       });
 
       if (method === "GET") {
+        // ?preview=1 means an authenticated HR user is checking their own link.
+        // Counting that as a candidate open is what made "has she opened it?"
+        // impossible to answer — the owner's own 4-seconds-after-sending click
+        // looked identical to the candidate arriving.
+        if (qs.preview === "1") {
+          await writeAudit("hr-preview", "questionnaire.preview", cand.candidateId, {});
+          return resp(200, { candidate: publicView(cand) });
+        }
+        // A real candidate open. First and last are kept separately: "when did
+        // she start looking" and "was she back an hour ago" answer different
+        // questions. No IP, no device — just that it happened.
+        const now = new Date().toISOString();
+        await ddb.send(
+          new UpdateCommand({
+            TableName: T_CAND,
+            Key: { seq },
+            UpdateExpression:
+              "SET firstViewedAt = if_not_exists(firstViewedAt, :n), lastViewedAt = :n, viewCount = if_not_exists(viewCount, :z) + :one",
+            ExpressionAttributeValues: { ":n": now, ":z": 0, ":one": 1 },
+          }),
+        );
         await writeAudit("candidate", "questionnaire.view", cand.candidateId, {});
         return resp(200, { candidate: publicView(cand) });
       }
@@ -860,6 +907,38 @@ export async function handler(event) {
         await ddb.send(new DeleteCommand({ TableName: T_BANK, Key: { txnId } }));
         await writeAudit(body.actor, "banking.delete", txnId, {});
         return resp(200, { ok: true });
+      }
+    }
+
+    // ---- /hr/access (per-user permissions) ----
+    //
+    // Stored as ONE item so a read is a single GetCommand on every request and
+    // a write is atomic across all users. Key seq = -1 in the employees table:
+    // negative seqs are already the reserved counter space, and the reference
+    // counters occupy -(year*10 + series) — always <= -20250 for any plausible
+    // year — so -1 can never collide with one.
+    //
+    // ADMINS ARE NOT STORED HERE. Admin identity lives in the app's
+    // HR_ADMIN_EMAILS env var, so nothing written through this route can grant
+    // or revoke administrator rights.
+    if (parts[0] === "hr" && parts[1] === "access" && parts.length === 2) {
+      const KEY = { seq: -1 };
+      if (method === "GET") {
+        const cur = (await ddb.send(new GetCommand({ TableName: T_EMP, Key: KEY }))).Item;
+        return resp(200, { grants: cur?.grants ?? {} });
+      }
+      if (method === "PUT") {
+        const email = String(body.email ?? "").trim().toLowerCase();
+        if (!email) return resp(400, { error: "EMAIL_REQUIRED" });
+        const cur = (await ddb.send(new GetCommand({ TableName: T_EMP, Key: KEY }))).Item;
+        const grants = { ...(cur?.grants ?? {}) };
+        if (body.access === null) delete grants[email];
+        else grants[email] = body.access;
+        await ddb.send(new PutCommand({ TableName: T_EMP, Item: { ...KEY, grants, updatedAt: new Date().toISOString() } }));
+        // Audited with the full resulting permission set: "who could see what,
+        // when" has to be reconstructable from the log alone.
+        await writeAudit(body.actor, "access.update", email, { access: body.access ?? null });
+        return resp(200, { grants });
       }
     }
 

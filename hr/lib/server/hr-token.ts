@@ -65,3 +65,24 @@ export function hrAllowlist(): Set<string> {
 export function isAllowed(email: string): boolean {
   return hrAllowlist().has(email.trim().toLowerCase());
 }
+
+/**
+ * Administrators, from the ENVIRONMENT — never from stored data. Lives here
+ * (rather than beside the permission guards) so the edge middleware can answer
+ * "is this the owner?" without any I/O, and so there is exactly one definition.
+ *
+ * Because admin status is deployment configuration, no sequence of clicks in
+ * the portal can revoke the owner's own access or promote anyone else.
+ */
+export function hrAdmins(): Set<string> {
+  return new Set(
+    (process.env.HR_ADMIN_EMAILS ?? "admin@shieldsyncsecurity.com")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+export function isAdminEmail(email: string | null | undefined): boolean {
+  return !!email && hrAdmins().has(email.trim().toLowerCase());
+}

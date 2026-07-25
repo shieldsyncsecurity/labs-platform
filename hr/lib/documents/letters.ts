@@ -47,18 +47,43 @@ export function buildVerificationLetter(
   const first = firstName(e.name);
   const exited = e.status === "exited" && !!e.lastWorkingDay;
   const tenure = exited ? `from ${e.dateOfJoining} to ${e.lastWorkingDay}` : `since ${e.dateOfJoining}`;
-  const verb = exited ? "was employed" : "is employed";
+
+  // An intern is NOT an employee, and the internship letter says so explicitly
+  // ("does not constitute an offer of employment"). Certifying the same person
+  // as "in the active employment of the Company" would have this letter
+  // contradict the one they already hold — and would be the document a tribunal
+  // reads as the company's own admission of an employment relationship.
+  // Consultants are engaged, not employed, for the same reason.
+  const isIntern = /intern/i.test(e.employmentType);
+  const isConsultant = /consultant/i.test(e.employmentType);
+  const engaged = isIntern || isConsultant;
+  const verb = engaged ? (exited ? "was engaged" : "is engaged") : exited ? "was employed" : "is employed";
+  const idLabel = isIntern ? "Intern ID" : "Employee ID";
 
   const paragraphs: string[] = [
-    `This is to certify that ${e.name} (Employee ID: ${e.employeeId}) ${verb} with ${COMPANY.legalName} as ${e.designation}${e.department ? ` in the ${e.department} department` : ""}, ${tenure}.`,
+    `This is to certify that ${e.name} (${idLabel}: ${e.employeeId}) ${verb} ${engaged ? "by" : "with"} ${COMPANY.legalName} as ${e.designation}${e.department ? ` in the ${e.department} department` : ""}, ${tenure}.`,
     exited
       ? `${first} was engaged on a ${e.employmentType.toLowerCase()} basis${e.baseLocation ? `, based at ${e.baseLocation}` : ""}.`
-      : `${first} is engaged on a ${e.employmentType.toLowerCase()} basis${e.baseLocation ? `, based at ${e.baseLocation}` : ""}, and as of the date of this letter continues to be in the active employment of the Company.`,
+      : `${first} is engaged on a ${e.employmentType.toLowerCase()} basis${e.baseLocation ? `, based at ${e.baseLocation}` : ""}, and as of the date of this letter ${
+          engaged
+            ? `continues to be ${isIntern ? "an intern with" : "engaged by"} the Company.`
+            : "continues to be in the active employment of the Company."
+        }`,
   ];
   if (opts.includeSalary !== false) {
-    paragraphs.push(
-      `The ${exited ? "last drawn" : "current"} annual cost to company (CTC) is INR ${fmt(e.annualCTC)} (Rupees ${rupeesToWords(Math.floor(e.annualCTC))} only) per annum.`,
-    );
+    // An intern receives a stipend, not a CTC — and if the stipend is nil,
+    // stating an annual figure of zero reads as an error rather than a fact.
+    if (isIntern) {
+      if (e.grossMonthly > 0) {
+        paragraphs.push(
+          `${first} ${exited ? "received" : "receives"} a stipend of INR ${fmt(e.grossMonthly)} (Rupees ${rupeesToWords(Math.floor(e.grossMonthly))} only) per month.`,
+        );
+      }
+    } else {
+      paragraphs.push(
+        `The ${exited ? "last drawn" : "current"} annual cost to company (CTC) is INR ${fmt(e.annualCTC)} (Rupees ${rupeesToWords(Math.floor(e.annualCTC))} only) per annum.`,
+      );
+    }
   }
   paragraphs.push(
     opts.purpose

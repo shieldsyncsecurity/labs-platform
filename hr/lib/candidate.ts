@@ -69,6 +69,17 @@ export type Candidate = {
   answers?: Answers;
 
   /**
+   * Whether the CANDIDATE has opened the link, and when. Engine-owned and set
+   * only on a genuine open: the questionnaire page flags its own request as
+   * `preview=1` when the visitor holds an HR session, so staff checking their
+   * own link never inflates these. No IP or device is recorded — only that it
+   * was opened, so this answers "has she seen it?" without tracking her.
+   */
+  firstViewedAt?: string;
+  lastViewedAt?: string;
+  viewCount?: number;
+
+  /**
    * If set, this candidate sees THIS questionnaire — a full per-candidate
    * snapshot the HR user has tailored (via /manage-candidates/[seq]/questions).
    * When undefined, the public page falls back to the default from
@@ -144,6 +155,9 @@ export function normalizeCandidate(input: CandidateInput): Omit<Candidate, "seq"
     questionnaireSentAt: input.questionnaireSentAt,
     submittedAt: input.submittedAt,
     answers: input.answers,
+    firstViewedAt: input.firstViewedAt,
+    lastViewedAt: input.lastViewedAt,
+    viewCount: input.viewCount,
     customQuestionnaire: input.customQuestionnaire,
     salaryProof: input.salaryProof,
     createdBy: input.createdBy,

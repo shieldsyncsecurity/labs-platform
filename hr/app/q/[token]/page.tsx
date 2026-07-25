@@ -1,4 +1,5 @@
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
+import { getHrSession } from "@/lib/server/hr-session";
 import { getQuestionnaire } from "@/lib/questionnaire";
 import { COMPANY } from "@/lib/company";
 import { QuestionnaireForm, AnswersView } from "@/components/QuestionnaireForm";
@@ -52,9 +53,21 @@ function Notice({ title, body }: { title: string; body: string }) {
 export default async function QuestionnairePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
 
+  // A visitor holding a valid HR session is US previewing the form, not the
+  // candidate opening it. Without this, checking your own link is indistinguishable
+  // from the candidate arriving — which is exactly the false signal that made
+  // "has she opened it yet?" unanswerable. Staff previews are logged separately
+  // and never touch the open counters.
+  const isStaffPreview = await getHrSession();
+
   let view: PublicCandidateView;
   try {
-    view = (await hrFetch<{ candidate: PublicCandidateView }>(`/hr/questionnaire/${encodeURIComponent(token)}`)).candidate;
+    view = (
+      await hrFetch<{ candidate: PublicCandidateView }>(
+        `/hr/questionnaire/${encodeURIComponent(token)}`,
+        { query: { preview: isStaffPreview ? "1" : undefined } },
+      )
+    ).candidate;
   } catch (err) {
     if (err instanceof HrEngineError && err.status === 410) {
       return <Notice title="This link has expired" body="For your security these links are time-limited. Please reply to the email we sent you and we'll send a fresh one straight away." />;

@@ -8,6 +8,40 @@ import { ghostBtn, primaryBtn, inputStyle, labelStyle } from "./fields";
 const card: React.CSSProperties = { border: "1px solid #e2e8f2", borderRadius: 10, padding: 16, marginTop: 16 };
 const title: React.CSSProperties = { fontWeight: 700, color: "#1f3a5f", fontSize: 14 };
 
+const when = (iso: string) =>
+  new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+
+/**
+ * Has the CANDIDATE opened it yet? Counts only genuine opens — the questionnaire
+ * page marks its own request as a preview whenever the visitor holds an HR
+ * session, so checking your own link no longer looks like the candidate arriving.
+ * States are deliberately distinct, because "sent but untouched" and "read twice
+ * and not answered" call for different follow-ups.
+ */
+function OpenStatus({ candidate }: { candidate: Candidate }) {
+  const opens = candidate.viewCount ?? 0;
+  const box = (bg: string, border: string, fg: string, text: React.ReactNode) => (
+    <div style={{ fontSize: 12, background: bg, border: `1px solid ${border}`, color: fg, borderRadius: 8, padding: "7px 11px", marginBottom: 12, lineHeight: 1.5 }}>
+      {text}
+    </div>
+  );
+
+  if (candidate.submittedAt) return null; // the submitted banner already says it
+  if (opens === 0) {
+    return box("#fafbfd", "#e2e8f2", "#5b6676", <>Not opened yet — she hasn&rsquo;t clicked the link. Your own previews aren&rsquo;t counted.</>);
+  }
+  return box(
+    "#eef6ff",
+    "#c3d8f0",
+    "#1f3a5f",
+    <>
+      <b>Opened{opens > 1 ? ` ${opens} times` : ""}</b> — {opens > 1 ? "last " : ""}
+      {when(candidate.lastViewedAt ?? candidate.firstViewedAt!)}
+      {opens > 1 && candidate.firstViewedAt ? <>, first {when(candidate.firstViewedAt)}</> : null}. Not submitted yet.
+    </>,
+  );
+}
+
 /** Send (or re-send) the questionnaire link, and surface the raw link for
  * copy/paste — HR often prefers WhatsApp. */
 export function SendQuestionnaire({ candidate }: { candidate: Candidate }) {
@@ -18,6 +52,38 @@ export function SendQuestionnaire({ candidate }: { candidate: Candidate }) {
   const [to, setTo] = useState(candidate.email);
 
   const alreadySent = Boolean(candidate.questionnaireSentAt);
+  // A link exists only while a hash is stored — revoking removes it, so this
+  // flips to false the moment the link is killed.
+  const linkLive = Boolean(candidate.tokenExpiresAt);
+
+  /** Kill a link that's already gone out — wrong recipient, or we've moved on.
+   * Their answers, if any, are kept; only the way in is closed. */
+  async function revoke() {
+    if (
+      !confirm(
+        `Make the questionnaire link stop working${candidate.questionnaireSentTo ? ` for ${candidate.questionnaireSentTo}` : ""}?\n\n` +
+          "Anyone who opens it will be told it is no longer valid. Anything already submitted is kept.\n\n" +
+          "You can always send a fresh link afterwards.",
+      )
+    )
+      return;
+    setBusy(true);
+    setState(null);
+    try {
+      const res = await fetch(`/api/candidates/${candidate.seq}/link`, { method: "DELETE" });
+      if (!res.ok) {
+        setState((await res.json().catch(() => ({}))).error ?? "Could not cancel the link.");
+        setBusy(false);
+        return;
+      }
+      setLink(null);
+      setState("Link cancelled — it will no longer open for anyone.");
+      router.refresh();
+    } catch {
+      setState("Could not reach the server.");
+    }
+    setBusy(false);
+  }
 
   async function go(send: boolean) {
     if (alreadySent && send && !confirm("Re-sending creates a NEW link and immediately invalidates the old one. Continue?")) return;
@@ -67,9 +133,13 @@ export function SendQuestionnaire({ candidate }: { candidate: Candidate }) {
       <div style={title}>Questionnaire link</div>
       <p style={{ fontSize: 12, color: "#5b6676", margin: "5px 0 12px", lineHeight: 1.55 }}>
         {alreadySent
-          ? `Sent to ${candidate.questionnaireSentTo} on ${new Date(candidate.questionnaireSentAt!).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })} — not submitted yet.`
+          ? `Sent to ${candidate.questionnaireSentTo} on ${new Date(candidate.questionnaireSentAt!).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })} — ${
+              linkLive ? "not submitted yet." : "the link has been cancelled and no longer works."
+            }`
           : "Emails the candidate a private, expiring link to the detailed questionnaire."}
       </p>
+
+      {alreadySent ? <OpenStatus candidate={candidate} /> : null}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div style={{ flex: 1, minWidth: 220 }}>
           <label style={labelStyle} htmlFor="qto">Send to</label>
@@ -83,6 +153,22 @@ export function SendQuestionnaire({ candidate }: { candidate: Candidate }) {
           Just give me the link
         </button>
       </div>
+
+      {linkLive ? (
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #f2f5fa", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={revoke}
+            disabled={busy}
+            style={{ background: "none", border: "1px solid #f0c2cb", color: "#c0344c", fontSize: 12, fontWeight: 700, borderRadius: 7, padding: "6px 12px", cursor: busy ? "default" : "pointer" }}
+          >
+            Cancel this link
+          </button>
+          <span style={{ fontSize: 11.5, color: "#8a94a3" }}>
+            Stops it opening for anyone — use it if it went to the wrong person, or you&rsquo;ve moved on from this candidate.
+          </span>
+        </div>
+      ) : null}
 
       {state ? <div style={{ fontSize: 12.5, color: "#1f3a5f", fontWeight: 600, marginTop: 10 }}>{state}</div> : null}
       {link ? (

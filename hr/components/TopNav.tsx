@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { can, type Access, type Area } from "@/lib/access";
 
 // Persistent top menu, grouped to match the dashboard's lifecycle sections
 // (Recruiting -> Employee records -> Payroll -> Governance) so the nav and
@@ -10,7 +11,10 @@ import { usePathname } from "next/navigation";
 // destination renders as a plain link; a group with several renders as a
 // dropdown. All dropdowns share name="topnav-menu" so opening one closes
 // any other that's open — native <details> behaviour, no JS needed.
-type NavItem = { href: string; label: string; match: (p: string) => boolean };
+// Each destination carries the permission it needs, so the menu is derived from
+// the same model the middleware enforces rather than a second hand-kept list
+// that drifts out of step with it.
+type NavItem = { href: string; label: string; match: (p: string) => boolean; area: Area; need: "read" | "write" };
 type NavGroup = { label: string; items: NavItem[]; match: (p: string) => boolean };
 
 const GROUPS: NavGroup[] = [
@@ -18,28 +22,30 @@ const GROUPS: NavGroup[] = [
     label: "Recruiting",
     match: (p) => p.startsWith("/manage-candidates") || p === "/employees/new",
     items: [
-      { href: "/manage-candidates", label: "Candidates", match: (p) => p.startsWith("/manage-candidates") },
-      { href: "/employees/new", label: "New hire", match: (p) => p === "/employees/new" },
+      { href: "/manage-candidates", label: "Candidates", match: (p) => p.startsWith("/manage-candidates"), area: "candidates", need: "read" },
+      { href: "/employees/new", label: "New hire", match: (p) => p === "/employees/new", area: "employees", need: "write" },
     ],
   },
   {
     label: "Employee records",
     match: (p) => p.startsWith("/employees") && p !== "/employees/new",
-    items: [{ href: "/employees", label: "Employee records", match: (p) => p.startsWith("/employees") && p !== "/employees/new" }],
+    items: [
+      { href: "/employees", label: "Employee records", match: (p) => p.startsWith("/employees") && p !== "/employees/new", area: "employees", need: "read" },
+    ],
   },
   {
     label: "Payroll",
     match: (p) => p.startsWith("/payslips") || p.startsWith("/banking"),
     items: [
-      { href: "/payslips", label: "Run payroll", match: (p) => p.startsWith("/payslips") && !p.startsWith("/payslips/summary") },
-      { href: "/payslips/summary", label: "FY Summary", match: (p) => p.startsWith("/payslips/summary") },
-      { href: "/banking", label: "Banking", match: (p) => p.startsWith("/banking") },
+      { href: "/payslips", label: "Run payroll", match: (p) => p.startsWith("/payslips") && !p.startsWith("/payslips/summary"), area: "payroll", need: "read" },
+      { href: "/payslips/summary", label: "FY Summary", match: (p) => p.startsWith("/payslips/summary"), area: "payroll", need: "read" },
+      { href: "/banking", label: "Banking", match: (p) => p.startsWith("/banking"), area: "banking", need: "read" },
     ],
   },
   {
     label: "Governance",
     match: (p) => p.startsWith("/audit"),
-    items: [{ href: "/audit", label: "Governance", match: (p) => p.startsWith("/audit") }],
+    items: [{ href: "/audit", label: "Governance", match: (p) => p.startsWith("/audit"), area: "audit", need: "read" }],
   },
 ];
 
@@ -112,13 +118,20 @@ function NavGroupItem({ group, pathname }: { group: NavGroup; pathname: string }
   );
 }
 
-export function TopNav({ actor }: { actor?: string | null }) {
+export function TopNav({ actor, isAdmin, access }: { actor?: string | null; isAdmin?: boolean; access?: Access }) {
   const pathname = usePathname() ?? "/";
   // Never on unauthenticated surfaces: /login, and the candidate questionnaire
   // (/q/*) which is a public token page with no portal access.
   if (pathname === "/login" || pathname.startsWith("/q/")) return null;
 
   const initial = (actor ?? "?").trim().charAt(0).toUpperCase();
+
+  // Drop anything this person can't open, then drop groups left empty.
+  const allowed = (item: NavItem) => isAdmin || (access ? can(access, item.area, item.need) : false);
+  const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter(allowed) })).filter((g) => g.items.length > 0);
+  const canAddEmployee = isAdmin || (access ? can(access, "employees", "write") : false);
+  const canAddCandidate = isAdmin || (access ? can(access, "candidates", "write") : false);
+  const showQuickAdd = canAddEmployee || canAddCandidate;
 
   return (
     <header
@@ -165,16 +178,30 @@ export function TopNav({ actor }: { actor?: string | null }) {
             scrollbarWidth: "none",
           }}
         >
-          {GROUPS.map((g) => (
+          {groups.map((g) => (
             <NavGroupItem key={g.label} group={g} pathname={pathname} />
           ))}
+          {/* Admin-only: who can do what. Sits at the end of the row, quieter
+              than the day-to-day sections — it's setup, not routine work. */}
+          {isAdmin ? (
+            <Link
+              href="/access"
+              style={{
+                ...pillBase,
+                color: pathname.startsWith("/access") ? "#1f3a5f" : "#8a94a3",
+                background: pathname.startsWith("/access") ? "#eef2f8" : "transparent",
+              }}
+            >
+              Access
+            </Link>
+          ) : null}
         </nav>
 
         {/* Quick-add menu — Employees and Candidates are equally common
             starting points now, so this is a menu rather than one hardcoded
             action. <details>/<summary> needs no click-outside JS, and
             shares name="topnav-menu" so it closes if a group dropdown opens. */}
-        <details name="topnav-menu" style={{ position: "relative", flex: "none" }}>
+        <details name="topnav-menu" style={{ position: "relative", flex: "none", display: showQuickAdd ? undefined : "none" }}>
           <summary
             style={{
               listStyle: "none",
@@ -208,18 +235,22 @@ export function TopNav({ actor }: { actor?: string | null }) {
               zIndex: 60,
             }}
           >
-            <Link
-              href="/employees/new"
-              style={{ display: "block", padding: "8px 10px", fontSize: 13, fontWeight: 600, color: "#1b2331", textDecoration: "none", borderRadius: 6 }}
-            >
-              Employee
-            </Link>
-            <Link
-              href="/manage-candidates/new"
-              style={{ display: "block", padding: "8px 10px", fontSize: 13, fontWeight: 600, color: "#1b2331", textDecoration: "none", borderRadius: 6 }}
-            >
-              Candidate
-            </Link>
+            {canAddEmployee ? (
+              <Link
+                href="/employees/new"
+                style={{ display: "block", padding: "8px 10px", fontSize: 13, fontWeight: 600, color: "#1b2331", textDecoration: "none", borderRadius: 6 }}
+              >
+                Employee
+              </Link>
+            ) : null}
+            {canAddCandidate ? (
+              <Link
+                href="/manage-candidates/new"
+                style={{ display: "block", padding: "8px 10px", fontSize: 13, fontWeight: 600, color: "#1b2331", textDecoration: "none", borderRadius: 6 }}
+              >
+                Candidate
+              </Link>
+            ) : null}
           </div>
         </details>
 

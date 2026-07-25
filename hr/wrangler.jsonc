@@ -43,6 +43,12 @@
     "COGNITO_POOL_ID": "us-east-1_54vIGJe4R",
     "COGNITO_CLIENT_ID": "7pei9flt4qnoercbb4lqb00bqf",
     "COGNITO_DOMAIN": "shieldsync-enterprise.auth.us-east-1.amazoncognito.com",
-    "HR_ALLOWLIST": "admin@shieldsyncsecurity.com,hr@shieldsyncsecurity.com"
+    "HR_ALLOWLIST": "admin@shieldsyncsecurity.com,hr@shieldsyncsecurity.com",
+    // WHO IS THE OWNER. Administrators have everything, always, and their
+    // status can NOT be changed from inside the portal — that is what makes
+    // self-lockout impossible and stops anyone granting themselves admin.
+    // Everyone else on HR_ALLOWLIST starts with NOTHING until granted at
+    // /access. Changing this list requires a deploy, on purpose.
+    "HR_ADMIN_EMAILS": "admin@shieldsyncsecurity.com"
   }
 }

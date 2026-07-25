@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { HR_COOKIE, verifyHrSession } from "@/lib/server/hr-token";
+import { HR_COOKIE, isAdminEmail, verifyHrSession } from "@/lib/server/hr-token";
+import { hrFetch } from "@/lib/server/hr-engine";
+import { requirementFor } from "@/lib/access-routes";
+import { can, normalizeAccess, type Access } from "@/lib/access";
 
 // NOTE: this file is `middleware.ts`, not Next 16's newer `proxy.ts` —
 // deliberately. `proxy.ts` is HARD-LOCKED to the Node.js runtime (Next
@@ -53,15 +56,69 @@ export async function middleware(req: NextRequest) {
 
   const token = req.cookies.get(HR_COOKIE)?.value;
   const session = token ? await verifyHrSession(token) : null;
-  if (session) return NextResponse.next();
 
+  if (!session) {
+    if (isApi) {
+      return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+    }
+    const url = req.nextUrl.clone();
+    url.pathname = "/login";
+    url.search = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
+    return NextResponse.redirect(url);
+  }
+
+  // ---- Authorisation ----------------------------------------------------
+  // Signed in is not the same as allowed. Every surface resolves to a required
+  // permission here, and anything unmapped is administrator-only, so a new page
+  // added later is denied by default rather than silently exposed.
+  const need = requirementFor(pathname, req.method);
+  if (need.kind === "public" || need.kind === "any") return NextResponse.next();
+
+  // The owner is identified by deployment config, so this costs no I/O and can
+  // never be revoked by anything stored in the data plane.
+  if (isAdminEmail(session.email)) return NextResponse.next();
+  if (need.kind === "admin") return deny(req, isApi, "admin");
+
+  const access = await grantsFor(session.email);
+  if (can(access, need.area, need.need)) return NextResponse.next();
+  return deny(req, isApi, need.area);
+}
+
+function deny(req: NextRequest, isApi: boolean, area: string) {
   if (isApi) {
-    return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+    return NextResponse.json(
+      { error: "You do not have access to this. Ask the administrator if you need it." },
+      { status: 403 },
+    );
   }
   const url = req.nextUrl.clone();
-  url.pathname = "/login";
-  url.search = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
+  url.pathname = "/no-access";
+  url.search = `?area=${encodeURIComponent(area)}`;
   return NextResponse.redirect(url);
+}
+
+// Permissions are read from the data plane rather than baked into the session
+// cookie: cookie-embedded permissions would only change at the next sign-in, up
+// to 12 hours later, and "I revoked banking" has to mean now. The short TTL
+// below keeps that honest while avoiding a round trip on every asset request —
+// a revocation lands within seconds, not hours.
+const GRANT_TTL_MS = 10_000;
+let grantCache: { at: number; grants: Record<string, unknown> } | null = null;
+
+async function grantsFor(email: string | undefined): Promise<Access> {
+  const empty = normalizeAccess(null);
+  if (!email) return empty;
+  try {
+    const now = Date.now();
+    if (!grantCache || now - grantCache.at > GRANT_TTL_MS) {
+      const { grants } = await hrFetch<{ grants?: Record<string, unknown> }>("/hr/access");
+      grantCache = { at: now, grants: grants ?? {} };
+    }
+    return normalizeAccess(grantCache.grants[email.trim().toLowerCase()]);
+  } catch {
+    // The store being unreachable must never widen access.
+    return empty;
+  }
 }
 
 export const config = {

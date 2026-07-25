@@ -226,14 +226,14 @@ It takes about 15 minutes. Your answers save as you type, so you can pause and c
           options: [
             "Yes, absolutely — I already dress professionally",
             "Yes, and I enjoy dressing well — I see it as part of the job",
-            "Yes, and I would love guidance on the dress code",
-            "Yes, with some considerations we can discuss together",
+            "Yes, but I have some religious considerations which we can discuss together",
+            "Yes, happy to be told the dress code",
           ],
         },
         {
           id: "peerPartnership",
           label:
-            "We are a small team, and we will work side by side rather than boss-and-report. You would be expected to share your opinion, disagree when you disagree, and treat this as a partnership rather than a chain of command. How does that sit with you, and is it how you have worked before?",
+            "At the moment the company is just the founder, so you would not be joining a team so much as making it a team of two. That means working side by side rather than boss-and-report: sharing your opinion, disagreeing when you disagree, and treating this as a partnership rather than a chain of command. How does that sit with you, and is it how you have worked before?",
           type: "textarea",
           rows: 4,
         },
