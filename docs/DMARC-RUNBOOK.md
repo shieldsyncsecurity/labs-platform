@@ -43,25 +43,32 @@ edit to the `_dmarc` TXT record (proxy OFF — it's a TXT record, not traffic).
 
 `p=none` changes nothing about delivery; this only starts the telemetry flowing.
 
-**Name:** `_dmarc`  **Type:** `TXT`  **Value:**
+**Name:** `_dmarc`  **Type:** `TXT`  **Proxy:** off (TXT is never proxied)
 
 ```
-v=DMARC1; p=none; rua=mailto:dmarc@shieldsyncsecurity.com; fo=1; adkim=r; aspf=r; pct=100
+v=DMARC1; p=none; rua=mailto:info@shieldsyncsecurity.com; adkim=r; aspf=r
 ```
 
-Prerequisite: create `dmarc@shieldsyncsecurity.com` (a Hostinger alias forwarding
-to `info@` is fine). Aggregate reports are daily XML, a handful per day at our
-volume — or point `rua` at a free analyser (Postmark DMARC / dmarcian) if you'd
-rather read a dashboard than raw XML.
+Reports go to `info@` deliberately: it is a live, verified mailbox, so this step
+has **no prerequisite** and starts collecting immediately. Aggregate reports are
+one daily XML per reporting provider (Google, Microsoft, Yahoo…) — a handful a
+day at our volume. If it gets noisy later, create a `dmarc@` alias forwarding to
+`info@` and change the single `mailto:`, or point it at a free analyser
+(Postmark DMARC, dmarcian) for a dashboard instead of raw XML.
 
-`fo=1` requests failure reports whenever *either* leg fails, which is what
-surfaces a misconfigured sender early. `adkim=r` / `aspf=r` are relaxed
-alignment — required, because Resend's Return-Path is a subdomain.
+Tag notes:
+- `adkim=r` / `aspf=r` — relaxed alignment. **Required**: Resend's Return-Path is
+  on the `send.` subdomain, which only aligns under relaxed.
+- No `ruf=`. Forensic reports embed message content — candidate PII under DPDP —
+  most large providers don't send them anyway, and aggregate reports already
+  answer "who is sending as us".
+- `p=none` means **no change to how any mail is treated**. This step is pure
+  telemetry, which is why it is safe to run during launch week.
 
 ### Step 2 — quarantine at 25% (only after ~1–2 weeks of clean reports, POST-launch)
 
 ```
-v=DMARC1; p=quarantine; pct=25; rua=mailto:dmarc@shieldsyncsecurity.com; fo=1; adkim=r; aspf=r
+v=DMARC1; p=quarantine; pct=25; rua=mailto:info@shieldsyncsecurity.com; adkim=r; aspf=r
 ```
 
 Watch OTP deliverability for a few days, then raise `pct=100`.
@@ -69,7 +76,7 @@ Watch OTP deliverability for a few days, then raise `pct=100`.
 ### Step 3 — reject (the end state)
 
 ```
-v=DMARC1; p=reject; rua=mailto:dmarc@shieldsyncsecurity.com; fo=1; adkim=r; aspf=r
+v=DMARC1; p=reject; rua=mailto:info@shieldsyncsecurity.com; adkim=r; aspf=r
 ```
 
 Once here, also consider tightening both SPF records from `~all` to `-all`.
