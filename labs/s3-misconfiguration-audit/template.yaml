@@ -40,18 +40,13 @@ Conditions:
   #   A -> TLS already enforced      B -> assets bucket already private
   #   C -> encryption already enforced   D -> IAM already least-privilege
   PlantAssetsPublic: !Not [!Equals [!Ref Variant, B]]
-  PlantEncGap: !Not [!Equals [!Ref Variant, C]]
-  PlantTlsGap: !Not [!Equals [!Ref Variant, A]]
   PlantIamWildcard: !Not [!Equals [!Ref Variant, D]]
   # Pre-applied controls (the inverse of a planted gap), used to inject the
-  # already-correct statement into a bucket policy.
+  # already-correct statement into a bucket policy. The matching "PlantEncGap" /
+  # "PlantTlsGap" conditions are deliberately NOT declared here — the template
+  # only ever needs the pre-applied form; the grader owns the planted-flaw table.
   EncPreset: !Equals [!Ref Variant, C]
   TlsPreset: !Equals [!Ref Variant, A]
-  # The assets bucket only needs a policy resource if it carries at least one
-  # statement. Only variant B leaves it with none (no public grant, and neither
-  # control pre-applied) — an empty PolicyDocument is invalid, so in B the
-  # resource is skipped entirely, which is exactly "already private".
-  AssetsNeedsPolicy: !Not [!Equals [!Ref Variant, B]]
 
 Resources:
 
@@ -150,21 +145,21 @@ Resources:
   AssetsBucketPublicPolicy:
     Type: AWS::S3::BucketPolicy
     DeletionPolicy: Delete
-    # Skipped entirely in variant B (no statements to write — see Conditions).
-    Condition: AssetsNeedsPolicy
+    # Skipped entirely in variant B: that variant ships the bucket already
+    # private, leaving no statement to write, and an empty PolicyDocument is
+    # invalid. In every other variant the public grant below is present, so this
+    # one condition governs both the resource and its headline statement.
+    Condition: PlantAssetsPublic
     Properties:
       Bucket: !Ref AssetsBucket
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - !If
-            - PlantAssetsPublic
-            - Sid: PublicReadGetObject             # <-- FLAW: anonymous world-read
-              Effect: Allow
-              Principal: "*"
-              Action: s3:GetObject
-              Resource: !Sub "${AssetsBucket.Arn}/*"
-            - !Ref "AWS::NoValue"
+          - Sid: PublicReadGetObject               # <-- FLAW: anonymous world-read
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${AssetsBucket.Arn}/*"
           - !If
             - EncPreset
             - Sid: DenyUnencryptedObjectUploads
