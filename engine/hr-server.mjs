@@ -36,7 +36,7 @@ mkdirSync(KYC_DIR, { recursive: true });
 // open and preview exactly what the recipient would receive.
 const MAIL_DIR = path.join(DEV_DATA_DIR, "mail");
 
-const EMPTY_DB = { employees: [], audit: [], documents: [], candidates: [], seq: 7, candidateSeq: 0, refs: { "hr-2026": 14 } }; // next id after Diya (0007)
+const EMPTY_DB = { employees: [], audit: [], documents: [], candidates: [], banking: [], seq: 7, candidateSeq: 0, refs: { "hr-2026": 14 } }; // next id after Diya (0007)
 function load() {
   if (!existsSync(DB)) return { ...EMPTY_DB };
   try {
@@ -654,6 +654,80 @@ const server = http.createServer(async (req, res) => {
       audit(db, body.actor, body.action || "candidate.email", body.target || "", { to, subject: body.subject, simulated: delivery.simulated });
       save(db);
       return send(res, 200, { ok: true, ...delivery });
+    }
+
+    // ---------------- BANKING (imported bank statement transactions) ----------------
+    if (parts[0] === "hr" && parts[1] === "banking" && parts.length === 2) {
+      if (req.method === "GET") {
+        const month = url.searchParams.get("month");
+        const list = (db.banking || []).filter((t) => !month || t.month === month);
+        list.sort((a, b) => (a.date === b.date ? b.balance - a.balance : a.date < b.date ? 1 : -1));
+        return send(res, 200, { transactions: list });
+      }
+      if (req.method === "POST") {
+        const body = await readBody(req);
+        const txns = Array.isArray(body.transactions) ? body.transactions : [];
+        if (!txns.length) return send(res, 400, { error: "NO_TRANSACTIONS" });
+        db.banking = db.banking || [];
+        const now = new Date().toISOString();
+        let created = 0;
+        let updated = 0;
+        for (const t of txns) {
+          if (!t?.txnId || !t?.date) continue;
+          const i = db.banking.findIndex((x) => x.txnId === t.txnId);
+          if (i >= 0) {
+            const prev = db.banking[i];
+            // Keep a category the user set by hand — a re-import must not undo it.
+            db.banking[i] = {
+              ...t,
+              category: prev.categorySetBy === "user" ? prev.category : t.category,
+              categorySetBy: prev.categorySetBy,
+              note: prev.note ?? t.note,
+              importedAt: prev.importedAt ?? now,
+              importedBy: prev.importedBy ?? body.actor,
+              updatedAt: now,
+            };
+            updated += 1;
+          } else {
+            db.banking.push({ ...t, importedAt: now, importedBy: body.actor, updatedAt: now });
+            created += 1;
+          }
+        }
+        audit(db, body.actor, "banking.import", body.accountNumber ?? "", { created, updated, total: txns.length });
+        save(db);
+        return send(res, 200, { ok: true, created, updated });
+      }
+    }
+
+    // /hr/banking/:txnId
+    if (parts[0] === "hr" && parts[1] === "banking" && parts.length === 3) {
+      const txnId = decodeURIComponent(parts[2]);
+      db.banking = db.banking || [];
+      const i = db.banking.findIndex((x) => x.txnId === txnId);
+      if (i < 0) return send(res, 404, { error: "NOT_FOUND" });
+
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        const cur = db.banking[i];
+        db.banking[i] = {
+          ...cur,
+          category: body.category ?? cur.category,
+          note: body.note !== undefined ? body.note : cur.note,
+          matchedEmployeeSeq: body.matchedEmployeeSeq !== undefined ? body.matchedEmployeeSeq : cur.matchedEmployeeSeq,
+          categorySetBy: body.category ? "user" : cur.categorySetBy,
+          updatedAt: new Date().toISOString(),
+        };
+        audit(db, body.actor, "banking.update", txnId, { category: db.banking[i].category });
+        save(db);
+        return send(res, 200, { transaction: db.banking[i] });
+      }
+      if (req.method === "DELETE") {
+        const body = await readBody(req);
+        db.banking.splice(i, 1);
+        audit(db, body.actor, "banking.delete", txnId, {});
+        save(db);
+        return send(res, 200, { ok: true });
+      }
     }
 
     // /hr/audit

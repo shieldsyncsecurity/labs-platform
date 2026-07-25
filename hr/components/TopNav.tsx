@@ -29,10 +29,11 @@ const GROUPS: NavGroup[] = [
   },
   {
     label: "Payroll",
-    match: (p) => p.startsWith("/payslips"),
+    match: (p) => p.startsWith("/payslips") || p.startsWith("/banking"),
     items: [
       { href: "/payslips", label: "Run payroll", match: (p) => p.startsWith("/payslips") && !p.startsWith("/payslips/summary") },
       { href: "/payslips/summary", label: "FY Summary", match: (p) => p.startsWith("/payslips/summary") },
+      { href: "/banking", label: "Banking", match: (p) => p.startsWith("/banking") },
     ],
   },
   {

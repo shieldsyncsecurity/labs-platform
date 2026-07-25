@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getHrActor } from "@/lib/server/hr-session";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
-import { normalizeEmployee, type Employee } from "@/lib/employee";
+import { normalizeEmployee, allowsZeroGross, type Employee } from "@/lib/employee";
 import type { Candidate } from "@/lib/candidate";
 
 export const dynamic = "force-dynamic";
@@ -42,9 +42,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
   if (!employee.name || !employee.designation || !employee.dateOfJoining) {
     return NextResponse.json({ error: "Name, designation and date of joining are required." }, { status: 400 });
   }
-  const isInternship = /internship/i.test(employee.employmentType);
-  if (employee.grossMonthly <= 0 && !isInternship) {
-    return NextResponse.json({ error: "Gross monthly salary must be greater than zero (0 is allowed only for internships)." }, { status: 400 });
+  if (employee.grossMonthly <= 0 && !allowsZeroGross(employee.employmentType)) {
+    return NextResponse.json(
+      { error: "Gross monthly salary must be greater than zero (0 is allowed only for internships and consultants, who have no fixed monthly salary)." },
+      { status: 400 },
+    );
   }
 
   let created: Employee;
@@ -82,5 +84,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
     /* best-effort */
   }
 
+  // The client uses this to send an intern to the internship-offer letter
+  // rather than the standard appointment letter.
+  const isInternship = /internship/i.test(created.employmentType ?? "");
   return NextResponse.json({ ok: true, seq: created.seq, employeeId: created.employeeId, isInternship });
 }

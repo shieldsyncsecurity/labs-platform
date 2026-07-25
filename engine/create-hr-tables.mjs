@@ -5,6 +5,7 @@
 //   ShieldSyncHrDocuments   pk=employeeSeq (N), sk=docId   KYC/document metadata (bytes in S3)
 //   ShieldSyncHrAudit       pk=auditId (S)                 durable action log
 //   ShieldSyncHrCandidates  pk=seq (N)                     hiring records; item seq=0 is the id counter
+//   ShieldSyncHrBanking     pk=txnId (S)                   imported bank transactions (deterministic id = idempotent re-import)
 //
 // All PAY_PER_REQUEST, PITR ON (re-asserted every run), no TTL (HR records are
 // permanent employment records). The employee counter is seeded to 7 so the
@@ -75,6 +76,15 @@ const SPECS = [
     TableName: "ShieldSyncHrCandidates",
     AttributeDefinitions: [{ AttributeName: "seq", AttributeType: "N" }],
     KeySchema: [{ AttributeName: "seq", KeyType: "HASH" }],
+  },
+  {
+    // Imported bank transactions. pk is a DETERMINISTIC hash of the row
+    // (account + date + particulars + amounts + balance), so re-importing an
+    // overlapping statement period updates rows in place instead of
+    // double-counting the money.
+    TableName: "ShieldSyncHrBanking",
+    AttributeDefinitions: [{ AttributeName: "txnId", AttributeType: "S" }],
+    KeySchema: [{ AttributeName: "txnId", KeyType: "HASH" }],
   },
 ];
 

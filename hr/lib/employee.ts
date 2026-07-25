@@ -111,6 +111,16 @@ export const EMPLOYMENT_TYPE_OPTIONS = [
   "Internship",
   "Consultant",
 ];
+
+/**
+ * Roles with no fixed monthly salary, where a gross of 0 is legitimate rather
+ * than a data-entry mistake: unpaid internships, and consultants paid per
+ * engagement / occasionally rather than on a monthly cycle. Everyone else must
+ * have a positive gross.
+ */
+export function allowsZeroGross(employmentType: string): boolean {
+  return /internship|consultant/i.test(employmentType ?? "");
+}
 export const BASE_LOCATION_OPTIONS = [
   "Noida, Uttar Pradesh, India (Remote-first)",
   "Noida, Uttar Pradesh, India",

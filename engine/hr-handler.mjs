@@ -42,6 +42,8 @@ const T_AUDIT = "ShieldSyncHrAudit";
 // Hiring records live in their OWN table: a candidate is not staff, and under
 // the DPDP Act their data has a different stated purpose and a shorter life.
 const T_CAND = "ShieldSyncHrCandidates";
+// Imported bank transactions (pk = deterministic row hash, so re-import is idempotent).
+const T_BANK = "ShieldSyncHrBanking";
 const BUCKET = process.env.HR_KYC_BUCKET ?? `shieldsync-hr-kyc-${ACCOUNT}`;
 // Dedicated CMK for KYC (alias created by create-hr-kyc-infra.mjs).
 const KMS_KEY = process.env.HR_KMS_KEY_ID ?? "alias/shieldsync-hr-kyc";
@@ -762,6 +764,91 @@ export async function handler(event) {
       if (!r.ok) return resp(502, { error: "SEND_FAILED", status: r.status });
       await writeAudit(body.actor, body.action || "candidate.email", body.target || "", { to, subject: body.subject });
       return resp(200, { ok: true, simulated: false });
+    }
+
+    // ---------------- BANKING (imported bank statement transactions) ----------------
+    if (parts[0] === "hr" && parts[1] === "banking" && parts.length === 2) {
+      if (method === "GET") {
+        const items = [];
+        let startKey;
+        do {
+          const out = await ddb.send(new ScanCommand({ TableName: T_BANK, ExclusiveStartKey: startKey }));
+          items.push(...(out.Items ?? []));
+          startKey = out.LastEvaluatedKey;
+        } while (startKey);
+        const month = qs.month;
+        const filtered = month ? items.filter((t) => t.month === month) : items;
+        // Newest first, and stable within a day via the running balance.
+        filtered.sort((a, b) => (a.date === b.date ? b.balance - a.balance : a.date < b.date ? 1 : -1));
+        return resp(200, { transactions: filtered });
+      }
+
+      // Bulk import. The txnId is a deterministic hash of the statement row, so
+      // re-importing an overlapping period overwrites rather than duplicates —
+      // double-counted money would be far worse than a rejected import.
+      if (method === "POST") {
+        const txns = Array.isArray(body.transactions) ? body.transactions : [];
+        if (!txns.length) return resp(400, { error: "NO_TRANSACTIONS" });
+        if (txns.length > 2000) return resp(400, { error: "TOO_MANY" });
+
+        const now = new Date().toISOString();
+        let created = 0;
+        let updated = 0;
+        for (const t of txns) {
+          if (!t?.txnId || !t?.date) continue;
+          const existing = (await ddb.send(new GetCommand({ TableName: T_BANK, Key: { txnId: t.txnId } }))).Item;
+          if (existing) {
+            // Preserve any manual classification the user has already applied.
+            await ddb.send(
+              new PutCommand({
+                TableName: T_BANK,
+                Item: {
+                  ...t,
+                  category: existing.categorySetBy === "user" ? existing.category : t.category,
+                  categorySetBy: existing.categorySetBy,
+                  note: existing.note ?? t.note,
+                  importedAt: existing.importedAt ?? now,
+                  importedBy: existing.importedBy ?? body.actor,
+                  updatedAt: now,
+                },
+              }),
+            );
+            updated += 1;
+          } else {
+            await ddb.send(new PutCommand({ TableName: T_BANK, Item: { ...t, importedAt: now, importedBy: body.actor, updatedAt: now } }));
+            created += 1;
+          }
+        }
+        await writeAudit(body.actor, "banking.import", body.accountNumber ?? "", { created, updated, total: txns.length });
+        return resp(200, { ok: true, created, updated });
+      }
+    }
+
+    // ---- /hr/banking/:txnId — reclassify or annotate a single transaction ----
+    if (parts[0] === "hr" && parts[1] === "banking" && parts.length === 3) {
+      const txnId = decodeURIComponent(parts[2]);
+      const cur = (await ddb.send(new GetCommand({ TableName: T_BANK, Key: { txnId } }))).Item;
+      if (!cur) return resp(404, { error: "NOT_FOUND" });
+
+      if (method === "PUT") {
+        const item = {
+          ...cur,
+          category: body.category ?? cur.category,
+          note: body.note !== undefined ? body.note : cur.note,
+          matchedEmployeeSeq: body.matchedEmployeeSeq !== undefined ? body.matchedEmployeeSeq : cur.matchedEmployeeSeq,
+          // Marks this row as human-classified so a re-import won't revert it.
+          categorySetBy: body.category ? "user" : cur.categorySetBy,
+          updatedAt: new Date().toISOString(),
+        };
+        await ddb.send(new PutCommand({ TableName: T_BANK, Item: item }));
+        await writeAudit(body.actor, "banking.update", txnId, { category: item.category });
+        return resp(200, { transaction: item });
+      }
+      if (method === "DELETE") {
+        await ddb.send(new DeleteCommand({ TableName: T_BANK, Key: { txnId } }));
+        await writeAudit(body.actor, "banking.delete", txnId, {});
+        return resp(200, { ok: true });
+      }
     }
 
     // ---- /hr/audit ----

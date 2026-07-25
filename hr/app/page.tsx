@@ -79,6 +79,10 @@ export default function Home() {
             <div style={h}>Run this month&rsquo;s payroll</div>
             <div style={p}>Generate each active employee&rsquo;s salary slip — ✓ shows who&rsquo;s already done.</div>
           </Link>
+          <Link href="/banking" style={card}>
+            <div style={h}>Track money in &amp; out</div>
+            <div style={p}>Import the bank statement — see where money came from and went, and whether payroll actually left the account.</div>
+          </Link>
           <Link href="/payslips/summary" style={card}>
             <div style={h}>Prepare FY / tax numbers</div>
             <div style={p}>April–March salary + TDS summary per employee, from issued slips (Form 16 input).</div>

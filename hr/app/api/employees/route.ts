@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getHrActor } from "@/lib/server/hr-session";
 import { hrFetch } from "@/lib/server/hr-engine";
-import { normalizeEmployee } from "@/lib/employee";
+import { normalizeEmployee, allowsZeroGross } from "@/lib/employee";
 
 export const dynamic = "force-dynamic";
 
@@ -39,9 +39,11 @@ export async function POST(req: Request) {
   }
   // Unpaid internships are legitimate (the internship offer explicitly renders
   // "no stipend payable" at 0) — only paid roles require a positive gross.
-  const isInternship = /internship/i.test(employee.employmentType);
-  if (employee.grossMonthly <= 0 && !isInternship) {
-    return NextResponse.json({ error: "Gross monthly salary must be greater than zero (0 is allowed only for internships)." }, { status: 400 });
+  if (employee.grossMonthly <= 0 && !allowsZeroGross(employee.employmentType)) {
+    return NextResponse.json(
+      { error: "Gross monthly salary must be greater than zero (0 is allowed only for internships and consultants, who have no fixed monthly salary)." },
+      { status: 400 },
+    );
   }
 
   try {
