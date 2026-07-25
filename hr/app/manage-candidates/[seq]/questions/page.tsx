@@ -24,7 +24,7 @@ export default async function EditQuestions({ params }: { params: Promise<{ seq:
 
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", padding: "36px 24px", fontFamily: "Arial, Helvetica, 'Segoe UI', sans-serif" }}>
-      <Link href={`/candidates/${seq}`} style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; {c.name}</Link>
+      <Link href={`/manage-candidates/${seq}`} style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; {c.name}</Link>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 6, gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 800, color: "#1f3a5f" }}>Edit questions for {c.name}</h1>

@@ -45,7 +45,7 @@ export default async function CandidatesPage() {
         return (
           <tr key={c.seq} style={{ borderTop: "1px solid #eef2f7" }}>
             <td style={{ padding: "10px" }}>
-              <Link href={`/candidates/${c.seq}`} style={{ color: "#1f3a5f", fontWeight: 700, textDecoration: "none" }}>{c.name}</Link>
+              <Link href={`/manage-candidates/${c.seq}`} style={{ color: "#1f3a5f", fontWeight: 700, textDecoration: "none" }}>{c.name}</Link>
               <div style={{ fontSize: 11.5, color: "#8a94a3", fontFamily: "monospace" }}>{c.candidateId}</div>
             </td>
             <td style={{ padding: "10px", color: "#5b6676" }}>{c.roleAppliedFor}</td>
@@ -97,7 +97,7 @@ export default async function CandidatesPage() {
           </p>
         </div>
         <Link
-          href="/candidates/new"
+          href="/manage-candidates/new"
           style={{ background: "#1f3a5f", color: "#fff", fontSize: 13, fontWeight: 700, borderRadius: 8, padding: "10px 16px", textDecoration: "none", whiteSpace: "nowrap" }}
         >
           + Add candidate
@@ -112,7 +112,7 @@ export default async function CandidatesPage() {
           <p style={{ fontSize: 12.5, color: "#8a94a3", marginTop: 5 }}>
             Add someone you&rsquo;ve interviewed, then email them the questionnaire link to capture their details.
           </p>
-          <Link href="/candidates/new" style={{ display: "inline-block", marginTop: 14, color: "#2f4fb0", fontSize: 13, fontWeight: 700 }}>
+          <Link href="/manage-candidates/new" style={{ display: "inline-block", marginTop: 14, color: "#2f4fb0", fontSize: 13, fontWeight: 700 }}>
             Add your first candidate &rarr;
           </Link>
         </div>

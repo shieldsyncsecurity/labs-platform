@@ -3,8 +3,9 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   ShieldSync Lab - s3-misconfiguration-audit (Beginner, FREE).
   Deploys a deliberately MISCONFIGURED mini-environment for the learner to audit
-  and fix: one S3 bucket public via a BUCKET POLICY, one public via an ACL, neither
-  enforcing encryption or TLS, plus an over-privileged IAM user (s3:* on *).
+  and fix: two S3 buckets public via BUCKET POLICY, neither enforcing encryption
+  or TLS, plus an over-privileged IAM user (s3:* on *). The Variant parameter
+  selects which subset of those flaws is planted (base = all).
   Region-agnostic (us-east-1 default). No compute beyond a tiny seeding Lambda.
   Per-lab contract: every taggable resource carries ShieldSyncLab=<slug>;
   DeletionPolicy: Delete on everything; outputs feed the Session Engine.
@@ -14,6 +15,43 @@ Parameters:
     Type: String
     Default: s3-misconfiguration-audit
     Description: Tag value stamped on every resource so aws-nuke can target the lab.
+
+  # PER-SESSION VARIANCE. Each variant plants a DIFFERENT subset of flaws, so a
+  # candidate who is handed "the answer" ("do these five things") cannot apply it
+  # blindly — one of the five is already correct in their environment, and a
+  # different one is broken. Resource NAMES are identical across variants (the
+  # written instructions reference them), so only the WORK differs.
+  #
+  # 'base' plants every flaw = the original, live-tested scenario. It is the
+  # DEFAULT, so an engine that passes no Variant behaves exactly as before.
+  # The grader reads this parameter back off the deployed stack and scores ONLY
+  # the flaws that were actually planted (see engine/graders.mjs gradeS3).
+  Variant:
+    Type: String
+    Default: base
+    AllowedValues: [base, A, B, C, D]
+    Description: >-
+      Which flaw subset to plant. base=all; A=TLS already enforced;
+      B=assets bucket already private; C=encryption already enforced;
+      D=IAM already least-privilege.
+
+Conditions:
+  # A flaw is PLANTED unless this variant pre-fixes it.
+  #   A -> TLS already enforced      B -> assets bucket already private
+  #   C -> encryption already enforced   D -> IAM already least-privilege
+  PlantAssetsPublic: !Not [!Equals [!Ref Variant, B]]
+  PlantEncGap: !Not [!Equals [!Ref Variant, C]]
+  PlantTlsGap: !Not [!Equals [!Ref Variant, A]]
+  PlantIamWildcard: !Not [!Equals [!Ref Variant, D]]
+  # Pre-applied controls (the inverse of a planted gap), used to inject the
+  # already-correct statement into a bucket policy.
+  EncPreset: !Equals [!Ref Variant, C]
+  TlsPreset: !Equals [!Ref Variant, A]
+  # The assets bucket only needs a policy resource if it carries at least one
+  # statement. Only variant B leaves it with none (no public grant, and neither
+  # control pre-applied) — an empty PolicyDocument is invalid, so in B the
+  # resource is skipped entirely, which is exactly "already private".
+  AssetsNeedsPolicy: !Not [!Equals [!Ref Variant, B]]
 
 Resources:
 
@@ -47,11 +85,41 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
+          # The headline flaw is planted in EVERY variant — the data bucket is
+          # always world-readable, so the lab always has its core objective.
           - Sid: PublicReadGetObject               # <-- FLAW: anonymous world-read. Learner must remove.
             Effect: Allow
             Principal: "*"
             Action: s3:GetObject
             Resource: !Sub "${DataBucket.Arn}/*"
+          # Variant C ships encryption ALREADY enforced — the candidate must not
+          # be credited for work the environment did for them, so the grader skips
+          # this criterion for C (it reads the variant back off the stack).
+          - !If
+            - EncPreset
+            - Sid: DenyUnencryptedObjectUploads
+              Effect: Deny
+              Principal: "*"
+              Action: s3:PutObject
+              Resource: !Sub "${DataBucket.Arn}/*"
+              Condition:
+                "Null":
+                  "s3:x-amz-server-side-encryption": "true"
+            - !Ref "AWS::NoValue"
+          # Variant A ships TLS ALREADY enforced (same reasoning).
+          - !If
+            - TlsPreset
+            - Sid: DenyInsecureTransport
+              Effect: Deny
+              Principal: "*"
+              Action: s3:*
+              Resource:
+                - !GetAtt DataBucket.Arn
+                - !Sub "${DataBucket.Arn}/*"
+              Condition:
+                Bool:
+                  "aws:SecureTransport": "false"
+            - !Ref "AWS::NoValue"
 
   # ---------------------------------------------------------------------------
   # 2) AssetsBucket - PUBLIC via a second BUCKET POLICY. (Was ACL-based, but
@@ -67,11 +135,14 @@ Resources:
       OwnershipControls:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
+      # Variant B ships this bucket ALREADY locked down (Block Public Access on),
+      # so the candidate's job is the data bucket only. Every other variant leaves
+      # BPA fully off, which is what makes the public policy below effective.
       PublicAccessBlockConfiguration:
-        BlockPublicAcls: false
-        BlockPublicPolicy: false
-        IgnorePublicAcls: false
-        RestrictPublicBuckets: false
+        BlockPublicAcls: !If [PlantAssetsPublic, false, true]
+        BlockPublicPolicy: !If [PlantAssetsPublic, false, true]
+        IgnorePublicAcls: !If [PlantAssetsPublic, false, true]
+        RestrictPublicBuckets: !If [PlantAssetsPublic, false, true]
       Tags:
         - Key: ShieldSyncLab
           Value: !Ref LabSlug
@@ -79,16 +150,45 @@ Resources:
   AssetsBucketPublicPolicy:
     Type: AWS::S3::BucketPolicy
     DeletionPolicy: Delete
+    # Skipped entirely in variant B (no statements to write — see Conditions).
+    Condition: AssetsNeedsPolicy
     Properties:
       Bucket: !Ref AssetsBucket
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: PublicReadGetObject               # <-- FLAW: anonymous world-read
-            Effect: Allow
-            Principal: "*"
-            Action: s3:GetObject
-            Resource: !Sub "${AssetsBucket.Arn}/*"
+          - !If
+            - PlantAssetsPublic
+            - Sid: PublicReadGetObject             # <-- FLAW: anonymous world-read
+              Effect: Allow
+              Principal: "*"
+              Action: s3:GetObject
+              Resource: !Sub "${AssetsBucket.Arn}/*"
+            - !Ref "AWS::NoValue"
+          - !If
+            - EncPreset
+            - Sid: DenyUnencryptedObjectUploads
+              Effect: Deny
+              Principal: "*"
+              Action: s3:PutObject
+              Resource: !Sub "${AssetsBucket.Arn}/*"
+              Condition:
+                "Null":
+                  "s3:x-amz-server-side-encryption": "true"
+            - !Ref "AWS::NoValue"
+          - !If
+            - TlsPreset
+            - Sid: DenyInsecureTransport
+              Effect: Deny
+              Principal: "*"
+              Action: s3:*
+              Resource:
+                - !GetAtt AssetsBucket.Arn
+                - !Sub "${AssetsBucket.Arn}/*"
+              Condition:
+                Bool:
+                  "aws:SecureTransport": "false"
+            - !Ref "AWS::NoValue"
 
   # ---------------------------------------------------------------------------
   # 3) Seeder - Lambda-backed custom resource. On CREATE it drops a few
@@ -197,9 +297,13 @@ Resources:
   SeedData:
     Type: AWS::CloudFormation::CustomResource
     DeletionPolicy: Delete
+    # NOTE: only the DATA bucket policy is listed. AssetsBucketPublicPolicy is
+    # conditional (absent in variant B) and CloudFormation has no conditional
+    # DependsOn — naming an uncreated resource fails the stack. Seeding writes via
+    # the seeder's IAM role, not anonymously, so it never needed the public policy
+    # to be in place first; ordering against the data policy is enough.
     DependsOn:
       - DataBucketPublicPolicy
-      - AssetsBucketPublicPolicy
     Properties:
       ServiceToken: !GetAtt SeederFunction.Arn
       Buckets:
@@ -218,18 +322,40 @@ Resources:
       UserName: auditor
       Path: /lab/
       Policies:
-        - PolicyName: s3-full-access-everywhere     # <-- FLAW: s3:* on Resource "*"
+        # Variant D ships this identity ALREADY scoped to least privilege, so the
+        # candidate's IAM work is off the table for them — and the grader skips the
+        # least-privilege criterion rather than handing out a free pass.
+        - PolicyName: !If [PlantIamWildcard, s3-full-access-everywhere, s3-scoped-read]
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Effect: Allow
-                Action: s3:*
-                Resource: "*"
+              - !If
+                - PlantIamWildcard
+                # <-- FLAW: s3:* on Resource "*"
+                - Effect: Allow
+                  Action: s3:*
+                  Resource: "*"
+                # Already least-privilege: read-only, scoped to the lab buckets.
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                    - s3:ListBucket
+                  Resource:
+                    - !GetAtt DataBucket.Arn
+                    - !Sub "${DataBucket.Arn}/*"
+                    - !GetAtt AssetsBucket.Arn
+                    - !Sub "${AssetsBucket.Arn}/*"
       Tags:
         - Key: ShieldSyncLab
           Value: !Ref LabSlug
 
 Outputs:
+  LabVariant:
+    Description: >-
+      Which flaw subset was planted in this session. The grader reads this back
+      off the stack and scores ONLY the planted flaws, so a variant that ships a
+      control already-correct never becomes a free pass.
+    Value: !Ref Variant
   DataBucketName:
     Description: Bucket made public via a BUCKET POLICY.
     Value: !Ref DataBucket

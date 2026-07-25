@@ -216,18 +216,18 @@ export function EmployeeWizard() {
         <form key={step} ref={formRef} onSubmit={onNext} style={{ border: "1px solid #e2e8f2", borderRadius: 10, padding: 16, marginTop: 10 }}>
           {step === 0 ? (
             <div style={gridStyle}>
-              <Field name="name" label="Full name" required placeholder="Diya Jain" defaultValue={data.name} />
-              <Field name="personalEmail" label="Personal email (for sending documents)" type="email" placeholder="name@example.com" defaultValue={data.personalEmail} />
-              <Field name="phone" label="Phone" placeholder="+91 …" defaultValue={data.phone} />
-              <Field name="pan" label="PAN" placeholder="CSRPJ6260N" defaultValue={data.pan} />
-              <Field name="address" label="Address (appears on the offer letter)" full placeholder="Flat, street, city, state, PIN" defaultValue={data.address} />
+              <Field name="name" label="Full name" required placeholder="e.g. Aarav Sample" defaultValue={data.name} />
+              <Field name="personalEmail" label="Personal email (for sending documents)" type="email" placeholder="e.g. aarav.sample@gmail.com" defaultValue={data.personalEmail} />
+              <Field name="phone" label="Phone" placeholder="e.g. +91 98765 43210" defaultValue={data.phone} />
+              <Field name="pan" label="PAN" placeholder="e.g. ABCDE1234F" defaultValue={data.pan} />
+              <Field name="address" label="Address (appears on the offer letter)" full placeholder="e.g. 12, Sample Residency, Sector 62, Noida, Uttar Pradesh 201309" defaultValue={data.address} />
             </div>
           ) : null}
 
           {step === 1 ? (
             <div style={gridStyle}>
-              <SelectOrCustom name="designation" label="Designation" required options={DESIGNATION_OPTIONS} defaultValue={data.designation ?? ""} placeholder="e.g. Threat Intelligence Analyst" />
-              <SelectOrCustom name="department" label="Department" options={DEPARTMENT_OPTIONS} defaultValue={data.department ?? ""} placeholder="e.g. Research" />
+              <SelectOrCustom name="designation" label="Designation" required options={DESIGNATION_OPTIONS} defaultValue={data.designation ?? ""} placeholder="e.g. Security Analyst" />
+              <SelectOrCustom name="department" label="Department" options={DEPARTMENT_OPTIONS} defaultValue={data.department ?? ""} placeholder="e.g. Security Operations" />
               <SelectOrCustom name="employmentType" label="Employment type" options={EMPLOYMENT_TYPE_OPTIONS} defaultValue={data.employmentType || DEFAULT_EMPLOYMENT_TYPE} />
               <DateField name="dateOfJoining" label="Date of joining" required defaultValue={data.dateOfJoining} />
               <Field name="probationMonths" label="Probation months (full-time; blank = 3)" placeholder="3" defaultValue={data.probationMonths} />
@@ -245,12 +245,12 @@ export function EmployeeWizard() {
 
           {step === 3 ? (
             <div style={gridStyle}>
-              <Field name="bankAccount" label="Bank account no." placeholder="10254647001" defaultValue={data.bankAccount} />
-              <Field name="ifsc" label="IFSC" placeholder="IDFB0021416" defaultValue={data.ifsc} />
-              <Field name="bankBranch" label="Bank & branch" placeholder="IDFC First Bank, Indirapuram" defaultValue={data.bankBranch} />
+              <Field name="bankAccount" label="Bank account no." placeholder="e.g. 00001234567" defaultValue={data.bankAccount} />
+              <Field name="ifsc" label="IFSC" placeholder="e.g. SMPL0000123" defaultValue={data.ifsc} />
+              <Field name="bankBranch" label="Bank & branch" placeholder="e.g. Sample Bank, Sector 62 Noida" defaultValue={data.bankBranch} />
               <SelectOrCustom name="paymentMode" label="Payment mode" options={PAYMENT_MODE_OPTIONS} defaultValue={data.paymentMode || DEFAULT_PAYMENT_MODE} />
-              <Field name="uanPf" label="UAN / PF no. (blank = Not Applicable)" placeholder="Not Applicable" defaultValue={data.uanPf} />
-              <Field name="esic" label="ESIC no. (if registered)" placeholder="—" defaultValue={data.esic} />
+              <Field name="uanPf" label="UAN / PF no. (blank = Not Applicable)" placeholder="e.g. 100123456789" defaultValue={data.uanPf} />
+              <Field name="esic" label="ESIC no. (if registered)" placeholder="e.g. 1234567890 (blank if not registered)" defaultValue={data.esic} />
             </div>
           ) : null}
 

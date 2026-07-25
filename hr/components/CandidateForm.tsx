@@ -112,7 +112,7 @@ export function CandidateForm({ candidate }: { candidate?: Candidate }) {
         setBusy(false);
         return;
       }
-      router.push(`/candidates/${data.candidate?.seq ?? candidate!.seq}`);
+      router.push(`/manage-candidates/${data.candidate?.seq ?? candidate!.seq}`);
       router.refresh();
     } catch {
       setError("Could not reach the server — check the connection and try again.");

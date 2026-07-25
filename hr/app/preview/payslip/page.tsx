@@ -4,21 +4,25 @@ import { PrintButton } from "@/components/PrintButton";
 
 export const metadata = { title: "Payslip preview", robots: { index: false, follow: false } };
 
-// Dev/verify page: renders the March 2026 payslip (owner's finalized Diya data)
-// through the real component + module, so the app output matches the signed slip.
-// The live generator (task #4) will feed real employee data into the same doc.
+// Dev/verify page: renders a payslip through the real component + module so the
+// slip format can be eyeballed without opening a real employee record.
+//
+// SAMPLE DATA ONLY — deliberately fictional. This page is reachable from the
+// dashboard, so a real employee's PAN, bank account and IFSC here would expose
+// exactly the sensitive personal data this portal exists to protect. Keep every
+// identifier below fake.
 export default function PayslipPreview() {
   const payslip = buildPayslip({
     employee: {
-      name: "Diya Jain",
-      employeeId: "SSS/EMP/0007",
+      name: "Aarav Sample",
+      employeeId: "SSS/EMP/SAMPLE",
       designation: "GRC Analyst",
       department: "Governance, Risk & Compliance (GRC)",
       dateOfJoining: "02 March 2026",
-      pan: "CSRPJ6260N",
-      bankAccount: "10254647001",
-      bankBranch: "IDFC First Bank, Indirapuram",
-      ifsc: "IDFB0021416",
+      pan: "ABCDE1234F",
+      bankAccount: "XXXXXXXX0000",
+      bankBranch: "Sample Bank, Sector 62 Noida",
+      ifsc: "SMPL0000000",
       paymentMode: "Bank Transfer",
       uanPf: "Not Applicable",
     },

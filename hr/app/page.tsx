@@ -45,7 +45,7 @@ export default function Home() {
       <section style={{ marginTop: 26 }}>
         <div style={sectionLabel}><span style={dot("#2f4fb0")} />Recruiting</div>
         <div style={grid}>
-          <Link href="/candidates" style={card}>
+          <Link href="/manage-candidates" style={card}>
             <div style={h}>Add or manage candidates</div>
             <div style={p}>Add someone you&rsquo;ve interviewed and send the questionnaire, or follow up with anyone already in your pipeline — then hire in one click.</div>
           </Link>

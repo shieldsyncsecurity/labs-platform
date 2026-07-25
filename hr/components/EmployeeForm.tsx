@@ -118,19 +118,19 @@ export function EmployeeForm({ seq, initial }: { seq?: string; initial?: Partial
       <div style={group}>
         <div style={groupTitle}>Personal</div>
         <div style={grid}>
-          <Field name="name" label="Full name" required placeholder="Diya Jain" defaultValue={dv.name} />
-          <Field name="pan" label="PAN" placeholder="CSRPJ6260N" defaultValue={dv.pan} />
-          <Field name="address" label="Address" full placeholder="Flat, street, city, state, PIN" defaultValue={dv.address} />
-          <Field name="personalEmail" label="Personal email" placeholder="name@example.com" defaultValue={dv.personalEmail} />
-          <Field name="phone" label="Phone" placeholder="+91 …" defaultValue={dv.phone} />
+          <Field name="name" label="Full name" required placeholder="e.g. Aarav Sample" defaultValue={dv.name} />
+          <Field name="pan" label="PAN" placeholder="e.g. ABCDE1234F" defaultValue={dv.pan} />
+          <Field name="address" label="Address" full placeholder="e.g. 12, Sample Residency, Sector 62, Noida, Uttar Pradesh 201309" defaultValue={dv.address} />
+          <Field name="personalEmail" label="Personal email" placeholder="e.g. aarav.sample@gmail.com" defaultValue={dv.personalEmail} />
+          <Field name="phone" label="Phone" placeholder="e.g. +91 98765 43210" defaultValue={dv.phone} />
         </div>
       </div>
 
       <div style={group}>
         <div style={groupTitle}>Role</div>
         <div style={grid}>
-          <SelectOrCustom name="designation" label="Designation" required options={DESIGNATION_OPTIONS} defaultValue={dv.designation} placeholder="e.g. Threat Intelligence Analyst" />
-          <SelectOrCustom name="department" label="Department" options={DEPARTMENT_OPTIONS} defaultValue={dv.department} placeholder="e.g. Research" />
+          <SelectOrCustom name="designation" label="Designation" required options={DESIGNATION_OPTIONS} defaultValue={dv.designation} placeholder="e.g. Security Analyst" />
+          <SelectOrCustom name="department" label="Department" options={DEPARTMENT_OPTIONS} defaultValue={dv.department} placeholder="e.g. Security Operations" />
           <DateField name="dateOfJoining" label="Date of joining" required defaultValue={dv.dateOfJoining} />
           <SelectOrCustom name="employmentType" label="Employment type" options={EMPLOYMENT_TYPE_OPTIONS} defaultValue={dv.employmentType || DEFAULT_EMPLOYMENT_TYPE} />
           <Field name="probationMonths" label="Probation (months) — full-time roles" placeholder="3" defaultValue={d.probationMonths ? String(d.probationMonths) : ""} />
@@ -158,9 +158,9 @@ export function EmployeeForm({ seq, initial }: { seq?: string; initial?: Partial
       <div style={group}>
         <div style={groupTitle}>Bank</div>
         <div style={grid}>
-          <Field name="bankAccount" label="Account no." placeholder="10254647001" defaultValue={dv.bankAccount} />
-          <Field name="ifsc" label="IFSC" placeholder="IDFB0021416" defaultValue={dv.ifsc} />
-          <Field name="bankBranch" label="Bank & branch" placeholder="IDFC First Bank, Indirapuram" defaultValue={dv.bankBranch} />
+          <Field name="bankAccount" label="Account no." placeholder="e.g. 00001234567" defaultValue={dv.bankAccount} />
+          <Field name="ifsc" label="IFSC" placeholder="e.g. SMPL0000123" defaultValue={dv.ifsc} />
+          <Field name="bankBranch" label="Bank & branch" placeholder="e.g. Sample Bank, Sector 62 Noida" defaultValue={dv.bankBranch} />
           <SelectOrCustom name="paymentMode" label="Payment mode" options={PAYMENT_MODE_OPTIONS} defaultValue={dv.paymentMode || DEFAULT_PAYMENT_MODE} />
         </div>
       </div>

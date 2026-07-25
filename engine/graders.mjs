@@ -34,6 +34,7 @@ import {
 // runtime bundle. The bedrock lab isn't `ready` yet, so this grader never runs in
 // prod — the dynamic import can't fail-at-load. Make it a top-level import again
 // once the client is confirmed bundled and the lab is live-tested.
+import { CloudFormationClient, DescribeStacksCommand } from "@aws-sdk/client-cloudformation";
 import { assumeInSandbox } from "./labinfra.mjs";
 
 const REGION = "us-east-1";
@@ -87,10 +88,50 @@ function isMissingBucket(e) {
 // Spread into a criterion to flag "couldn't verify" when a non-absence error hit.
 const unk = (err) => (err ? { unknown: true } : {});
 
+// ── Per-session variance ─────────────────────────────────────────────────────
+// Which flaws each variant PLANTS. A variant that ships a control already
+// correct must NOT credit the candidate for it, so the grader drops that
+// criterion entirely rather than auto-passing it (which would inflate the score
+// and make variants non-comparable). See labs/<slug>/template.yaml Conditions.
+const S3_VARIANT_PLANTS = {
+  base: { assetsPublic: true, enc: true, tls: true, iam: true },
+  A: { assetsPublic: true, enc: true, tls: false, iam: true }, // TLS pre-enforced
+  B: { assetsPublic: false, enc: true, tls: true, iam: true }, // assets pre-secured
+  C: { assetsPublic: true, enc: false, tls: true, iam: true }, // encryption pre-enforced
+  D: { assetsPublic: true, enc: true, tls: true, iam: false }, // IAM pre-scoped
+};
+
+/**
+ * readLabVariant(): read the variant back off the DEPLOYED stack — authoritative,
+ * lives in the candidate's own account, and cannot drift from what was actually
+ * built. FAIL-SAFE: any error, or a stack without the parameter, returns "base"
+ * (grade everything), which is the pre-variance behaviour.
+ */
+async function readLabVariant(creds) {
+  try {
+    const cfn = new CloudFormationClient({ region: REGION, credentials: creds });
+    const r = await cfn.send(new DescribeStacksCommand({}));
+    // A sandbox holds exactly one lab stack (warm or cold). Prefer a stack that
+    // actually declares Variant; ignore any unrelated/rolled-back stacks.
+    for (const st of r.Stacks ?? []) {
+      if (!/^sslab-/.test(st.StackName ?? "")) continue;
+      if (!["CREATE_COMPLETE", "UPDATE_COMPLETE"].includes(st.StackStatus ?? "")) continue;
+      const p = (st.Parameters ?? []).find((x) => x.ParameterKey === "Variant");
+      if (p?.ParameterValue && S3_VARIANT_PLANTS[p.ParameterValue]) return p.ParameterValue;
+    }
+  } catch {
+    /* fall through to base */
+  }
+  return "base";
+}
+
 // ── S3 misconfiguration & data exposure ──────────────────────────────────────
 async function gradeS3(creds, accountId) {
   const s3 = new S3Client({ region: REGION, credentials: creds });
   const buckets = [`sslab-data-${accountId}`, `sslab-assets-${accountId}`];
+  // Which flaws this session actually had planted (defaults to "base" = all).
+  const variant = await readLabVariant(creds);
+  const plants = S3_VARIANT_PLANTS[variant] ?? S3_VARIANT_PLANTS.base;
 
   const info = {};
   let probeErr = null; // any non-absence error makes the bucket criteria "unknown"
@@ -184,18 +225,33 @@ async function gradeS3(creds, accountId) {
   // Only claim intact/deleted if existence was actually confirmed for every bucket; if any
   // probe was ambiguous (403/throttle, never a definitive 200 or missing), report "unknown".
   const existUnverified = buckets.some((b) => !info[b].existKnown) ? (existErr || true) : null;
-  return [
+
+  // Criteria for a control this variant shipped ALREADY CORRECT are dropped, not
+  // auto-passed: the candidate did no work for them, so counting them would
+  // inflate the score and make variants incomparable. The always-present ones
+  // still demand real work in every variant (the data bucket is public in all of
+  // them), or are "don't break it" checks that apply regardless.
+  const criteria = [
     // Correctness — did they achieve the required secure end-state (the core objective)?
     { id: "no-public-buckets", dimension: "correctness", description: "No lab bucket allows anonymous public read.", passed: buckets.every(notPublic), ...unk(probeErr) },
-    // Security rigor — did they harden properly (least-privilege + defence-in-depth), not just do the minimum?
-    { id: "least-privilege-iam", dimension: "rigor", description: "The 'auditor' user no longer has s3:* on Resource '*'.", passed: !auditorBroad, ...unk(auditorErr) },
-    { id: "encryption-required", dimension: "rigor", description: "Each bucket denies unencrypted PutObject.", passed: buckets.every(encDeny), ...unk(probeErr) },
-    { id: "tls-only", dimension: "rigor", description: "Each bucket denies non-TLS (HTTP) requests.", passed: buckets.every(tlsDeny), ...unk(probeErr) },
+  ];
+  // Security rigor — did they harden properly (least-privilege + defence-in-depth), not just the minimum?
+  if (plants.iam) {
+    criteria.push({ id: "least-privilege-iam", dimension: "rigor", description: "The 'auditor' user no longer has s3:* on Resource '*'.", passed: !auditorBroad, ...unk(auditorErr) });
+  }
+  if (plants.enc) {
+    criteria.push({ id: "encryption-required", dimension: "rigor", description: "Each bucket denies unencrypted PutObject.", passed: buckets.every(encDeny), ...unk(probeErr) });
+  }
+  if (plants.tls) {
+    criteria.push({ id: "tls-only", dimension: "rigor", description: "Each bucket denies non-TLS (HTTP) requests.", passed: buckets.every(tlsDeny), ...unk(probeErr) });
+  }
+  criteria.push(
     // No new exposure — did the fix avoid leaving/opening an anonymous door?
     { id: "no-anonymous-grant", dimension: "no_new_exposure", description: "No bucket policy grants a wildcard (anonymous) principal.", passed: buckets.every(noAnonGrant), ...unk(probeErr) },
     // Operational safety — did they secure the workload without destroying it?
-    { id: "resources-intact", dimension: "operational_safety", description: "Both lab buckets still exist (secured, not deleted).", passed: bothIntact, ...unk(existUnverified) },
-  ];
+    { id: "resources-intact", dimension: "operational_safety", description: "Both lab buckets still exist (secured, not deleted).", passed: bothIntact, ...unk(existUnverified) }
+  );
+  return criteria;
 }
 
 // ── IAM privilege escalation ─────────────────────────────────────────────────

@@ -53,6 +53,17 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  // /candidates -> /manage-candidates (renamed 2026-07-25 so the URL says what
+  // the page does: add, edit, send questionnaires, track, hire). Permanent
+  // redirect so already-shared or bookmarked links keep working instead of
+  // 404ing. NOTE: only the PAGE moved — the API routes are still
+  // /api/candidates/* and the engine contract is still /hr/candidates/*.
+  async redirects() {
+    return [
+      { source: "/candidates", destination: "/manage-candidates", permanent: true },
+      { source: "/candidates/:path*", destination: "/manage-candidates/:path*", permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;

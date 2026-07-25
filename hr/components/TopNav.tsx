@@ -16,9 +16,9 @@ type NavGroup = { label: string; items: NavItem[]; match: (p: string) => boolean
 const GROUPS: NavGroup[] = [
   {
     label: "Recruiting",
-    match: (p) => p.startsWith("/candidates") || p === "/employees/new",
+    match: (p) => p.startsWith("/manage-candidates") || p === "/employees/new",
     items: [
-      { href: "/candidates", label: "Candidates", match: (p) => p.startsWith("/candidates") },
+      { href: "/manage-candidates", label: "Candidates", match: (p) => p.startsWith("/manage-candidates") },
       { href: "/employees/new", label: "New hire", match: (p) => p === "/employees/new" },
     ],
   },
@@ -214,7 +214,7 @@ export function TopNav({ actor }: { actor?: string | null }) {
               Employee
             </Link>
             <Link
-              href="/candidates/new"
+              href="/manage-candidates/new"
               style={{ display: "block", padding: "8px 10px", fontSize: 13, fontWeight: 600, color: "#1b2331", textDecoration: "none", borderRadius: 6 }}
             >
               Candidate

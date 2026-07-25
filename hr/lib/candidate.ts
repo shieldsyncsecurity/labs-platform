@@ -70,7 +70,7 @@ export type Candidate = {
 
   /**
    * If set, this candidate sees THIS questionnaire — a full per-candidate
-   * snapshot the HR user has tailored (via /candidates/[seq]/questions).
+   * snapshot the HR user has tailored (via /manage-candidates/[seq]/questions).
    * When undefined, the public page falls back to the default from
    * lib/questionnaire.ts. Editing after send is allowed — it changes what an
    * unsubmitted link shows; once submitted, the snapshot inside `answers`

@@ -170,7 +170,7 @@ export function DeleteCandidateButton({ candidate }: { candidate: Candidate }) {
         setBusy(false);
         return;
       }
-      router.push("/candidates");
+      router.push("/manage-candidates");
       router.refresh();
     } catch {
       alert("Could not reach the server.");

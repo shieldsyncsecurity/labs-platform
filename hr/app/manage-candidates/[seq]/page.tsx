@@ -35,7 +35,7 @@ export default async function CandidateDetail({ params }: { params: Promise<{ se
 
   return (
     <main style={{ maxWidth: 860, margin: "0 auto", padding: "36px 24px", fontFamily: "Arial, Helvetica, 'Segoe UI', sans-serif" }}>
-      <Link href="/candidates" style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; Candidates</Link>
+      <Link href="/manage-candidates" style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; Candidates</Link>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 6, gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: 21, fontWeight: 800, color: "#1f3a5f" }}>{c.name}</h1>
@@ -44,7 +44,7 @@ export default async function CandidateDetail({ params }: { params: Promise<{ se
           </div>
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <Link href={`/candidates/${seq}/edit`} style={{ color: "#2f4fb0", fontSize: 12.5, fontWeight: 600 }}>Edit</Link>
+          <Link href={`/manage-candidates/${seq}/edit`} style={{ color: "#2f4fb0", fontSize: 12.5, fontWeight: 600 }}>Edit</Link>
           <DeleteCandidateButton candidate={c} />
         </div>
       </div>
@@ -109,7 +109,7 @@ export default async function CandidateDetail({ params }: { params: Promise<{ se
             </p>
           </div>
           <Link
-            href={`/candidates/${seq}/questions`}
+            href={`/manage-candidates/${seq}/questions`}
             style={{ background: c.customQuestionnaire ? "#e7f0fd" : "#fff", color: "#1f3a5f", border: "1px solid #c3cee0", fontSize: 12.5, fontWeight: 700, borderRadius: 8, padding: "8px 14px", textDecoration: "none", whiteSpace: "nowrap" }}
           >
             {c.customQuestionnaire ? "Edit questions →" : "Tailor questions →"}
@@ -127,7 +127,7 @@ export default async function CandidateDetail({ params }: { params: Promise<{ se
             Creates the employee record (prefilled from their questionnaire) and takes you straight to their offer letter.
           </p>
           <Link
-            href={`/candidates/${seq}/hire`}
+            href={`/manage-candidates/${seq}/hire`}
             style={{ background: "#1f3a5f", color: "#fff", fontSize: 13, fontWeight: 700, borderRadius: 8, padding: "10px 16px", textDecoration: "none", display: "inline-block" }}
           >
             Hire &rarr; create employee + offer
