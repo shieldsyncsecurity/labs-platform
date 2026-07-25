@@ -282,7 +282,15 @@ Resources:
               else:
                 for b in buckets:
                   for key, val in SEED.items():
-                    s3.put_object(Bucket=b, Key=key, Body=val.encode())
+                    # ServerSideEncryption is REQUIRED, not cosmetic: variants that
+                    # pre-plant the "deny unencrypted PutObject" control put an
+                    # explicit Deny (Principal "*") on the bucket, and an explicit
+                    # resource-policy Deny beats this role's identity Allow. The
+                    # s3:x-amz-server-side-encryption condition key reads the REQUEST
+                    # HEADER, so S3's automatic default encryption does NOT satisfy it
+                    # — a header-less PUT is denied and the stack rolls back. Sending
+                    # the header is a no-op in variants without that Deny.
+                    s3.put_object(Bucket=b, Key=key, Body=val.encode(), ServerSideEncryption="AES256")
               send(event, "SUCCESS")
             except Exception as e:
               print("ERROR:", e)

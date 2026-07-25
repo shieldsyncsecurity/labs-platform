@@ -104,8 +104,18 @@ const S3_VARIANT_PLANTS = {
 /**
  * readLabVariant(): read the variant back off the DEPLOYED stack — authoritative,
  * lives in the candidate's own account, and cannot drift from what was actually
- * built. FAIL-SAFE: any error, or a stack without the parameter, returns "base"
- * (grade everything), which is the pre-variance behaviour.
+ * built.
+ *
+ * Returns the variant name, or NULL when it genuinely could not be determined.
+ * The null case must NOT be collapsed into "base": "base" means "every flaw was
+ * planted, grade all of them", so defaulting an unreadable variant to base hands
+ * the candidate a free pass on whichever control their variant shipped
+ * already-correct (A->tls-only, C->encryption-required, D->least-privilege-iam).
+ * That is fail-OPEN scoring, the exact thing the `unknown` convention in this
+ * file exists to prevent. The caller marks the affected criteria `unknown`.
+ *
+ * A lab stack that exists but declares no Variant parameter is a pre-variance
+ * deploy — that IS confidently "base", not an unknown.
  */
 async function readLabVariant(creds) {
   try {
@@ -113,25 +123,36 @@ async function readLabVariant(creds) {
     const r = await cfn.send(new DescribeStacksCommand({}));
     // A sandbox holds exactly one lab stack (warm or cold). Prefer a stack that
     // actually declares Variant; ignore any unrelated/rolled-back stacks.
+    let sawLabStack = false;
     for (const st of r.Stacks ?? []) {
       if (!/^sslab-/.test(st.StackName ?? "")) continue;
       if (!["CREATE_COMPLETE", "UPDATE_COMPLETE"].includes(st.StackStatus ?? "")) continue;
+      sawLabStack = true;
       const p = (st.Parameters ?? []).find((x) => x.ParameterKey === "Variant");
       if (p?.ParameterValue && S3_VARIANT_PLANTS[p.ParameterValue]) return p.ParameterValue;
     }
+    if (sawLabStack) return "base"; // pre-variance template — confidently all-flaws
   } catch {
-    /* fall through to base */
+    /* unverifiable — fall through */
   }
-  return "base";
+  return null;
 }
 
 // ── S3 misconfiguration & data exposure ──────────────────────────────────────
 async function gradeS3(creds, accountId) {
   const s3 = new S3Client({ region: REGION, credentials: creds });
   const buckets = [`sslab-data-${accountId}`, `sslab-assets-${accountId}`];
-  // Which flaws this session actually had planted (defaults to "base" = all).
-  const variant = await readLabVariant(creds);
-  const plants = S3_VARIANT_PLANTS[variant] ?? S3_VARIANT_PLANTS.base;
+  // Which flaws this session actually had planted. null = could not determine.
+  const variantRead = await readLabVariant(creds);
+  const plants = S3_VARIANT_PLANTS[variantRead ?? "base"] ?? S3_VARIANT_PLANTS.base;
+  // An undeterminable variant only threatens SCORING where variants can actually
+  // exist. With LAB_VARIANCE off nothing ever deploys a non-base variant, so
+  // falling back to "grade everything" is exactly the pre-variance behaviour and
+  // must NOT start marking criteria unknown (that would newly deny B2C learners
+  // their certificate on a transient DescribeStacks blip). With variance ON, an
+  // unreadable variant is a real "could not verify" and is flagged as such.
+  const variantUnknown = variantRead === null && process.env.LAB_VARIANCE === "1";
+  const vunk = variantUnknown ? { unknown: true } : {};
 
   const info = {};
   let probeErr = null; // any non-absence error makes the bucket criteria "unknown"
@@ -236,14 +257,18 @@ async function gradeS3(creds, accountId) {
     { id: "no-public-buckets", dimension: "correctness", description: "No lab bucket allows anonymous public read.", passed: buckets.every(notPublic), ...unk(probeErr) },
   ];
   // Security rigor — did they harden properly (least-privilege + defence-in-depth), not just the minimum?
+  // These three are the variant-dependent ones. When the variant is unreadable we
+  // keep all three (we cannot know which were dropped) but mark them `unknown`, so
+  // a control the environment may have shipped already-correct can never be scored
+  // as the candidate's own work.
   if (plants.iam) {
-    criteria.push({ id: "least-privilege-iam", dimension: "rigor", description: "The 'auditor' user no longer has s3:* on Resource '*'.", passed: !auditorBroad, ...unk(auditorErr) });
+    criteria.push({ id: "least-privilege-iam", dimension: "rigor", description: "The 'auditor' user no longer has s3:* on Resource '*'.", passed: !auditorBroad, ...unk(auditorErr), ...vunk });
   }
   if (plants.enc) {
-    criteria.push({ id: "encryption-required", dimension: "rigor", description: "Each bucket denies unencrypted PutObject.", passed: buckets.every(encDeny), ...unk(probeErr) });
+    criteria.push({ id: "encryption-required", dimension: "rigor", description: "Each bucket denies unencrypted PutObject.", passed: buckets.every(encDeny), ...unk(probeErr), ...vunk });
   }
   if (plants.tls) {
-    criteria.push({ id: "tls-only", dimension: "rigor", description: "Each bucket denies non-TLS (HTTP) requests.", passed: buckets.every(tlsDeny), ...unk(probeErr) });
+    criteria.push({ id: "tls-only", dimension: "rigor", description: "Each bucket denies non-TLS (HTTP) requests.", passed: buckets.every(tlsDeny), ...unk(probeErr), ...vunk });
   }
   criteria.push(
     // No new exposure — did the fix avoid leaving/opening an anonymous door?
