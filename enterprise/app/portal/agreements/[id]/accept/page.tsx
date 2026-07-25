@@ -96,7 +96,7 @@ export default async function AcceptAgreementPage({
           <Link href="/portal/agreements" className="font-semibold text-brand-strong hover:underline">
             All agreements
           </Link>{" "}
-          {"\u00B7"} or write to hello@shieldsyncsecurity.com before accepting.
+          {"\u00B7"} or write to info@shieldsyncsecurity.com before accepting.
         </p>
       </div>
     </div>

@@ -17,7 +17,17 @@ export default function AdminNav() {
     if (signingOut) return;
     setSigningOut(true);
     try {
-      await fetch("/api/admin/logout", { method: "POST" });
+      // Real form POST, not fetch: /api/auth/logout clears BOTH cookies and then
+      // redirects to the Cognito Hosted-UI logout, and only a browser navigation
+      // can follow that redirect. The old cookie-only endpoint left the IdP
+      // session alive, so Sign out -> Sign in silently re-authenticated with no
+      // prompt. POST (not a link) keeps it non-triggerable cross-site.
+      const f = document.createElement("form");
+      f.method = "POST";
+      f.action = "/api/auth/logout";
+      document.body.appendChild(f);
+      f.submit();
+      return;
     } finally {
       router.push("/admin/login");
       router.refresh();

@@ -16,6 +16,11 @@ const csp = [
   "frame-ancestors 'none'",
   "form-action 'self'",
   "img-src 'self' data: blob: https:",
+  // Session-recording audio is a cross-origin presigned S3 URL. Without an
+  // explicit media-src it falls back to default-src 'self' and every clip is
+  // blocked (snapshots still render via the img-src wildcard, so it looked
+  // half-working). The proctoring evidence we sell needs this.
+  "media-src 'self' blob: https:",
   "font-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
   "style-src-elem 'self' 'unsafe-inline'",

@@ -24,17 +24,21 @@ type Order = {
   orderId?: string;
   orgId?: string;
   credits?: number;
-  amount?: number;
+  // The engine stores MINOR units (paise) as `amountMinor` — there is no
+  // `amount` field. Reading the wrong name made formatMoney bail to "—",
+  // so every row of the customer's billing history showed an em dash.
+  amountMinor?: number;
   currency?: string;
   status?: string;
   createdAt?: string;
 };
 
-const CONTACT_EMAIL = "hello@shieldsyncsecurity.com";
+const CONTACT_EMAIL = "info@shieldsyncsecurity.com";
 
 // Format an order amount as real currency (major units, e.g. 249 -> ₹249.00).
-function formatMoney(amount?: number, currency?: string): string {
-  if (typeof amount !== "number") return "—";
+function formatMoney(amountMinor?: number, currency?: string): string {
+  if (typeof amountMinor !== "number") return "—";
+  const amount = amountMinor / 100;
   const cur = (currency ?? "INR").toUpperCase();
   try {
     return new Intl.NumberFormat("en-IN", { style: "currency", currency: cur }).format(amount);
@@ -181,7 +185,7 @@ export default async function BillingPage() {
                     <tr key={o.orderId ?? i} className="border-b border-line last:border-b-0">
                       <td className="px-4 py-3 text-ink-soft">{formatDate(o.createdAt)}</td>
                       <td className="px-4 py-3 text-ink">{o.credits ?? "—"}</td>
-                      <td className="px-4 py-3 text-ink-soft">{formatMoney(o.amount, o.currency)}</td>
+                      <td className="px-4 py-3 text-ink-soft">{formatMoney(o.amountMinor, o.currency)}</td>
                       <td className="px-4 py-3">
                         <OrderStatusBadge status={o.status} />
                       </td>
