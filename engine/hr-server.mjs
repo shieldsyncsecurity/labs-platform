@@ -565,6 +565,39 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { ok: true });
       }
 
+      // ---- /hr/candidates/:seq/interviews — mirrors the Lambda ----
+      if (parts[3] === "interviews" && parts.length === 4 && req.method === "POST") {
+        const body = await readBody(req);
+        const iv = {
+          id: `iv_${Date.now()}_${Math.floor(Math.random() * 1e6)}`,
+          createdAt: new Date().toISOString(),
+          createdBy: body.actor || "unknown",
+          ...body.interview,
+        };
+        cur.interviews = [...(cur.interviews ?? []), iv].sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1));
+        cur.updatedAt = new Date().toISOString();
+        db.candidates[idx] = cur;
+        audit(db, body.actor, "interview.schedule", cur.candidateId, {
+          startsAt: iv.startsAt,
+          invited: Boolean(iv.invitedAt),
+          hasMeeting: Boolean(iv.meetingUrl),
+        });
+        save(db);
+        return send(res, 200, { interview: iv, interviews: cur.interviews });
+      }
+
+      if (parts[3] === "interviews" && parts.length === 5 && req.method === "DELETE") {
+        const body = await readBody(req);
+        const gone = (cur.interviews ?? []).find((x) => x.id === parts[4]);
+        if (!gone) return send(res, 404, { error: "NOT_FOUND" });
+        cur.interviews = (cur.interviews ?? []).filter((x) => x.id !== parts[4]);
+        cur.updatedAt = new Date().toISOString();
+        db.candidates[idx] = cur;
+        audit(db, body.actor, "interview.cancel", cur.candidateId, { startsAt: gone.startsAt });
+        save(db);
+        return send(res, 200, { interviews: cur.interviews });
+      }
+
       if (parts[3] === "sent" && parts.length === 4 && req.method === "POST") {
         const body = await readBody(req);
         cur.questionnaireSentTo = body.to;

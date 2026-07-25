@@ -13,6 +13,7 @@
     "dev:all": "node dev-all.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
     "@cloudflare/puppeteer": "^1.1.0",
     "jose": "^6.2.3",
     "jszip": "^3.10.1",

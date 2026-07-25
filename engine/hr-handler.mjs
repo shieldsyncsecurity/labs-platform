@@ -739,6 +739,50 @@ export async function handler(event) {
         return resp(200, { ok: true });
       }
 
+      // ---- /hr/candidates/:seq/interviews — scheduled rounds ----
+      // Its own endpoint rather than a field on the candidate PUT: a scheduled
+      // meeting has a real calendar event behind it, so a stale form post must
+      // not be able to silently drop one.
+      if (parts[3] === "interviews" && parts.length === 4 && method === "POST") {
+        const iv = {
+          id: `iv_${Date.now()}_${randomUUID().slice(0, 8)}`,
+          createdAt: new Date().toISOString(),
+          createdBy: body.actor || "unknown",
+          ...body.interview,
+        };
+        const list = [...(cur.interviews ?? []), iv].sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1));
+        await ddb.send(
+          new UpdateCommand({
+            TableName: T_CAND,
+            Key: { seq },
+            UpdateExpression: "SET interviews = :i, updatedAt = :u",
+            ExpressionAttributeValues: { ":i": list, ":u": new Date().toISOString() },
+          }),
+        );
+        await writeAudit(body.actor, "interview.schedule", cur.candidateId, {
+          startsAt: iv.startsAt,
+          invited: Boolean(iv.invitedAt),
+          hasMeeting: Boolean(iv.meetingUrl),
+        });
+        return resp(200, { interview: iv, interviews: list });
+      }
+
+      if (parts[3] === "interviews" && parts.length === 5 && method === "DELETE") {
+        const list = (cur.interviews ?? []).filter((x) => x.id !== parts[4]);
+        const gone = (cur.interviews ?? []).find((x) => x.id === parts[4]);
+        if (!gone) return resp(404, { error: "NOT_FOUND" });
+        await ddb.send(
+          new UpdateCommand({
+            TableName: T_CAND,
+            Key: { seq },
+            UpdateExpression: "SET interviews = :i, updatedAt = :u",
+            ExpressionAttributeValues: { ":i": list, ":u": new Date().toISOString() },
+          }),
+        );
+        await writeAudit(body.actor, "interview.cancel", cur.candidateId, { startsAt: gone.startsAt });
+        return resp(200, { interviews: list });
+      }
+
       if (parts[3] === "sent" && parts.length === 4 && method === "POST") {
         const now = new Date().toISOString();
         await ddb.send(

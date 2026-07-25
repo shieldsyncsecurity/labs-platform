@@ -121,6 +121,17 @@ test("sending a questionnaire and hiring are writes even though the page is a re
   assert.deepEqual(req("/api/candidates/1/hire", "POST"), { kind: "area", area: "candidates", need: "write" });
 });
 
+test("the scheduling assistant requires candidate write, not merely read", () => {
+  // It proposes interview invites, so it must sit behind the same permission as
+  // booking one directly — otherwise the model is a hole in the gate.
+  assert.deepEqual(req("/api/assistant", "POST"), { kind: "area", area: "candidates", need: "write" });
+});
+
+test("scheduling and cancelling an interview are candidate writes", () => {
+  assert.deepEqual(req("/api/candidates/1/interviews", "POST"), { kind: "area", area: "candidates", need: "write" });
+  assert.deepEqual(req("/api/candidates/1/interviews/iv_1", "DELETE"), { kind: "area", area: "candidates", need: "write" });
+});
+
 test("the bulk export is administrator-only, not merely employee-read", () => {
   // It returns every employee, every issued payslip snapshot and all KYC
   // metadata in one file. Anything less than admin would make the salary and

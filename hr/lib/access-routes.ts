@@ -72,6 +72,9 @@ export function requirementFor(pathname: string, method: string): Requirement {
     if (p.endsWith("/send") || p.endsWith("/hire") || p.endsWith("/parse-resume")) return area("candidates", "write");
     return byMethod("candidates", method);
   }
+  // The scheduling assistant can only ever propose a candidate write, so it
+  // needs that permission — the model must not become a way around the gate.
+  if (p === "/api/assistant") return area("candidates", "write");
 
   // --- Employees, and everything hanging off an employee record ---
   if (p.startsWith("/api/employees")) {

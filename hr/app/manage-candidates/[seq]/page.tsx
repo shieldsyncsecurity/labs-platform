@@ -5,6 +5,8 @@ import { getQuestionnaire } from "@/lib/questionnaire";
 import { isRetentionDue, retentionDueDate, OUTCOME_OPTIONS, type Candidate } from "@/lib/candidate";
 import { AnswersView } from "@/components/QuestionnaireForm";
 import { SendQuestionnaire, OutcomeControl, DeleteCandidateButton } from "@/components/CandidateControls";
+import { InterviewScheduler } from "@/components/InterviewScheduler";
+import { graphConfigured } from "@/lib/server/graph";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Candidate — ShieldSync HR", robots: { index: false, follow: false } };
@@ -117,6 +119,9 @@ export default async function CandidateDetail({ params }: { params: Promise<{ se
         </div>
       </div>
 
+      {/* Scheduling sits above the questionnaire: you interview first, then
+          send the questions. The page should read in the order the work happens. */}
+      <InterviewScheduler candidate={c} teamsConnected={graphConfigured()} />
       <SendQuestionnaire candidate={c} />
       <OutcomeControl candidate={c} />
 

@@ -39,6 +39,34 @@ export const ROLE_OPTIONS = [
 
 export const SOURCE_OPTIONS = ["Naukri", "LinkedIn", "Indeed", "Referral", "Website", "Consultant / agency", "Walk-in"];
 
+/**
+ * One scheduled interview round. `startsAt` is a full ISO instant, not a local
+ * date string: a meeting time that doesn't carry its timezone is the classic
+ * way to invite someone to 3pm and have them arrive at 8:30pm.
+ */
+export type Interview = {
+  id: string;
+  /** ISO 8601 instant, e.g. "2026-07-28T09:30:00.000Z" (= 3:00 PM IST). */
+  startsAt: string;
+  durationMinutes: number;
+  /** Free text — "Himanshu Jain", "Himanshu + Diya". Not an employee link:
+   *  panels routinely include people who aren't on the payroll. */
+  panel?: string;
+  /** Round label the candidate would recognise: "Screening", "Technical". */
+  round?: string;
+  /** Teams/Meet join URL. Set by Graph when we create the meeting, or pasted
+   *  by hand when the meeting was made in Outlook directly. */
+  meetingUrl?: string;
+  /** Microsoft Graph event id, so we can cancel or update the real calendar
+   *  entry later rather than orphaning it. */
+  graphEventId?: string;
+  /** Whether the candidate was actually sent an invite (vs a private hold). */
+  invitedAt?: string;
+  notes?: string;
+  createdAt: string;
+  createdBy?: string;
+};
+
 export type Candidate = {
   seq: number;
   candidateId: string; // SSS/CAND/0001
@@ -52,6 +80,14 @@ export type Candidate = {
   interviewedOn?: string; // display date
   interviewedBy?: string;
   notes?: string;
+
+  /**
+   * Scheduled interviews. An array because a candidate can be seen more than
+   * once (screen, then a longer conversation) and each round is its own record
+   * — collapsing them to a single "interviewedOn" field is how the second round
+   * silently overwrites the first.
+   */
+  interviews?: Interview[];
 
   outcome: CandidateOutcome;
   outcomeNote?: string;
@@ -158,6 +194,9 @@ export function normalizeCandidate(input: CandidateInput): Omit<Candidate, "seq"
     firstViewedAt: input.firstViewedAt,
     lastViewedAt: input.lastViewedAt,
     viewCount: input.viewCount,
+    // Engine-owned like the token state: interviews are created through their
+    // own endpoint so a stale form post can't wipe a scheduled meeting.
+    interviews: input.interviews,
     customQuestionnaire: input.customQuestionnaire,
     salaryProof: input.salaryProof,
     createdBy: input.createdBy,
