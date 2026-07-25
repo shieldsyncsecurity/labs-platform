@@ -219,18 +219,6 @@ It takes about 15 minutes. Your answers save as you type, so you can pause and c
       blurb: "How the day-to-day would actually feel, and how you'd want to be part of it.",
       fields: [
         {
-          id: "dressCode",
-          label:
-            "This role is client-facing and represents ShieldSync in meetings and at the office. Are you comfortable dressing formally or smart-professional as the day requires?",
-          type: "select",
-          options: [
-            "Yes, absolutely — I already dress professionally",
-            "Yes, and I enjoy dressing well — I see it as part of the job",
-            "Yes, but I have some religious considerations which we can discuss together",
-            "Yes, happy to be told the dress code",
-          ],
-        },
-        {
           id: "peerPartnership",
           label:
             "At the moment the company is just the founder, so you would not be joining a team so much as making it a team of two. That means working side by side rather than boss-and-report: sharing your opinion, disagreeing when you disagree, and treating this as a partnership rather than a chain of command. How does that sit with you, and is it how you have worked before?",
@@ -255,39 +243,12 @@ It takes about 15 minutes. Your answers save as you type, so you can pause and c
     },
     {
       id: "personal",
-      title: "Getting to know you",
-      blurb: "The part a CV never captures. We read every one of these — it is how we get to know the person, not the CV.",
+      title: "How you work",
+      blurb: "The part a CV never captures — judgement, temperament and working style. We read every one of these.",
       fields: [
         {
-          id: "freeTime",
-          label: "How do you like to spend your time outside work?",
-          type: "multiselect",
-          options: [
-            "Reading",
-            "Cooking / baking",
-            "Going out & partying",
-            "Fashion & styling",
-            "Shopping",
-            "Meeting friends",
-            "Gym / fitness",
-            "Sports",
-            "Dance",
-            "Music",
-            "Movies & series",
-            "Gaming",
-            "Travelling",
-            "Photography",
-            "Art & craft",
-            "Volunteering",
-            "Time with family",
-            "Quiet time at home",
-          ],
-          allowOther: true,
-          hint: "Pick as many as you like.",
-        },
-        {
           id: "personalDiscretion",
-          label: `In this job you would see a lot of ${SUPPORTS}'s world — the diary, the travel, sometimes personal and family commitments, and conversations that are not for sharing. What does discretion mean to you personally?`,
+          label: "In this job you would see confidential company and client information every day — the diary, commercial discussions, and conversations that are not for sharing. What does discretion mean to you in practice?",
           type: "textarea",
           rows: 4,
         },
@@ -313,10 +274,9 @@ It takes about 15 minutes. Your answers save as you type, so you can pause and c
         },
         {
           id: "pressureWithFounder",
-          label: `Some days here are genuinely high-pressure. There will be moments when ${SUPPORTS} is in the middle of a crisis and comes across as urgent, blunt or frustrated. How do you keep yourself steady on a day like that?`,
+          label: "Some days here are genuinely high-pressure — a deadline moves, a client escalates, and several things need attention at once. How do you keep yourself steady and decide what to do first on a day like that?",
           type: "textarea",
           rows: 4,
-          hint: "We are asking openly because it is part of the job. Tell us what genuinely helps you.",
         },
         {
           id: "drainsAndEnergy",
