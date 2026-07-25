@@ -139,7 +139,15 @@ export function buildInternshipOffer(
         heading: "Scope of Work & Learning",
         intro:
           "You will be given real, substantive work with guidance and review, rather than observation alone. Your responsibilities will include:",
-        bullets: scope,
+        // A specific scope list without a catch-all is worse than a vague one:
+        // it reads as exhaustive, so anything sensible but unlisted becomes a
+        // negotiation. This is the standard clause that makes a detailed scope
+        // safe to write. "Commensurate with your role" is the limit — it covers
+        // adjacent company work, not personal errands.
+        bullets: [
+          ...scope,
+          "Such other duties as may reasonably be assigned from time to time, commensurate with your role and experience.",
+        ],
       },
       {
         n: 4,
