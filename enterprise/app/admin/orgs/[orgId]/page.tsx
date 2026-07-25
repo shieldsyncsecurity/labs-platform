@@ -13,6 +13,7 @@ import CopyButton from "../../../portal/_components/copy-button";
 import AdjustCreditsForm from "./adjust-credits-form";
 import DeleteOrgButton from "./delete-org-button";
 import OrdersSection, { type OrderRow } from "./orders-section";
+import SeatsSection from "./seats-section";
 import ActivityPanel from "./_components/activity-panel";
 import { Bar, formatDate } from "../../../r/_components/report-bits";
 
@@ -177,6 +178,11 @@ export default async function AdminOrgDetailPage({
               <AdjustCreditsForm orgId={org.orgId ?? orgId} />
             </div>
           </div>
+        </div>
+
+        {/* Portal seats — the record auth/callback verifies the orgId claim against */}
+        <div className="mt-6">
+          <SeatsSection orgId={org.orgId ?? orgId} />
         </div>
 
         {/* Org details */}

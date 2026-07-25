@@ -98,6 +98,12 @@ import { gradeLab } from "./graders.mjs";
 // uploads during a live session, presigned playback for the candidate report,
 // and prefix deletion for the PII-erase cascade.
 import {
+  getMember,
+  putMember,
+  listMembers,
+  deleteMember,
+} from "./entinfra.mjs";
+import {
   startRecEpoch,
   presignRecUploads,
   recordRecEvent,
@@ -1630,6 +1636,41 @@ export async function handler(event) {
     // Allocate a capture EPOCH for a fresh recorder session (each page load).
     // Keys are namespaced by epoch, so a reload starts a new key space and can
     // never overwrite the earlier half of the recording (or the identity shot).
+    // ── tenant membership (sub -> orgId) ─────────────────────────────────
+    // The app calls this on every portal login and refuses to mint a session
+    // unless the Cognito claim matches. Read path is deliberately tiny + fast.
+    if (method === "GET" && path === "/ent/member") {
+      const sub = url.searchParams.get("sub") || "";
+      if (!sub) return resp(400, { error: "sub required" });
+      const m = await getMember(sub);
+      if (!m) return resp(404, { error: "not a member" });
+      return resp(200, { sub: m.sub, orgId: m.orgId, email: m.email ?? null });
+    }
+    if (method === "GET" && path === "/ent/members") {
+      const orgId = url.searchParams.get("orgId") || "";
+      if (!orgId) return resp(400, { error: "orgId required" });
+      return resp(200, { members: await listMembers(orgId) });
+    }
+    if (method === "POST" && path === "/ent/members") {
+      const { sub, orgId, email } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (!sub || !orgId) return resp(400, { error: "sub and orgId required" });
+      const org = await getOrg(orgId);
+      if (!org) return resp(404, { error: "no such org" });
+      const m = await putMember({ sub, orgId, email, actor });
+      await audit({ orgId, actor, action: "member.bind", target: sub, detail: { email: m.email } });
+      return resp(200, { ok: true, member: m });
+    }
+    if (method === "POST" && path === "/ent/members/delete") {
+      const { sub } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (!sub) return resp(400, { error: "sub required" });
+      const existing = await getMember(sub);
+      await deleteMember(sub);
+      await audit({ orgId: existing?.orgId, actor, action: "member.revoke", target: sub, detail: {} });
+      return resp(200, { ok: true });
+    }
+
     if (method === "POST" && path === "/ent/rec/start") {
       const { inviteToken } = parsed;
       const invite = await getInvite(inviteToken);

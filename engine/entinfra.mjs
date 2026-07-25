@@ -2370,3 +2370,60 @@ export async function stampDocResend(docToken) {
     })
   );
 }
+
+// ── Tenant membership (sub -> orgId) ─────────────────────────────────────────
+// THE control that makes cross-tenant access structurally impossible. Cognito's
+// `custom:orgId` is a CLAIM: it lives on a user attribute, and any future app-client
+// misconfiguration (writable attribute, a re-enabled USER_PASSWORD_AUTH flow, an admin
+// slip) would let a real employer point that claim at ANOTHER tenant and mint a valid
+// session for it. This table is the server-side answer to "which org does this Cognito
+// subject actually belong to", written ONLY by staff at onboard time. The app verifies
+// the claim against it before minting a portal session, so the claim alone is worthless.
+const MEMBERS_TABLE = "ShieldSyncEntMembers";
+
+/** Authoritative org for a Cognito subject, or null if they are not a member of any. */
+export async function getMember(sub) {
+  if (!sub) return null;
+  const db = await ddb();
+  const r = await db.send(new GetItemCommand({ TableName: MEMBERS_TABLE, Key: { sub: S(String(sub)) } }));
+  return r.Item ? unmarshallItem(r.Item) : null;
+}
+
+/** Bind a Cognito subject to exactly one org. Staff-only; idempotent (re-binding
+ *  the same sub overwrites, which is how you MOVE a user between orgs deliberately). */
+export async function putMember({ sub, orgId, email, actor }) {
+  if (!sub || !orgId) throw new Error("sub and orgId are required");
+  const db = await ddb();
+  const item = {
+    sub: S(String(sub)),
+    orgId: S(String(orgId)),
+    email: S(String(email ?? "").toLowerCase()),
+    createdAt: S(nowIso()),
+    createdBy: S(String(actor ?? "staff")),
+  };
+  await db.send(new PutItemCommand({ TableName: MEMBERS_TABLE, Item: item }));
+  return unmarshallItem(item);
+}
+
+/** Members of one org. Volume is human-scale (a handful of seats), so a filtered
+ *  Scan is correct here — same call the leads list makes. */
+export async function listMembers(orgId) {
+  const db = await ddb();
+  const r = await db.send(
+    new ScanCommand({
+      TableName: MEMBERS_TABLE,
+      FilterExpression: "orgId = :o",
+      ExpressionAttributeValues: { ":o": S(String(orgId)) },
+      Limit: 200,
+    })
+  );
+  return (r.Items ?? []).map(unmarshallItem);
+}
+
+/** Revoke a seat. The next portal login fails closed even if the Cognito user
+ *  still carries the custom:orgId attribute. */
+export async function deleteMember(sub) {
+  const db = await ddb();
+  await db.send(new DeleteItemCommand({ TableName: MEMBERS_TABLE, Key: { sub: S(String(sub)) } }));
+  return { ok: true };
+}
