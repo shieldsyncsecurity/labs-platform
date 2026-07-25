@@ -820,6 +820,21 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// A taken port used to be SILENT: node emitted an unhandled 'error', this process
+// died, and anything polling /hr/health got an answer from the STALE server still
+// holding the port — so the E2E suite ran against another run's leftover data and
+// failed a different assertion each time. Fail loudly instead.
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`[hr-dev-engine] FATAL: port ${PORT} is already in use — refusing to start (another dev engine is running).`);
+  } else {
+    console.error(`[hr-dev-engine] FATAL:`, err);
+  }
+  process.exit(1);
+});
+
+// Pass HR_ENGINE_PORT=0 to get an OS-assigned free port; the line below reports the
+// REAL port, which is how the test harness learns where to connect (collision-proof).
 server.listen(PORT, () => {
-  console.log(`[hr-dev-engine] listening on http://localhost:${PORT}  (store: ${DB})`);
+  console.log(`[hr-dev-engine] listening on http://localhost:${server.address().port}  (store: ${DB})`);
 });

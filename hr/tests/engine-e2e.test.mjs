@@ -15,9 +15,13 @@ import { fileURLToPath } from "node:url";
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const ENGINE = path.join(__dir, "..", "..", "engine", "hr-server.mjs");
-const PORT = 4599;
-const BASE = `http://127.0.0.1:${PORT}`;
+// NO fixed port. A hardcoded one made this suite flaky: if a previous run's engine
+// was still holding it, the fresh spawn died on EADDRINUSE while /hr/health kept
+// answering from the STALE process — so tests silently ran against leftover data and
+// a different assertion failed each run. We now ask for an OS-assigned port (0) and
+// read the real one back from the engine's startup line.
 const TOKEN = "e2e-secret";
+let BASE;
 let proc;
 let dataDir;
 
@@ -37,10 +41,30 @@ async function api(pathname, opts = {}) {
 before(async () => {
   dataDir = mkdtempSync(path.join(tmpdir(), "hr-e2e-"));
   proc = spawn(process.execPath, [ENGINE], {
-    env: { ...process.env, HR_ENGINE_PORT: String(PORT), HR_ENGINE_SECRET: TOKEN, HR_DEV_DATA_DIR: dataDir },
-    stdio: "ignore",
+    // Port 0 = OS picks a free one, so concurrent/back-to-back runs can't collide.
+    env: { ...process.env, HR_ENGINE_PORT: "0", HR_ENGINE_SECRET: TOKEN, HR_DEV_DATA_DIR: dataDir },
+    stdio: ["ignore", "pipe", "pipe"],
   });
-  // Poll until it answers rather than sleeping a fixed amount.
+
+  // Learn the real port from THIS process's startup line — guarantees we're talking
+  // to the engine we just spawned, never a stale one someone left running.
+  const port = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("dev engine did not report a port in 15s")), 15000);
+    let buf = "";
+    proc.stdout.on("data", (d) => {
+      buf += d.toString();
+      const m = buf.match(/listening on http:\/\/localhost:(\d+)/);
+      if (m) { clearTimeout(timer); resolve(Number(m[1])); }
+    });
+    let errBuf = "";
+    proc.stderr.on("data", (d) => { errBuf += d.toString(); });
+    proc.on("exit", (code) => {
+      clearTimeout(timer);
+      reject(new Error(`dev engine exited (code ${code}) before listening: ${errBuf.trim() || "no stderr"}`));
+    });
+  });
+  BASE = `http://127.0.0.1:${port}`;
+
   for (let i = 0; i < 60; i++) {
     try {
       const r = await fetch(`${BASE}/hr/health`);
@@ -48,7 +72,7 @@ before(async () => {
     } catch { /* not up yet */ }
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error("dev engine did not start");
+  throw new Error("dev engine did not answer /hr/health");
 });
 
 after(() => {
