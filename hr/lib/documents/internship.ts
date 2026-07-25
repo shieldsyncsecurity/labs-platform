@@ -160,7 +160,7 @@ export function buildInternshipOffer(
           // straight hours without one is inconsistent with it on its face.
           "You are entitled to a rest and meal break of at least thirty (30) minutes during the working day, to be taken at a time that suits the day's commitments.",
           "There will be flexibility on both sides where the work genuinely requires it. You will not be required to work on public holidays.",
-          "The stipend is paid monthly in arrears, by bank transfer, ordinarily within the first ten (10) working days of the following month.",
+          "The stipend is paid by bank transfer each month, for the month just worked, ordinarily within the first ten (10) working days of the following month.",
           "Any performance incentive is assessed at the end of each month, is at the sole discretion of the Company, and is neither guaranteed nor an entitlement. A month in which no incentive is paid is not a breach of this letter.",
           "You are entitled to one (1) day of paid leave per completed month of the internship, to be taken with prior approval. Leave does not carry forward beyond the term and is not encashable.",
           "You will inform the Company as early as practicable if you are unable to attend on a working day.",

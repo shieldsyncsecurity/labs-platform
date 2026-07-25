@@ -136,7 +136,7 @@ export function buildOfferLetter(input: OfferLetterInput): OfferLetter {
       blocks: [
         {
           type: "p",
-          text: `Your gross remuneration is ${moneyLong(e.grossMonthly, "month")} (Annual CTC INR ${fmt(e.annualCTC)}), payable monthly in arrears by the agreed pay date, subject to applicable statutory deductions including, where applicable, Provident Fund, Professional Tax, and Tax Deducted at Source (TDS). The detailed salary structure is set out in Annexure A.`,
+          text: `Your gross remuneration is ${moneyLong(e.grossMonthly, "month")} (Annual CTC INR ${fmt(e.annualCTC)}), paid each month for the month just worked, by the agreed pay date, subject to applicable statutory deductions including, where applicable, Provident Fund, Professional Tax, and Tax Deducted at Source (TDS). The detailed salary structure is set out in Annexure A.`,
         },
         {
           type: "p",
