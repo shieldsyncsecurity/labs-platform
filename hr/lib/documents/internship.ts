@@ -32,6 +32,52 @@ export function internshipRef(year: number, seq: number): string {
   return `SSS/INT/${year}/${String(seq).padStart(3, "0")}`;
 }
 
+/**
+ * Scope bullets when the employee record carries no duties.
+ *
+ * This used to be a single hardcoded cloud-security list, which meant an
+ * Executive Assistant's offer letter described auditing AWS IAM policies —
+ * plausible-looking text in the right shape, and completely wrong. Silently
+ * substituting confident-sounding content is worse than substituting nothing,
+ * because nobody proofreads a section that looks finished.
+ *
+ * So: match on designation where we can, and where we can't, emit something
+ * that CANNOT be mistaken for finished copy.
+ */
+function defaultScopeFor(designation: string): string[] {
+  const d = (designation ?? "").toLowerCase();
+
+  if (/assistant|secretary|administrat|operations|office/.test(d)) {
+    return [
+      "Managing the founder's calendar — scheduling and rescheduling, resolving clashes, protecting focused working time, and making sure the day is realistic.",
+      "Triaging the inbox: prioritising what needs attention, drafting replies for review, and making sure nothing important goes unanswered.",
+      "Coordinating meetings end to end — agendas beforehand, notes during, and chasing the resulting actions to completion.",
+      "Arranging travel, appointments, and logistics, and keeping the founder briefed on what is coming up.",
+      "Keeping company records, trackers, and documents organised, accurate, and easy to retrieve.",
+      "Acting as a first point of contact for clients, vendors, and candidates, handling correspondence professionally on the company's behalf.",
+      "Preparing background and briefing notes ahead of meetings so the founder walks in prepared.",
+      "Handling confidential company, client, and personnel information with discretion at all times.",
+      "Learning how a cybersecurity business runs day to day — client engagements, compliance obligations, and internal operations — and taking on more as you grow into the role.",
+    ];
+  }
+
+  if (/security|cloud|soc|analyst|engineer|grc|compliance/.test(d)) {
+    return [
+      "Auditing and hardening cloud environments — IAM, storage, encryption, and logging — the way working security teams do.",
+      "Practising in managed, production-like cyber-range labs rather than passive coursework.",
+      "Gaining exposure to detection and response workflows across SIEM and SOAR to understand the blue-team picture end to end.",
+      "Documenting findings, fixes, and verification steps, and presenting your work to your mentor.",
+      "Completing assigned learning milestones and project deliverables within the internship timeline.",
+    ];
+  }
+
+  // Deliberately not plausible prose. If this reaches a letter, it is meant to
+  // stop the person issuing it, not slip past them.
+  return [
+    "[ SCOPE OF WORK NOT SET — add this intern's duties to their employee record before issuing this letter. ]",
+  ];
+}
+
 export function buildInternshipOffer(
   e: Employee,
   opts: { ref: string; date: string; startDate?: string; mentor?: string; scopeBullets?: string[] },
@@ -57,13 +103,7 @@ export function buildInternshipOffer(
       ? opts.scopeBullets
       : e.duties.length > 0
         ? e.duties
-        : [
-            "Auditing and hardening AWS cloud environments — IAM, S3, encryption, and logging — the way working security teams do.",
-            "Practising in managed, production-like cyber-range labs rather than passive coursework.",
-            "Gaining exposure to detection and response workflows across SIEM and SOAR to understand the blue-team picture end to end.",
-            "Documenting findings, fixes, and verification steps, and presenting your work to your mentor.",
-            "Completing assigned learning milestones and project deliverables within the internship timeline.",
-          ];
+        : defaultScopeFor(e.designation);
 
   return {
     ref: opts.ref,
@@ -105,7 +145,13 @@ export function buildInternshipOffer(
         n: 4,
         heading: "Working Arrangements",
         bullets: [
-          "Working days and hours are Monday to Friday, ordinarily 10:00 AM to 7:00 PM, with flexibility on both sides where the work requires it. You will not be required to work on public holidays.",
+          "Working days are Monday to Friday. Your working hours are 12:00 noon to 8:00 PM, and you are expected to be available from 11:30 AM to settle in and pick up anything outstanding before the day begins.",
+          // A rest interval is not optional decoration: the UP Shops and
+          // Commercial Establishments Act requires a break within a continuous
+          // working stretch of this length, and a letter that schedules eight
+          // straight hours without one is inconsistent with it on its face.
+          "You are entitled to a rest and meal break of at least thirty (30) minutes during the working day, to be taken at a time that suits the day's commitments.",
+          "There will be flexibility on both sides where the work genuinely requires it. You will not be required to work on public holidays.",
           "The stipend is paid monthly in arrears, by bank transfer, ordinarily within the first ten (10) working days of the following month.",
           "Any performance incentive is assessed at the end of each month, is at the sole discretion of the Company, and is neither guaranteed nor an entitlement. A month in which no incentive is paid is not a breach of this letter.",
           "You are entitled to one (1) day of paid leave per completed month of the internship, to be taken with prior approval. Leave does not carry forward beyond the term and is not encashable.",
@@ -136,11 +182,11 @@ export function buildInternshipOffer(
       },
       {
         n: 7,
-        heading: "Security, Systems & Conduct",
+        heading: "Systems Access & Conduct",
         bullets: [
-          "You will access only the systems, accounts, and data expressly authorised for your tasks, using credentials issued to you, and you will not share those credentials with anyone.",
-          "You will not perform security testing, scanning, or access of any kind against any system outside the authorised lab or project scope. This applies to Company systems, client systems, and third-party systems alike. Any unauthorised activity is a serious breach of this letter and may also be an offence under the Information Technology Act, 2000.",
-          "You will follow the Company's security policies and instructions, including on device security, password management, and handling of Company data on any personal device.",
+          "You will access only the systems, accounts, mailboxes, and records you have been given access to for your own work, using the credentials issued to you, and you will not share those credentials with anyone.",
+          "You will not attempt to reach any system, account, or file you have not been given access to, and you will not copy Company or client data to any personal account, device, or storage service. Doing so is a serious breach of this letter and may also be an offence under the Information Technology Act, 2000.",
+          "You will follow the Company's security instructions on device security, password management, and handling Company data on any personal device — these apply to everyone here, whatever their role.",
           "You will conduct yourself professionally and respectfully in all dealings with colleagues, clients, and third parties, and will comply with all applicable laws in the course of your work.",
         ],
       },
@@ -149,8 +195,8 @@ export function buildInternshipOffer(
         heading: "Conflict of Interest & Non-Solicitation",
         bullets: [
           "During the term you will not take up any engagement, employment, or activity that conflicts with your duties here or with the Company's interests, and you will disclose any potential conflict as soon as you become aware of it.",
-          "For twelve (12) months after the term ends, you will not solicit or attempt to entice away any client, prospective client, employee, or intern of the Company with whom you had material dealings during the internship.",
-          "For the avoidance of doubt, nothing in this letter restricts your right to work elsewhere, in any role or sector, after this internship ends.",
+          "For twelve (12) months after the term ends, you will not approach any client, prospective client, employee, or intern of the Company you dealt with during the internship in order to take their business away from the Company or persuade them to leave it.",
+          "You are free to take any job you like after this internship ends. This clause is only about not taking the Company's clients or people with you — it does not stop you working anywhere, in any role or industry.",
         ],
       },
       {
@@ -163,15 +209,6 @@ export function buildInternshipOffer(
       },
       {
         n: 10,
-        heading: "Respectful Workplace",
-        bullets: [
-          "The Company is committed to a workplace free of harassment and discrimination. The Sexual Harassment of Women at Workplace (Prevention, Prohibition and Redressal) Act, 2013 applies to interns as it does to employees, and you are entitled to its protection throughout this engagement.",
-          `Any concern of this nature may be raised directly with the undersigned or in writing to ${COMPANY.hrEmail}, and will be taken seriously, handled confidentially, and dealt with in accordance with the Act. As the Company currently has fewer than ten workers, a complaint may also be made to the Local Committee constituted by the District Officer under Section 6 of the Act.`,
-          "No person will be disadvantaged for raising a concern in good faith.",
-        ],
-      },
-      {
-        n: 11,
         heading: "Term, Termination & Certificate",
         bullets: [
           "This internship runs for the term stated above unless ended earlier in accordance with this section. It ends automatically on the end date without further notice, and does not renew unless agreed in writing.",
@@ -182,7 +219,7 @@ export function buildInternshipOffer(
         ],
       },
       {
-        n: 12,
+        n: 11,
         heading: "General",
         bullets: [
           "This offer is made on the basis of the information you have provided, and is conditional on that information being accurate and on verification of your identity, education, and any prior engagement, together with your submission of the documents the Company reasonably requests.",
