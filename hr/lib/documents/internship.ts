@@ -37,10 +37,20 @@ export function buildInternshipOffer(
   opts: { ref: string; date: string; startDate?: string; mentor?: string; scopeBullets?: string[] },
 ): InternshipOffer {
   const months = e.internshipMonths ?? 2;
+  // The FIXED stipend and any performance incentive are stated separately on
+  // purpose. Rolling them into one figure would commit the company to paying
+  // the incentive as guaranteed pay — the intern could reasonably hold us to
+  // the combined number, which defeats the point of making it performance-linked.
   const stipend =
     e.grossMonthly > 0
-      ? `INR ${fmt(e.grossMonthly)} per month`
+      ? `INR ${fmt(e.grossMonthly)} per month (fixed)`
       : "This is an unpaid internship (no stipend payable)";
+  const incentive =
+    e.variableMin && e.variableMax
+      ? `INR ${fmt(e.variableMin)} – ${fmt(e.variableMax)} per month, performance-linked and at the Company's discretion`
+      : e.variableMax
+        ? `Up to INR ${fmt(e.variableMax)} per month, performance-linked and at the Company's discretion`
+        : null;
 
   const scope =
     opts.scopeBullets && opts.scopeBullets.length > 0
@@ -67,6 +77,7 @@ export function buildInternshipOffer(
       { label: "Engagement Type", value: e.employmentType || "Full-time internship · Remote-first" },
       { label: "Reporting To", value: opts.mentor || "Program Mentor, ShieldSync Security" },
       { label: "Stipend", value: stipend },
+      ...(incentive ? [{ label: "Performance Incentive", value: incentive }] : []),
       { label: "Certificate", value: "Certificate of completion issued on successful completion" },
       { label: "Location", value: e.baseLocation || "Remote / Noida, Uttar Pradesh, India" },
     ],

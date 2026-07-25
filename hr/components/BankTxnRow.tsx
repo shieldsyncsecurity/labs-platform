@@ -10,9 +10,10 @@ const CUSTOM_SENTINEL = "__custom__";
 
 /** One ledger row. The category is editable inline — auto-categorisation is a
  * starting guess, and money views are only as good as their classification. */
-export function BankTxnRow({ txn }: { txn: BankTxn }) {
+export function BankTxnRow({ txn, people }: { txn: BankTxn; people: Array<{ seq: number; name: string }> }) {
   const router = useRouter();
   const [category, setCategory] = useState<BankCategory>(txn.category);
+  const [person, setPerson] = useState<number | "">(txn.matchedEmployeeSeq ?? "");
   const [note, setNote] = useState(txn.note ?? "");
   const [savedNote, setSavedNote] = useState(txn.note ?? "");
   const [noteState, setNoteState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -40,6 +41,58 @@ export function BankTxnRow({ txn }: { txn: BankTxn }) {
       alert("Could not reach the server.");
     }
     setBusy(false);
+  }
+
+  /** Tag a row to a person. Needed because money often moves through a family
+   * member's account — Yachna's father's transfer is still hers — so name
+   * matching alone can never get this right. */
+  async function tagPerson(next: number | "") {
+    const prev = person;
+    setPerson(next); // optimistic
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/banking/${encodeURIComponent(txn.txnId)}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ matchedEmployeeSeq: next === "" ? null : Number(next) }),
+      });
+      if (!res.ok) {
+        setPerson(prev);
+        alert((await res.json().catch(() => ({}))).error ?? "Could not tag it.");
+      } else {
+        router.refresh();
+      }
+    } catch {
+      setPerson(prev);
+      alert("Could not reach the server.");
+    }
+    setBusy(false);
+  }
+
+  async function remove() {
+    if (!confirm(
+      `Remove this transaction from the ledger?
+
+${txn.date}  ${txn.counterparty ?? txn.particulars.slice(0, 40)}
+` +
+      `${txn.credit ? "+" : "−"}${formatINR(txn.credit || txn.debit)}
+
+` +
+      "Your month totals will change. Re-importing the statement will bring it back."
+    )) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/banking/${encodeURIComponent(txn.txnId)}`, { method: "DELETE" });
+      if (!res.ok) {
+        alert((await res.json().catch(() => ({}))).error ?? "Could not remove it.");
+        setBusy(false);
+        return;
+      }
+      router.refresh();
+    } catch {
+      alert("Could not reach the server.");
+      setBusy(false);
+    }
   }
 
   /** Saves on blur (and on Enter) — no per-row save button to hunt for. Only
@@ -130,6 +183,22 @@ export function BankTxnRow({ txn }: { txn: BankTxn }) {
           </select>
         )}
       </td>
+      <td style={{ padding: "8px 10px" }}>
+        <select
+          value={person}
+          disabled={busy}
+          onChange={(e) => tagPerson(e.target.value === "" ? "" : Number(e.target.value))}
+          style={{
+            fontSize: 11.5, padding: "3px 6px", border: "1px solid #d4dbe8", borderRadius: 6,
+            background: person === "" ? "#fff" : "#eef6ff", color: person === "" ? "#8a94a3" : "#1b2331", maxWidth: 140,
+          }}
+        >
+          <option value="">— not tagged —</option>
+          {people.map((p) => (
+            <option key={p.seq} value={p.seq}>{p.name}</option>
+          ))}
+        </select>
+      </td>
       <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap", fontWeight: 700, fontVariantNumeric: "tabular-nums", color: isCredit ? "#146c3c" : "#9a2233" }}>
         {isCredit ? "+" : "−"}
         {formatINR(isCredit ? txn.credit : txn.debit)}
@@ -167,6 +236,17 @@ export function BankTxnRow({ txn }: { txn: BankTxn }) {
             {noteState === "saving" ? "…" : noteState === "saved" ? "✓" : noteState === "error" ? "!" : ""}
           </span>
         </div>
+      </td>
+      <td style={{ padding: "8px 10px", textAlign: "right" }}>
+        <button
+          type="button"
+          onClick={remove}
+          disabled={busy}
+          title="Remove this transaction from the ledger"
+          style={{ background: "none", border: "none", color: "#c3cee0", fontSize: 15, lineHeight: 1, cursor: busy ? "default" : "pointer", padding: "2px 4px" }}
+        >
+          ×
+        </button>
       </td>
     </tr>
   );

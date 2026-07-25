@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getHrActor } from "@/lib/server/hr-session";
 import { hrFetch } from "@/lib/server/hr-engine";
-import { parseIdfcStatement, categorise, type RosterEntry } from "@/lib/banking";
+import { parseIdfcStatement, categorise, type RosterEntry, type BankTxn } from "@/lib/banking";
 import type { Employee } from "@/lib/employee";
 
 export const dynamic = "force-dynamic";
@@ -64,7 +64,30 @@ export async function POST(req: Request) {
   } catch {
     /* categorisation still works, just without employee matching */
   }
-  const transactions = parsed.transactions.map((t) => ({ ...t, ...categorise(t, roster) }));
+  let transactions = parsed.transactions.map((t) => ({ ...t, ...categorise(t, roster) }));
+
+  // Learn from past corrections: if the user has already classified a
+  // counterparty by hand (e.g. "AMITA JAIN" -> Loan), apply that to new rows
+  // from the same counterparty instead of making them reclassify it every
+  // month. The classification history IS the rule set — no separate config to
+  // maintain or drift out of sync.
+  try {
+    const known = (await hrFetch<{ transactions: BankTxn[] }>("/hr/banking")).transactions ?? [];
+    const learned = new Map<string, string>();
+    for (const t of known) {
+      if (t.categorySetBy !== "user" || !t.counterparty) continue;
+      learned.set(t.counterparty.toUpperCase(), t.category);
+    }
+    if (learned.size) {
+      transactions = transactions.map((t) => {
+        const rule = t.counterparty ? learned.get(t.counterparty.toUpperCase()) : undefined;
+        // Never override a confident employee match — payroll beats a name rule.
+        return rule && !t.matchedEmployeeSeq ? { ...t, category: rule, categorySetBy: "user" } : t;
+      });
+    }
+  } catch {
+    /* learning is a convenience; a failure here must not block the import */
+  }
 
   return NextResponse.json({ ok: true, ...parsed, transactions, fileName: file.name });
 }

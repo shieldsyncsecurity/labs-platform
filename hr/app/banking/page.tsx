@@ -47,6 +47,25 @@ export default async function BankingPage({ searchParams }: { searchParams: Prom
   }
   const active = employees.filter((e) => e.status !== "exited");
 
+  // Everyone taggable, including exited staff — you still need to answer
+  // "how much did we ever pay Yachna?" after she's left.
+  const people = employees.map((e) => ({ seq: e.seq, name: e.name }));
+
+  // ALL-TIME position per person, across every imported month. Money can flow
+  // BOTH ways for the same person (we pay a stipend; a parent transfers a
+  // course fee from their own account), so in/out/net are tracked separately —
+  // a single "total" would net them off and hide both figures.
+  const ledger = new Map<number, { inAmt: number; outAmt: number; count: number }>();
+  for (const t of all) {
+    if (!t.matchedEmployeeSeq) continue;
+    const cur = ledger.get(t.matchedEmployeeSeq) ?? { inAmt: 0, outAmt: 0, count: 0 };
+    cur.inAmt += t.credit;
+    cur.outAmt += t.debit;
+    cur.count += 1;
+    ledger.set(t.matchedEmployeeSeq, cur);
+  }
+  const untagged = all.filter((t) => !t.matchedEmployeeSeq).length;
+
   return (
     <main style={{ maxWidth: 1180, margin: "0 auto", padding: "36px 24px 48px", fontFamily: "Arial, Helvetica, 'Segoe UI', sans-serif" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
@@ -195,6 +214,54 @@ export default async function BankingPage({ searchParams }: { searchParams: Prom
             </section>
           ) : null}
 
+          {/* Per-person, all months */}
+          {ledger.size > 0 ? (
+            <section style={{ marginTop: 26 }}>
+              <div style={groupTitle}>Money by person — all imported months</div>
+              <div style={card}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ textAlign: "left", color: "#8a94a3", fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>
+                      <th style={{ padding: "6px 8px" }}>Person</th>
+                      <th style={{ padding: "6px 8px", textAlign: "right" }}>Received from</th>
+                      <th style={{ padding: "6px 8px", textAlign: "right" }}>Paid to</th>
+                      <th style={{ padding: "6px 8px", textAlign: "right" }}>Net</th>
+                      <th style={{ padding: "6px 8px", textAlign: "right" }}>Txns</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees
+                      .filter((e) => ledger.has(e.seq))
+                      .map((e) => {
+                        const v = ledger.get(e.seq)!;
+                        const net = v.inAmt - v.outAmt;
+                        return (
+                          <tr key={e.seq} style={{ borderTop: "1px solid #eef2f7" }}>
+                            <td style={{ padding: "8px" }}>
+                              <Link href={`/employees/${e.seq}`} style={{ color: "#1f3a5f", fontWeight: 600, textDecoration: "none" }}>{e.name}</Link>
+                              <div style={{ fontSize: 10.5, color: "#8a94a3" }}>{e.designation}</div>
+                            </td>
+                            <td style={{ padding: "8px", textAlign: "right", color: v.inAmt ? "#146c3c" : "#c3cee0", fontVariantNumeric: "tabular-nums" }}>{v.inAmt ? formatINR(v.inAmt) : "—"}</td>
+                            <td style={{ padding: "8px", textAlign: "right", color: v.outAmt ? "#9a2233" : "#c3cee0", fontVariantNumeric: "tabular-nums" }}>{v.outAmt ? formatINR(v.outAmt) : "—"}</td>
+                            <td style={{ padding: "8px", textAlign: "right", fontWeight: 700, color: net >= 0 ? "#146c3c" : "#9a2233", fontVariantNumeric: "tabular-nums" }}>
+                              {net >= 0 ? "+" : "−"}{formatINR(Math.abs(net))}
+                            </td>
+                            <td style={{ padding: "8px", textAlign: "right", color: "#8a94a3" }}>{v.count}</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+                <p style={{ fontSize: 11, color: "#8a94a3", marginTop: 10, lineHeight: 1.5 }}>
+                  Covers every imported month, not just the one selected above. Tag a transaction to someone using the
+                  <b> Person</b> column below — useful when money moves through a family member&rsquo;s account, which name
+                  matching can never catch on its own.
+                  {untagged > 0 ? <> <b>{untagged}</b> transaction{untagged === 1 ? " is" : "s are"} still untagged.</> : null}
+                </p>
+              </div>
+            </section>
+          ) : null}
+
           {/* Full ledger */}
           <section style={{ marginTop: 26 }}>
             <div style={groupTitle}>All transactions — {monthLabel(month!)}</div>
@@ -206,20 +273,22 @@ export default async function BankingPage({ searchParams }: { searchParams: Prom
                     <th style={{ padding: "8px 10px" }}>Counterparty</th>
                     <th style={{ padding: "8px 10px" }}>Via</th>
                     <th style={{ padding: "8px 10px" }}>Category</th>
+                    <th style={{ padding: "8px 10px" }}>Person</th>
                     <th style={{ padding: "8px 10px", textAlign: "right" }}>Amount</th>
                     <th style={{ padding: "8px 10px", textAlign: "right" }}>Balance</th>
                     <th style={{ padding: "8px 10px" }}>Remark</th>
+                    <th style={{ padding: "8px 10px" }} />
                   </tr>
                 </thead>
                 <tbody>
                   {txns.map((t) => (
-                    <BankTxnRow key={t.txnId} txn={t} />
+                    <BankTxnRow key={t.txnId} txn={t} people={people} />
                   ))}
                 </tbody>
               </table>
             </div>
             <p style={{ fontSize: 11, color: "#8a94a3", marginTop: 8 }}>
-              Click a category to reclassify it (or pick <b>+ Custom…</b> to name your own). Remarks save as you click away. Both stick — re-importing a statement won&rsquo;t overwrite them.
+              Click a category to reclassify it (or pick <b>+ Custom…</b> to name your own). Remarks save as you click away — clear the box to delete one. Both stick: re-importing a statement won&rsquo;t overwrite them. Use × to remove a row entirely.
             </p>
           </section>
         </>

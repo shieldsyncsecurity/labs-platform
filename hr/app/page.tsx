@@ -106,7 +106,8 @@ export default function Home() {
       </section>
 
       <div style={{ fontSize: 11, color: "#8a94a3", marginTop: 32, borderTop: "1px solid #eef2f7", paddingTop: 16 }}>
-        Sample templates: <Link href="/preview/offer" style={{ color: "#2f4fb0" }}>letter</Link> ·{" "}
+        Sample templates: <Link href="/preview/offer" style={{ color: "#2f4fb0" }}>appointment letter</Link> ·{" "}
+        <Link href="/preview/internship" style={{ color: "#2f4fb0" }}>internship offer</Link> ·{" "}
         <Link href="/preview/payslip" style={{ color: "#2f4fb0" }}>payslip</Link>
       </div>
     </main>

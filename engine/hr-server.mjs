@@ -371,6 +371,19 @@ const server = http.createServer(async (req, res) => {
           gen: { docId: d.docId, docType: d.docType, title: d.title, ref: d.ref, generatedBy: d.generatedBy, generatedAt: d.generatedAt, snapshot: JSON.parse(d.snapshotJson || "{}") },
         });
       }
+
+      // Withdraw an issued document (mirrors the prod Lambda) — audited WITH
+      // the ref so a gap in the series is always traceable to a decision.
+      if (parts.length === 5 && req.method === "DELETE") {
+        const body = await readBody(req);
+        const i = db.documents.findIndex((x) => x.employeeSeq === seq && x.docId === parts[4] && x.category === "generated");
+        if (i < 0) return send(res, 404, { error: "NOT_FOUND" });
+        const d = db.documents[i];
+        db.documents.splice(i, 1);
+        audit(db, body.actor, "doc.delete", `${seq}/${parts[4]}`, { docType: d.docType, ref: d.ref, title: d.title });
+        save(db);
+        return send(res, 200, { ok: true });
+      }
     }
 
     // /hr/email — send a document to an employee (Resend; simulated when no key)

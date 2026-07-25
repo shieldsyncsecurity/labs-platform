@@ -80,6 +80,13 @@ export type BankTxn = {
   credit: number; // 0 when this row is a debit
   balance: number;
   category: BankCategory;
+  /**
+   * "user" once a human has classified this row. The engine uses it to protect
+   * the choice from being reverted by a later re-import, and the parser uses it
+   * to learn counterparty rules (classify "AMITA JAIN" as a loan once, and
+   * future imports follow).
+   */
+  categorySetBy?: "user";
   /** Set when the counterparty resolves to someone on the employee roster. */
   matchedEmployeeSeq?: number;
   note?: string;

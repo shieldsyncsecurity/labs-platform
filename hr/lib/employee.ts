@@ -54,7 +54,14 @@ export type Employee = {
 
   // probation / internship terms (drive the confirmation + internship letters)
   probationMonths?: number; // default 3 (full-time roles)
-  internshipMonths?: number; // internship engagements only
+  internshipMonths?: number;
+  /**
+   * Performance-linked pay, stated as a range and NOT part of grossMonthly.
+   * Kept separate so offer letters commit only to the fixed figure — folding
+   * it into gross would make a discretionary incentive contractually owed.
+   */
+  variableMin?: number;
+  variableMax?: number; // internship engagements only
 
   // bank
   bankAccount?: string;
@@ -173,6 +180,8 @@ export function normalizeEmployee(input: Partial<Employee>): Omit<Employee, "emp
     transitions: Array.isArray(input.transitions) ? input.transitions : undefined,
     probationMonths: Number(input.probationMonths) > 0 ? Math.round(Number(input.probationMonths)) : undefined,
     internshipMonths: Number(input.internshipMonths) > 0 ? Math.round(Number(input.internshipMonths)) : undefined,
+    variableMin: Number(input.variableMin) > 0 ? Math.round(Number(input.variableMin)) : undefined,
+    variableMax: Number(input.variableMax) > 0 ? Math.round(Number(input.variableMax)) : undefined,
     bankAccount: input.bankAccount?.trim() || undefined,
     bankBranch: input.bankBranch?.trim() || undefined,
     ifsc: input.ifsc?.trim() || undefined,

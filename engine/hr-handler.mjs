@@ -428,6 +428,18 @@ export async function handler(event) {
           gen: { docId: g.Item.docId, docType: g.Item.docType, title: g.Item.title, ref: g.Item.ref, generatedBy: g.Item.generatedBy, generatedAt: g.Item.generatedAt, snapshot: JSON.parse(g.Item.snapshotJson || "{}") },
         });
       }
+
+      // Withdraw an issued document — for one genuinely issued in error (wrong
+      // month, superseded details). The deletion is audited WITH the ref so the
+      // series stays explainable: a gap in SSS/HR numbering must be traceable
+      // to a decision, not look like a lost document.
+      if (parts.length === 5 && method === "DELETE") {
+        const g = await ddb.send(new GetCommand({ TableName: T_DOC, Key: { employeeSeq: seq, docId: parts[4] } }));
+        if (!g.Item || g.Item.category !== "generated") return resp(404, { error: "NOT_FOUND" });
+        await ddb.send(new DeleteCommand({ TableName: T_DOC, Key: { employeeSeq: seq, docId: parts[4] } }));
+        await writeAudit(body.actor, "doc.delete", `${seq}/${parts[4]}`, { docType: g.Item.docType, ref: g.Item.ref, title: g.Item.title });
+        return resp(200, { ok: true });
+      }
     }
 
     // ---- /hr/email (send a document to an employee via Resend) ----
