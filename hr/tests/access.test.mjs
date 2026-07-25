@@ -121,8 +121,11 @@ test("sending a questionnaire and hiring are writes even though the page is a re
   assert.deepEqual(req("/api/candidates/1/hire", "POST"), { kind: "area", area: "candidates", need: "write" });
 });
 
-test("the bulk export needs employee access", () => {
-  assert.deepEqual(req("/api/export"), { kind: "area", area: "employees", need: "read" });
+test("the bulk export is administrator-only, not merely employee-read", () => {
+  // It returns every employee, every issued payslip snapshot and all KYC
+  // metadata in one file. Anything less than admin would make the salary and
+  // bank-detail masking decorative — download it all instead of reading the UI.
+  assert.equal(req("/api/export").kind, "admin");
 });
 
 test("trailing slashes do not bypass the map", () => {

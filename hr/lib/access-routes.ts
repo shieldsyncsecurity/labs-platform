@@ -93,8 +93,13 @@ export function requirementFor(pathname: string, method: string): Requirement {
     return area("employees", "read"); // /employees/:seq
   }
 
-  // --- Bulk data export: the whole employee master in one file ---
-  if (p === "/api/export") return area("employees", "read");
+  // --- Bulk data export: administrator only ------------------------------
+  // This returns the ENTIRE data plane in one JSON: every employee, every
+  // issued-document snapshot (which contain salary figures), and KYC metadata.
+  // Gating it on `employees: read` would have made every field-level protection
+  // decorative — someone barred from seeing salary in the UI could download all
+  // of it in one request. A whole-company backup is an owner action.
+  if (p === "/api/export") return ADMIN;
 
   // Unmapped: administrator only. New surfaces must be added above deliberately.
   return ADMIN;
