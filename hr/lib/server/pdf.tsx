@@ -68,6 +68,11 @@ export async function buildIssuedPdf(req: Request, seq: string, genId: string): 
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
+    // Puppeteer's page.pdf() defaults to emulating 'print' media (same as a
+    // real printer) — which would silently strip the offer letter's @media
+    // print watermark rule, the OPPOSITE of intended: this "Download PDF" path
+    // is the online/digital copy and must keep the watermark. Force 'screen'.
+    await page.emulateMediaType("screen");
     const pdf = await page.pdf({ format: "a4", printBackground: true, preferCSSPageSize: true });
     return { pdf: new Uint8Array(pdf), gen };
   } finally {

@@ -31,6 +31,7 @@ export function InternshipOfferDoc({ offer, toolbar }: { offer: InternshipOffer;
       ) : null}
 
       <div className="ss-sheet">
+        <div className="ss-watermark"><span>DIGITAL COPY &mdash; COLLECT ORIGINAL IN PERSON</span></div>
         <div className="ss-run">
           <span>{COMPANY.legalName}</span>
           <span className="r">Internship Offer Letter</span>

@@ -50,12 +50,18 @@ export default async function GenerateInternshipOffer({
     <InternshipOfferDoc
       offer={offer}
       toolbar={
-        <DocToolbar
-          backHref={`/employees/${seq}`}
-          backLabel={e.name}
-          save={{ seq, docType: "internship-offer", title: "INTERNSHIP OFFER LETTER", refSeries: "int", refYear: now.getFullYear(), snapshot: offer }}
-          email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Your Internship Offer — ShieldSync Security` }}
-        />
+        <>
+          <div style={{ background: "#fdf4e3", border: "1px solid #f0dfb8", color: "#7a5714", fontSize: 12.5, borderRadius: 8, padding: "9px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+            <b>Policy:</b> offers are collected in person at the office, not emailed. Print or save this letter for the candidate to
+            sign and collect physically — use Email only if they genuinely cannot come in.
+          </div>
+          <DocToolbar
+            backHref={`/employees/${seq}`}
+            backLabel={e.name}
+            save={{ seq, docType: "internship-offer", title: "INTERNSHIP OFFER LETTER", refSeries: "int", refYear: now.getFullYear(), snapshot: offer }}
+            email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Your Internship Offer — ShieldSync Security` }}
+          />
+        </>
       }
     />
   );

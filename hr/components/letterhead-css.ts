@@ -76,11 +76,23 @@ export const LETTERHEAD_CSS = `
   border-top:1px solid #d7deea; padding-top:8px; margin-top:26px; font-style:italic; gap:10px; }
 .ss-foot .c{ font-style:normal; text-align:center; }
 
+/* Offer-letter-only: online/digital views (screen, and the server-rendered
+   "Download PDF" — see lib/server/pdf.tsx forcing 'screen' media so Puppeteer
+   doesn't pick up the @media print rule below) carry this watermark. The
+   ACTUAL printed/physical copy (window.print(), whether to a real printer or
+   "Save as PDF" from the print dialog) never gets it — that copy is what the
+   candidate signs and collects in person, and must read as the real thing. */
+.ss-watermark{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  overflow:hidden; pointer-events:none; z-index:1; }
+.ss-watermark span{ font-size:54px; font-weight:800; color:#1f3a5f; opacity:.09;
+  transform:rotate(-32deg); white-space:nowrap; letter-spacing:.04em; }
+
 @media print {
   .ss-stage{ background:#fff !important; padding:0 !important; }
   .ss-sheet{ box-shadow:none !important; margin:0 !important; max-width:none !important;
     border-radius:0 !important; padding:22mm 18mm !important; }
   .ss-noprint{ display:none !important; }
+  .ss-watermark{ display:none !important; }
   @page{ size:A4; margin:0; }
 }
 `;
