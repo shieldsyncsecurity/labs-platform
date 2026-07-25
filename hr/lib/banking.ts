@@ -11,6 +11,12 @@
 
 import JSZip from "jszip";
 
+/**
+ * Built-in categories, plus anything the user types. The `(string & {})` arm
+ * keeps editor autocomplete for the known values while still permitting a
+ * custom label — a small business always has a bucket nobody predicted, and
+ * forcing those into "Uncategorised" makes the money view useless.
+ */
 export type BankCategory =
   | "salary"
   | "professional-fee"
@@ -19,10 +25,12 @@ export type BankCategory =
   | "tax"
   | "bank-charge"
   | "owner-funds"
+  | "loan"
   | "transfer"
-  | "other";
+  | "other"
+  | (string & {});
 
-export const CATEGORY_LABEL: Record<BankCategory, string> = {
+const BUILT_IN_LABELS: Record<string, string> = {
   salary: "Salary",
   "professional-fee": "Professional fee",
   revenue: "Client revenue",
@@ -30,13 +38,24 @@ export const CATEGORY_LABEL: Record<BankCategory, string> = {
   tax: "Tax (GST / TDS)",
   "bank-charge": "Bank charges",
   "owner-funds": "Owner funds",
+  loan: "Loan (given / repaid)",
   transfer: "Internal transfer",
   other: "Uncategorised",
 };
 
+/** Display name — a custom category shows exactly as the user typed it. */
+export function categoryLabel(c: BankCategory): string {
+  return BUILT_IN_LABELS[c] ?? c;
+}
+
+/** Kept as an alias so existing lookups keep working. */
+export const CATEGORY_LABEL = BUILT_IN_LABELS;
+
+/** Dropdown order for the built-ins; custom values are appended at runtime. */
 export const CATEGORY_ORDER: BankCategory[] = [
   "revenue",
   "owner-funds",
+  "loan",
   "salary",
   "professional-fee",
   "vendor",
@@ -359,7 +378,14 @@ export function summarise(txns: BankTxn[]): {
     cur.count += 1;
     map.set(t.category, cur);
   }
-  const byCategory = CATEGORY_ORDER.filter((c) => map.has(c)).map((c) => ({ category: c, ...map.get(c)! }));
+  // Built-ins first in their canonical order, then any custom categories the
+  // user invented. Filtering to CATEGORY_ORDER alone would drop custom rows
+  // from the breakdown and the totals would silently stop adding up.
+  const seen = new Set<string>();
+  const ordered: BankCategory[] = [];
+  for (const c of CATEGORY_ORDER) if (map.has(c)) { ordered.push(c); seen.add(c); }
+  for (const c of [...map.keys()].sort()) if (!seen.has(c)) ordered.push(c);
+  const byCategory = ordered.map((c) => ({ category: c, ...map.get(c)! }));
   return { totalIn, totalOut, net: totalIn - totalOut, byCategory };
 }
 

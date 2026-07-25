@@ -2,7 +2,7 @@ import Link from "next/link";
 import { hrFetch } from "@/lib/server/hr-engine";
 import { BankImport } from "@/components/BankImport";
 import { BankTxnRow } from "@/components/BankTxnRow";
-import { CATEGORY_LABEL, formatINR, summarise, type BankTxn } from "@/lib/banking";
+import { categoryLabel, formatINR, summarise, type BankTxn } from "@/lib/banking";
 import type { Employee } from "@/lib/employee";
 
 export const dynamic = "force-dynamic";
@@ -125,7 +125,7 @@ export default async function BankingPage({ searchParams }: { searchParams: Prom
                 <tbody>
                   {s.byCategory.map((c) => (
                     <tr key={c.category} style={{ borderTop: "1px solid #eef2f7" }}>
-                      <td style={{ padding: "8px", fontWeight: 600, color: "#1b2331" }}>{CATEGORY_LABEL[c.category]}</td>
+                      <td style={{ padding: "8px", fontWeight: 600, color: "#1b2331" }}>{categoryLabel(c.category)}</td>
                       <td style={{ padding: "8px", textAlign: "right", color: c.in ? "#146c3c" : "#c3cee0", fontVariantNumeric: "tabular-nums" }}>{c.in ? formatINR(c.in) : "—"}</td>
                       <td style={{ padding: "8px", textAlign: "right", color: c.out ? "#9a2233" : "#c3cee0", fontVariantNumeric: "tabular-nums" }}>{c.out ? formatINR(c.out) : "—"}</td>
                       <td style={{ padding: "8px", textAlign: "right", color: "#8a94a3" }}>{c.count}</td>
@@ -208,6 +208,7 @@ export default async function BankingPage({ searchParams }: { searchParams: Prom
                     <th style={{ padding: "8px 10px" }}>Category</th>
                     <th style={{ padding: "8px 10px", textAlign: "right" }}>Amount</th>
                     <th style={{ padding: "8px 10px", textAlign: "right" }}>Balance</th>
+                    <th style={{ padding: "8px 10px" }}>Remark</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -218,7 +219,7 @@ export default async function BankingPage({ searchParams }: { searchParams: Prom
               </table>
             </div>
             <p style={{ fontSize: 11, color: "#8a94a3", marginTop: 8 }}>
-              Click a category to reclassify it. Your choice sticks — re-importing a statement won&rsquo;t overwrite it.
+              Click a category to reclassify it (or pick <b>+ Custom…</b> to name your own). Remarks save as you click away. Both stick — re-importing a statement won&rsquo;t overwrite them.
             </p>
           </section>
         </>

@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CATEGORY_LABEL, formatINR, type BankTxn } from "@/lib/banking";
+import { categoryLabel, formatINR, type BankTxn } from "@/lib/banking";
 import { ghostBtn, primaryBtn } from "./fields";
 
 type Parsed = {
@@ -141,7 +141,7 @@ export function BankImport() {
                   <tr key={t.txnId} style={{ borderTop: "1px solid #f4f7fb" }}>
                     <td style={{ padding: "6px 8px", color: "#5b6676", whiteSpace: "nowrap" }}>{t.date}</td>
                     <td style={{ padding: "6px 8px", color: "#1b2331" }}>{t.counterparty ?? t.particulars.slice(0, 40)}</td>
-                    <td style={{ padding: "6px 8px", color: "#8a94a3", whiteSpace: "nowrap" }}>{CATEGORY_LABEL[t.category]}</td>
+                    <td style={{ padding: "6px 8px", color: "#8a94a3", whiteSpace: "nowrap" }}>{categoryLabel(t.category)}</td>
                     <td style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap", color: t.credit ? "#146c3c" : "#9a2233", fontVariantNumeric: "tabular-nums" }}>
                       {t.credit ? "+" + formatINR(t.credit) : "−" + formatINR(t.debit)}
                     </td>
