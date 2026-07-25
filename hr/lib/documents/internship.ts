@@ -84,36 +84,118 @@ export function buildInternshipOffer(
     sections: [
       {
         n: 2,
-        heading: "Scope of Work",
+        heading: "Nature of This Engagement",
         intro:
-          "During your internship, you will gain hands-on exposure to real cloud and security work, mentored by practising security engineers. Your responsibilities will include:",
-        bullets: scope,
-      },
-      {
-        n: 3,
-        heading: "Confidentiality, IP & Conduct",
-        intro: `As a security organisation, ${COMPANY.shortName} handles sensitive systems, client data, and proprietary tooling. By accepting this internship, you agree to the following:`,
+          "So that there is no ambiguity later, both parties record their understanding of what this engagement is and is not:",
         bullets: [
-          "Confidentiality: You will keep strictly confidential all non-public information you access during the internship — including client data, credentials, lab environments, source code, security findings, methodologies, and business information — and will not disclose, copy, or use it for any purpose other than your assigned work, both during and after the internship.",
-          `Intellectual Property: All work product, code, documentation, reports, and materials you create in the course of the internship are the sole and exclusive property of ${COMPANY.legalName}. You hereby assign all rights, title, and interest in such work product to the Company.`,
-          "Data & Systems: You will access only the systems, accounts, and data expressly authorised for your tasks, and will follow all Company security policies and lawful, ethical handling of any environment you are given access to.",
-          "Responsible Conduct: You will not perform any security testing or access against systems outside the authorised lab or project scope. Any unauthorised activity is strictly prohibited.",
-          "Return of Materials: On completion or earlier termination, you will return or securely destroy all Company materials, credentials, and data in your possession.",
+          "Internship, not employment: This is a fixed-term internship for learning and practical experience. It does not create an employer-employee relationship, does not constitute an offer of employment, and places no obligation on either party to enter into one at the end of the term.",
+          "Stipend, not wages: The amounts set out above are a stipend paid in support of your internship. They are not wages or salary, and are not consideration for an employment contract.",
+          "Statutory benefits: As this is not employment, you will not accrue provident fund, gratuity, employee state insurance, leave encashment, notice pay, severance, or other benefits available to employees. Any statutory deduction that does become applicable by law will be made and remitted accordingly.",
+          "No authority to bind: You may not enter into contracts, make commitments, incur expenditure, or hold yourself out as authorised to act on behalf of the Company, except as expressly instructed in writing.",
         ],
       },
       {
+        n: 3,
+        heading: "Scope of Work & Learning",
+        intro:
+          "You will be given real, substantive work with guidance and review, rather than observation alone. Your responsibilities will include:",
+        bullets: scope,
+      },
+      {
         n: 4,
-        heading: "General Terms",
+        heading: "Working Arrangements",
         bullets: [
-          "This internship is for learning and skill-building; it does not constitute an offer of employment, and creates no obligation on either party to enter into an employment relationship.",
-          "Either party may terminate this internship with prior written notice of seven (7) days. The Company may terminate immediately for breach of confidentiality, misconduct, or violation of the terms above.",
-          "Successful completion is subject to satisfactory performance, attendance, and completion of assigned deliverables.",
-          `This letter is governed by the laws of ${COMPANY.governingLaw}, with jurisdiction in the courts of ${COMPANY.jurisdiction}.`,
+          "Working days and hours are Monday to Friday, ordinarily 10:00 AM to 7:00 PM, with flexibility on both sides where the work requires it. You will not be required to work on public holidays.",
+          "The stipend is paid monthly in arrears, by bank transfer, ordinarily within the first ten (10) working days of the following month.",
+          "Any performance incentive is assessed at the end of each month, is at the sole discretion of the Company, and is neither guaranteed nor an entitlement. A month in which no incentive is paid is not a breach of this letter.",
+          "You are entitled to one (1) day of paid leave per completed month of the internship, to be taken with prior approval. Leave does not carry forward beyond the term and is not encashable.",
+          "You will inform the Company as early as practicable if you are unable to attend on a working day.",
+        ],
+      },
+      {
+        n: 5,
+        heading: "Confidentiality & Data Protection",
+        intro: `As a security organisation, ${COMPANY.shortName} handles sensitive systems, client data, employee records, and proprietary tooling. By accepting this internship you agree that:`,
+        bullets: [
+          "You will keep strictly confidential all non-public information you access — including client data, credentials, lab environments, source code, security findings, methodologies, commercial terms, employee and candidate records, and business information — and will not disclose, copy, transmit, or use it for any purpose other than your assigned work.",
+          "These confidentiality obligations continue during the internship and remain in force after it ends, without limit of time for anything that constitutes a trade secret, and for three (3) years from the end of the term for all other confidential information.",
+          "Where you handle personal data belonging to any individual, you will process it only as instructed by the Company and in accordance with the Digital Personal Data Protection Act, 2023. You will not retain personal data after the term ends, and you will report any suspected data breach or accidental disclosure to the Company immediately.",
+          "You will not make any public statement, social media post, or other disclosure that identifies the Company's clients, engagements, findings, or internal matters, at any time.",
+          "Confidential information does not include information that is or becomes public through no act of yours, or that you are required to disclose by law or a competent authority — in which case you will notify the Company in advance where lawfully permitted.",
+        ],
+      },
+      {
+        n: 6,
+        heading: "Intellectual Property",
+        bullets: [
+          `All work product, code, documentation, reports, designs, materials, and other output you create in the course of or in connection with this internship is the sole and exclusive property of ${COMPANY.legalName}.`,
+          "You hereby irrevocably assign to the Company all present and future rights, title, and interest in such work product, including copyright, worldwide and for the full term of those rights, and you waive any moral rights in it to the extent permitted by law.",
+          "You will, at the Company's request and cost, sign any further document reasonably required to give effect to this assignment.",
+          "If you incorporate anything you owned before this internship, or any third-party or open-source material, into your work product, you will identify it to the Company in advance and ensure the Company has the rights it needs to use it.",
+        ],
+      },
+      {
+        n: 7,
+        heading: "Security, Systems & Conduct",
+        bullets: [
+          "You will access only the systems, accounts, and data expressly authorised for your tasks, using credentials issued to you, and you will not share those credentials with anyone.",
+          "You will not perform security testing, scanning, or access of any kind against any system outside the authorised lab or project scope. This applies to Company systems, client systems, and third-party systems alike. Any unauthorised activity is a serious breach of this letter and may also be an offence under the Information Technology Act, 2000.",
+          "You will follow the Company's security policies and instructions, including on device security, password management, and handling of Company data on any personal device.",
+          "You will conduct yourself professionally and respectfully in all dealings with colleagues, clients, and third parties, and will comply with all applicable laws in the course of your work.",
+        ],
+      },
+      {
+        n: 8,
+        heading: "Conflict of Interest & Non-Solicitation",
+        bullets: [
+          "During the term you will not take up any engagement, employment, or activity that conflicts with your duties here or with the Company's interests, and you will disclose any potential conflict as soon as you become aware of it.",
+          "For twelve (12) months after the term ends, you will not solicit or attempt to entice away any client, prospective client, employee, or intern of the Company with whom you had material dealings during the internship.",
+          "For the avoidance of doubt, nothing in this letter restricts your right to work elsewhere, in any role or sector, after this internship ends.",
+        ],
+      },
+      {
+        n: 9,
+        heading: "Company Property & Return of Materials",
+        bullets: [
+          "Any equipment, devices, accounts, access cards, or materials issued to you remain the property of the Company, are to be used for Company purposes, and are to be kept secure and in good condition.",
+          "On completion or earlier termination, and in any event on request, you will promptly return all Company property and return or securely destroy all Company materials, credentials, and data in your possession or control, in any format, and confirm in writing that you have done so.",
+        ],
+      },
+      {
+        n: 10,
+        heading: "Respectful Workplace",
+        bullets: [
+          "The Company is committed to a workplace free of harassment and discrimination. The Sexual Harassment of Women at Workplace (Prevention, Prohibition and Redressal) Act, 2013 applies to interns as it does to employees, and you are entitled to its protection throughout this engagement.",
+          `Any concern of this nature may be raised directly with the undersigned or in writing to ${COMPANY.hrEmail}, and will be taken seriously, handled confidentially, and dealt with in accordance with the Act. As the Company currently has fewer than ten workers, a complaint may also be made to the Local Committee constituted by the District Officer under Section 6 of the Act.`,
+          "No person will be disadvantaged for raising a concern in good faith.",
+        ],
+      },
+      {
+        n: 11,
+        heading: "Term, Termination & Certificate",
+        bullets: [
+          "This internship runs for the term stated above unless ended earlier in accordance with this section. It ends automatically on the end date without further notice, and does not renew unless agreed in writing.",
+          "Either party may end the internship earlier by giving seven (7) days' prior written notice.",
+          "The Company may end it immediately, without notice, for breach of confidentiality or data protection obligations, unauthorised access or security testing, serious misconduct, dishonesty, or material breach of any term of this letter.",
+          "A Certificate of Completion will be issued on satisfactory completion of the full term, subject to performance, attendance, and completion of assigned deliverables. It is not issued where the internship ends early for cause.",
+          "The sections on Confidentiality & Data Protection, Intellectual Property, Conflict of Interest & Non-Solicitation, and Company Property survive the end of this engagement.",
+        ],
+      },
+      {
+        n: 12,
+        heading: "General",
+        bullets: [
+          "This offer is made on the basis of the information you have provided, and is conditional on that information being accurate and on verification of your identity, education, and any prior engagement, together with your submission of the documents the Company reasonably requests.",
+          "This letter, together with any policies the Company notifies to you, is the entire agreement between us on this engagement and supersedes any earlier discussion, representation, or understanding, whether written or verbal.",
+          "Any variation to these terms must be agreed in writing and signed by both parties.",
+          "If any provision of this letter is found to be unenforceable, the remainder continues in full force, and that provision will apply with the minimum modification necessary to make it enforceable.",
+          "A failure or delay by the Company in enforcing any term is not a waiver of that term or of any other.",
+          `This letter is governed by the laws of ${COMPANY.governingLaw}, and the courts of ${COMPANY.jurisdiction} have exclusive jurisdiction over any dispute arising from it.`,
         ],
       },
     ],
     closing:
-      "We look forward to your contributions and to supporting your growth into a job-ready security professional. To accept this offer, please sign and return a copy of this letter.",
+      "We look forward to your contributions and to supporting your growth into a job-ready professional. Please read this letter in full — it sets out the whole of what has been agreed. If anything is unclear or does not match your understanding, raise it before signing rather than after. To accept, please sign and return a copy.",
     signatory: DEFAULT_SIGNATORY,
   };
 }
