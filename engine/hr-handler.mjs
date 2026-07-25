@@ -108,7 +108,100 @@ async function writeAudit(actor, action, target, detail) {
   );
 }
 
+/**
+ * Daily "someone hasn't been paid" reminder.
+ *
+ * Salary for a month is DUE once that month has closed: an active employee with
+ * no issued payslip whose ref ends " YYYY-MM". Same rule the portal's banner and
+ * the /payslips table use, so all three always agree.
+ *
+ * Sends nothing when payroll is clear — a mail that arrives every day regardless
+ * gets filtered, and then the one that matters gets filtered too.
+ */
+async function runPayrollReminder(now = new Date()) {
+  const d = new Date(now);
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
+  const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const label = d.toLocaleString("en-GB", { month: "long", year: "numeric" });
+
+  const emps = await ddb.send(new ScanCommand({ TableName: T_EMP }));
+  // Anyone who joined AFTER the pay month can't owe a payslip for it — hire
+  // someone on 1 August and this would otherwise demand a July slip for them.
+  // Mirrors joinedMonth() in hr/lib/server/payroll-due.ts; the two must agree.
+  const joinedMonth = (e) => {
+    const t = Date.parse(e.dateOfJoining ?? "");
+    if (Number.isNaN(t)) return null; // unreadable date -> still remind, never excuse
+    const d = new Date(t);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  };
+  const active = (emps.Items ?? []).filter((i) => {
+    if (!(i.seq > 0) || i.status === "exited") return false;
+    const j = joinedMonth(i);
+    return j === null || j <= month;
+  });
+
+  const due = [];
+  for (const e of active) {
+    const docs = await ddb.send(
+      new QueryCommand({ TableName: T_DOC, KeyConditionExpression: "employeeSeq = :s", ExpressionAttributeValues: { ":s": e.seq } }),
+    );
+    const paid = (docs.Items ?? []).some(
+      (x) => x.category === "generated" && x.docType === "payslip" && typeof x.ref === "string" && x.ref.endsWith(` ${month}`),
+    );
+    if (!paid) due.push({ seq: e.seq, name: e.name, employeeId: e.employeeId });
+  }
+
+  if (due.length === 0) return resp(200, { month, due: 0, sent: false, reason: "PAYROLL_CLEAR" });
+
+  const to = process.env.HR_REMINDER_TO;
+  const key = process.env.RESEND_API_KEY;
+  if (!to || !key) {
+    // Still useful: the portal banner covers the human, and this line tells us
+    // in CloudWatch that the email half is unconfigured rather than silent.
+    console.warn(`[hr] payroll reminder: ${due.length} unpaid for ${month} but ${!to ? "HR_REMINDER_TO" : "RESEND_API_KEY"} is unset`);
+    return resp(200, { month, due: due.length, sent: false, reason: "EMAIL_NOT_CONFIGURED" });
+  }
+
+  // Day 1 of the new month = 1 day since the pay month closed.
+  const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const daysSince = Math.max(0, Math.floor((now - startOfThisMonth) / 86400000) + 1);
+  const overdue = daysSince > 7;
+  const lines = due.map((x) => `  - ${x.name}${x.employeeId ? ` (${x.employeeId})` : ""}`).join("\n");
+  const portal = process.env.HR_PORTAL_URL || "https://hr.shieldsyncsecurity.com";
+
+  const r = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
+      to: to.split(",").map((s) => s.trim()).filter(Boolean),
+      subject: `${overdue ? "OVERDUE" : "Due"}: salary for ${label} — ${due.length} unpaid`,
+      text:
+        `Salary for ${label} is ${overdue ? `OVERDUE (${daysSince} days since the month closed)` : "due"}.\n\n` +
+        `${due.length} of ${active.length} active ${due.length === 1 ? "person has" : "people have"} no payslip issued yet:\n\n${lines}\n\n` +
+        `Run payroll: ${portal}/payslips?month=${month}\n\n` +
+        `You are getting this because someone is still unpaid — it stops as soon as every payslip is issued.\n` +
+        `— ShieldSync Security Private Limited (HR)`,
+    }),
+  });
+  if (!r.ok) {
+    console.error("[hr] payroll reminder send failed", r.status);
+    return resp(502, { error: "SEND_FAILED", status: r.status, month, due: due.length });
+  }
+  await writeAudit("system", "payroll.reminder", month, { due: due.length, overdue });
+  return resp(200, { month, due: due.length, sent: true, overdue });
+}
+
 export async function handler(event) {
+  // Scheduled invoke (EventBridge -> Lambda). Checked BEFORE the token gate: a
+  // cron event carries no headers, and the invoke is already authorised by IAM,
+  // which is the correct trust boundary for it. It is NOT reachable over HTTP —
+  // API Gateway requests always carry rawPath, so they can never match here.
+  if (event?.job === "payroll-reminder" || (event?.["detail-type"] === "Scheduled Event" && !event?.rawPath)) {
+    return await runPayrollReminder();
+  }
+
   // Liveness probe — BEFORE the token gate; returns no data.
   if ((event.rawPath ?? "/") === "/hr/health") return resp(200, { ok: true });
 

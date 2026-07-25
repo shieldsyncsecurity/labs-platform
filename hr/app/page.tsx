@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { can } from "@/lib/access";
 import { getViewer } from "@/lib/server/hr-access";
+import { PayrollDueBanner } from "@/components/PayrollDueBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,10 @@ export default async function Home() {
   return (
     <main style={{ maxWidth: 1180, margin: "0 auto", padding: "36px 24px 48px", fontFamily: "Arial, Helvetica, 'Segoe UI', sans-serif" }}>
       <h1 style={{ fontSize: 20, fontWeight: 800, color: "#1f3a5f" }}>What do you want to do?</h1>
+
+      {/* Standing payroll reminder — renders only when someone is actually unpaid,
+          so its presence always means "act". Shown to whoever can run payroll. */}
+      {allow("payroll") ? <div style={{ marginTop: 18 }}><PayrollDueBanner /></div> : null}
 
       {nothing ? (
         <div style={{ ...card, marginTop: 22, borderStyle: "dashed" }}>

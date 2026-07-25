@@ -14,13 +14,13 @@ mkdirSync(out, { recursive: true });
 // Pure, dependency-free modules the suites import. Anything that touches
 // next/headers or the engine secret is deliberately NOT bundled — those paths
 // are exercised through the engine E2E suite instead.
-for (const mod of ["payslip", "access", "access-routes", "questionnaire"]) {
+for (const mod of ["payslip", "access", "access-routes", "questionnaire", "server/payroll-due"]) {
   await build({
     entryPoints: [path.join(__dir, "..", "lib", `${mod}.ts`)],
     bundle: true,
     format: "esm",
     platform: "node",
-    outfile: path.join(out, `${mod}.mjs`),
+    outfile: path.join(out, `${path.basename(mod)}.mjs`),
   });
 }
 
