@@ -44,6 +44,11 @@
     "COGNITO_CLIENT_ID": "7pei9flt4qnoercbb4lqb00bqf",
     "COGNITO_DOMAIN": "shieldsync-enterprise.auth.us-east-1.amazoncognito.com",
     "HR_ALLOWLIST": "admin@shieldsyncsecurity.com,hr@shieldsyncsecurity.com",
+    // Staff deliberately outside the monthly payslip run — they are skipped by
+    // BOTH the dashboard payroll banner and the reminder email. Comma-separated
+    // names or employee IDs. MUST match HR_REMINDER_EXCLUDE on the HR Lambda,
+    // or the banner and the email will disagree about who is unpaid.
+    "HR_REMINDER_EXCLUDE": "Preeti Jain",
     // WHO IS THE OWNER. Administrators have everything, always, and their
     // status can NOT be changed from inside the portal — that is what makes
     // self-lockout impossible and stops anyone granting themselves admin.

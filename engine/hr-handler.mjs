@@ -216,8 +216,22 @@ async function runPayrollReminder(now = new Date()) {
     const d = new Date(t);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   };
+  // People deliberately outside the payslip run (e.g. a director paid another
+  // way). Comma-separated names or employee IDs in HR_REMINDER_EXCLUDE, matched
+  // case/space-insensitively. Keep in sync with hr/lib/server/payroll-due.ts.
+  const excluded = new Set(
+    (process.env.HR_REMINDER_EXCLUDE ?? "")
+      .split(",")
+      .map((x) => x.trim().toLowerCase().replace(/\s+/g, " "))
+      .filter(Boolean),
+  );
+  const isExcluded = (e) =>
+    excluded.has(String(e.name ?? "").trim().toLowerCase().replace(/\s+/g, " ")) ||
+    excluded.has(String(e.employeeId ?? "").trim().toLowerCase());
+
   const active = (emps.Items ?? []).filter((i) => {
     if (!(i.seq > 0) || i.status === "exited") return false;
+    if (isExcluded(i)) return false;
     const j = joinedMonth(i);
     return j === null || j <= month;
   });

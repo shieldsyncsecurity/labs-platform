@@ -58,11 +58,30 @@ function joinedMonth(e: Employee): string | null {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+/**
+ * People deliberately outside the payslip run (e.g. a director paid another way).
+ * Comma-separated names or employee IDs in HR_REMINDER_EXCLUDE, matched
+ * case/space-insensitively. MUST stay in sync with the same variable on the HR
+ * Lambda (engine/hr-handler.mjs) — the banner and the email share one rule.
+ */
+const EXCLUDED = new Set(
+  (process.env.HR_REMINDER_EXCLUDE ?? "")
+    .split(",")
+    .map((x) => x.trim().toLowerCase().replace(/\s+/g, " "))
+    .filter(Boolean),
+);
+function isExcluded(e: Employee): boolean {
+  const n = (e.name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const id = (e.employeeId ?? "").trim().toLowerCase();
+  return EXCLUDED.has(n) || (id.length > 0 && EXCLUDED.has(id));
+}
+
 export async function getPayrollDue(now = new Date()): Promise<PayrollDue> {
   const month = payrollMonth(now);
   const employees = (await hrFetch<{ employees?: Employee[] }>("/hr/employees")).employees ?? [];
   const active = employees.filter((e) => {
     if (e.status === "exited") return false;
+    if (isExcluded(e)) return false;
     const joined = joinedMonth(e);
     // "2026-07" < "2026-08" compares correctly as a string: fixed width, zero-padded.
     return joined === null || joined <= month;
