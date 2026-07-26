@@ -20,7 +20,7 @@
 // before the next starts; nothing here touches aws-nuke or the account pool state.
 import { CloudFormationClient, CreateStackCommand, DeleteStackCommand, waitUntilStackCreateComplete, waitUntilStackDeleteComplete, DescribeStacksCommand } from "@aws-sdk/client-cloudformation";
 import { S3Client, PutBucketPolicyCommand, DeleteBucketPolicyCommand, PutPublicAccessBlockCommand, GetBucketPolicyCommand } from "@aws-sdk/client-s3";
-import { IAMClient, PutUserPolicyCommand } from "@aws-sdk/client-iam";
+import { IAMClient, PutUserPolicyCommand, ListUserPoliciesCommand, DeleteUserPolicyCommand } from "@aws-sdk/client-iam";
 import { assumeInSandbox } from "./labinfra.mjs";
 import { gradeLab } from "./graders.mjs";
 import { readFileSync } from "node:fs";
@@ -60,10 +60,16 @@ function clientsFor(credentials) {
 // Keeping an independent copy here is deliberate: if a future edit changes one
 // table and not the other, this harness's own assertions (not just the grader)
 // will catch the drift, because step 3 checks against BOTH.
+// "no-anonymous-grant" is UNCONDITIONAL in the grader (pushed outside every
+// `if (plants.x)` gate — it's a no_new_exposure check, not tied to a specific
+// planted flaw) and fails in every variant's seeded state because the DATA
+// bucket's public grant is planted universally, regardless of which OTHER
+// flaws a variant pre-fixes. It belongs in every row, including B — the first
+// run of this harness caught its own omission from B here, not a real defect.
 const EXPECT_FAIL = {
   base: ["no-public-buckets", "least-privilege-iam", "encryption-required", "tls-only", "no-anonymous-grant"],
   A: ["no-public-buckets", "least-privilege-iam", "encryption-required", "no-anonymous-grant"],
-  B: ["no-public-buckets", "least-privilege-iam", "encryption-required", "tls-only"],
+  B: ["no-public-buckets", "least-privilege-iam", "encryption-required", "tls-only", "no-anonymous-grant"],
   C: ["no-public-buckets", "least-privilege-iam", "tls-only", "no-anonymous-grant"],
   D: ["no-public-buckets", "encryption-required", "tls-only", "no-anonymous-grant"],
 };
@@ -128,7 +134,20 @@ async function remediate(s3, iam, accountId) {
       await s3.send(new DeleteBucketPolicyCommand({ Bucket: b })).catch(() => {});
     }
   }
-  // Scope the auditor user to read-only on the lab buckets.
+  // Scope the auditor user to read-only on the lab buckets. The CFN template
+  // creates ONE of TWO differently-named inline policies depending on the
+  // variant (s3-full-access-everywhere for the planted-wildcard variants,
+  // s3-scoped-read for D, which ships it already fixed) — PutUserPolicy under
+  // an assumed fixed name would ADD a second, CFN-untracked policy rather than
+  // replace the real one. That orphaned policy then blocks CloudFormation from
+  // deleting the IAM user at teardown ("must delete policies first"), which is
+  // exactly what happened the first time this harness ran against variant D and
+  // left a DELETE_FAILED stack with live resource-name collisions in a real
+  // pool account. Discover and remove whatever is ACTUALLY attached first.
+  const existing = await iam.send(new ListUserPoliciesCommand({ UserName: "auditor" }));
+  for (const pn of existing.PolicyNames ?? []) {
+    await iam.send(new DeleteUserPolicyCommand({ UserName: "auditor", PolicyName: pn }));
+  }
   await iam.send(new PutUserPolicyCommand({
     UserName: "auditor",
     PolicyName: "s3-full-access-everywhere",
@@ -197,7 +216,23 @@ async function runVariant(variant) {
         const c3 = await creds();
         const cfn2 = new CloudFormationClient({ region: REGION, credentials: c3, maxAttempts: 5, retryMode: "adaptive" });
         await cfn2.send(new DeleteStackCommand({ StackName: stackName }));
-        await waitUntilStackDeleteComplete({ client: cfn2, maxWaitTime: 600 }, { StackName: stackName });
+        try {
+          await waitUntilStackDeleteComplete({ client: cfn2, maxWaitTime: 120 }, { StackName: stackName });
+        } catch {
+          // Self-heal the one known cause (an out-of-band inline policy this
+          // harness itself added during remediate(), which CFN doesn't track
+          // and refuses to delete the user around) before retrying once. This
+          // account is a shared, real pool resource — leaving debris here
+          // collides with the NEXT thing that lands on it, test or candidate.
+          console.warn("  delete stalled — clearing any orphaned auditor policies and retrying once");
+          const iam2 = new IAMClient({ region: REGION, credentials: c3 });
+          const leftover = await iam2.send(new ListUserPoliciesCommand({ UserName: "auditor" })).catch(() => ({ PolicyNames: [] }));
+          for (const pn of leftover.PolicyNames ?? []) {
+            await iam2.send(new DeleteUserPolicyCommand({ UserName: "auditor", PolicyName: pn })).catch(() => {});
+          }
+          await cfn2.send(new DeleteStackCommand({ StackName: stackName }));
+          await waitUntilStackDeleteComplete({ client: cfn2, maxWaitTime: 300 }, { StackName: stackName });
+        }
         console.log(`  torn down: ${stackName}`);
       } catch (e) {
         console.error(`  WARNING: teardown failed for ${stackName} — delete it manually: ${e.message}`);
