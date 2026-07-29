@@ -111,6 +111,7 @@ import {
   deleteRecordings,
 } from "./recinfra.mjs";
 import { fetchWorkTimeline } from "./timeline.mjs";
+import { countParameters } from "./taxonomy.mjs";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 // Transactional email no longer uses SES (prod-access request was denied for
 // this account). Sends go out via the Resend HTTP API through a drop-in
@@ -1032,6 +1033,10 @@ async function submitAzureSession({ invite, inviteToken, labSlug, reflection, au
       criteria: crit,
       passedCount: passed,
       totalCriteria: total,
+      // Cloud-agnostic frame coverage, COMPUTED from what was actually verified
+      // (see taxonomy.mjs). Lets the report and any marketing claim quote a real
+      // number per assessment instead of a hand-maintained one that drifts.
+      frame: countParameters(crit),
       reflectionText,
       reflectionScore: null,
       integrity: "pending",
@@ -2686,6 +2691,9 @@ export async function handler(event) {
           criteria: crit,
           passedCount: passed,
           totalCriteria: total,
+          // Same computed frame coverage as the AWS submit path - both paths must
+          // stamp it or the report would show a parameter count for one cloud only.
+          frame: countParameters(crit),
           reflectionText,
           reflectionScore: null,
           integrity: "pending",

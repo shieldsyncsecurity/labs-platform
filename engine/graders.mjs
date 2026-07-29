@@ -267,7 +267,7 @@ async function gradeS3(creds, accountId) {
 
   const criteria = [
     // Correctness — did they achieve the required secure end-state (the core objective)?
-    { id: "no-public-buckets", dimension: "correctness", description: "No lab bucket allows anonymous public read.", passed: buckets.every(notPublic), subChecks: subs(notPublic), ...unk(probeErr) },
+    { id: "no-public-buckets", domain: "data_protection", dimension: "correctness", description: "No lab bucket allows anonymous public read.", passed: buckets.every(notPublic), subChecks: subs(notPublic), ...unk(probeErr) },
   ];
   // Security rigor — did they harden properly (least-privilege + defence-in-depth), not just the minimum?
   // These three are the variant-dependent ones. When the variant is unreadable we
@@ -275,19 +275,19 @@ async function gradeS3(creds, accountId) {
   // a control the environment may have shipped already-correct can never be scored
   // as the candidate's own work.
   if (plants.iam) {
-    criteria.push({ id: "least-privilege-iam", dimension: "rigor", description: "The 'auditor' user no longer has s3:* on Resource '*'.", passed: !auditorBroad, ...unk(auditorErr), ...vunk });
+    criteria.push({ id: "least-privilege-iam", domain: "identity", dimension: "rigor", description: "The 'auditor' user no longer has s3:* on Resource '*'.", passed: !auditorBroad, ...unk(auditorErr), ...vunk });
   }
   if (plants.enc) {
-    criteria.push({ id: "encryption-required", dimension: "rigor", description: "Each bucket denies unencrypted PutObject.", passed: buckets.every(encDeny), subChecks: subs(encDeny), ...unk(probeErr), ...vunk });
+    criteria.push({ id: "encryption-required", domain: "data_protection", dimension: "rigor", description: "Each bucket denies unencrypted PutObject.", passed: buckets.every(encDeny), subChecks: subs(encDeny), ...unk(probeErr), ...vunk });
   }
   if (plants.tls) {
-    criteria.push({ id: "tls-only", dimension: "rigor", description: "Each bucket denies non-TLS (HTTP) requests.", passed: buckets.every(tlsDeny), subChecks: subs(tlsDeny), ...unk(probeErr), ...vunk });
+    criteria.push({ id: "tls-only", domain: "data_protection", dimension: "rigor", description: "Each bucket denies non-TLS (HTTP) requests.", passed: buckets.every(tlsDeny), subChecks: subs(tlsDeny), ...unk(probeErr), ...vunk });
   }
   criteria.push(
     // No new exposure — did the fix avoid leaving/opening an anonymous door?
-    { id: "no-anonymous-grant", dimension: "no_new_exposure", description: "No bucket policy grants a wildcard (anonymous) principal.", passed: buckets.every(noAnonGrant), subChecks: subs(noAnonGrant), ...unk(probeErr) },
+    { id: "no-anonymous-grant", domain: "data_protection", dimension: "no_new_exposure", description: "No bucket policy grants a wildcard (anonymous) principal.", passed: buckets.every(noAnonGrant), subChecks: subs(noAnonGrant), ...unk(probeErr) },
     // Operational safety — did they secure the workload without destroying it?
-    { id: "resources-intact", dimension: "operational_safety", description: "Both lab buckets still exist (secured, not deleted).", passed: bothIntact, subChecks: subs((b) => info[b].exists), ...unk(existUnverified) }
+    { id: "resources-intact", domain: "data_protection", dimension: "operational_safety", description: "Both lab buckets still exist (secured, not deleted).", passed: bothIntact, subChecks: subs((b) => info[b].exists), ...unk(existUnverified) }
   );
   return criteria;
 }
@@ -354,9 +354,9 @@ async function gradeIam(creds) {
   } catch (e) { if (!isAbsenceError(e)) simErr = e; }
 
   return [
-    { id: "admin-detached", description: "AdministratorAccess is no longer attached to pipeline-deployer.", passed: !adminAttached, ...unk(primErr) },
-    { id: "escalation-primitive-removed", description: "LabDeployerPolicy no longer grants iam:AttachUserPolicy (or other IAM-write) on '*'.", passed: !escalation, ...unk(primErr || escErr) },
-    { id: "deployer-still-works", description: "The user keeps its legitimate read permissions (s3:GetObject still allowed).", passed: stillWorks, ...unk(simErr) },
+    { id: "admin-detached", domain: "identity", dimension: "correctness", description: "AdministratorAccess is no longer attached to pipeline-deployer.", passed: !adminAttached, ...unk(primErr) },
+    { id: "escalation-primitive-removed", domain: "identity", dimension: "no_new_exposure", description: "LabDeployerPolicy no longer grants iam:AttachUserPolicy (or other IAM-write) on '*'.", passed: !escalation, ...unk(primErr || escErr) },
+    { id: "deployer-still-works", domain: "identity", dimension: "operational_safety", description: "The user keeps its legitimate read permissions (s3:GetObject still allowed).", passed: stillWorks, ...unk(simErr) },
   ];
 }
 
@@ -499,9 +499,9 @@ async function gradeBedrockPromptInjection(creds, accountId) {
   }
 
   return [
-    { id: "guardrail-attached", description: "A Bedrock Guardrail exists with a denied-topic/content policy configured.", passed: guardrailOk, ...unk(guardrailErr) },
-    { id: "invoke-least-privilege", description: "The assistant's invoke role allows bedrock:InvokeModel scoped to the Nova Lite model ARN only — no bedrock:* and no Resource '*'.", passed: invokeOk, ...unk(invokeErr) },
-    { id: "model-logging-enabled", description: "Bedrock model-invocation logging is configured with a destination.", passed: loggingOk, ...unk(loggingErr) },
+    { id: "guardrail-attached", domain: "ai_security", dimension: "correctness", description: "A Bedrock Guardrail exists with a denied-topic/content policy configured.", passed: guardrailOk, ...unk(guardrailErr) },
+    { id: "invoke-least-privilege", domain: "identity", dimension: "rigor", description: "The assistant's invoke role allows bedrock:InvokeModel scoped to the Nova Lite model ARN only — no bedrock:* and no Resource '*'.", passed: invokeOk, ...unk(invokeErr) },
+    { id: "model-logging-enabled", domain: "detection", dimension: "rigor", description: "Bedrock model-invocation logging is configured with a destination.", passed: loggingOk, ...unk(loggingErr) },
   ];
 }
 

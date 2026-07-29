@@ -115,3 +115,69 @@ candidates, either:
 This is already implied by §P8's "percentile only at >=50 completions AND
 verified variant pass-rate equivalence" — worth stating explicitly here because
 it bites at the *shortlist* level, not just the percentile level.
+
+---
+
+## 4. The GENERIC claim — cloud, lab and vendor agnostic (2026-07-25)
+
+The owner's ask: market a parameter count the way any assessment vendor does
+("we test on N parameters"), independent of which lab, which cloud, which
+vendor. Per-lab numbers cannot carry that. A shared FRAME can.
+
+### The frame, now in code (`engine/taxonomy.mjs`)
+
+Every scored check is one cell of **dimension x domain**:
+
+- **4 dimensions** (how well): objective correctness, security rigor,
+  no new exposure, operational safety.
+- **7 domains** (what surface): identity & access, data protection, network
+  exposure, logging & detection, incident response, AI/model security,
+  governance guardrails.
+
+= **28 assessable parameter classes.** Cloud-neutral by construction: the same
+cell is satisfied by an AWS bucket policy, an Azure storage account or a GCP
+bucket, so a new provider maps in without re-marketing. Entra maps to IAM,
+Key Vault to KMS, NSG to security group, Activity Log to CloudTrail.
+
+### Two numbers, kept apart
+
+| Claim | Value | Meaning |
+|---|---|---|
+| **Framework** | "a 28-point assessment framework: 4 competency dimensions across 7 security domains" | platform CAPABILITY - true today, provider-independent |
+| **Per assessment** | computed and stamped on every result as `frame.parameters` | what THIS candidate was actually verified on |
+
+Per-assessment counts as they stand today: S3 **11**, Azure Storage **4**,
+IAM **3**, Bedrock **3**. The content plan's 5 objectives x 2-4 sub-checks
+puts a full level at **10-20**.
+
+### Why not simply claim a bigger per-candidate number
+
+A 60-minute work sample with a hard cap of 5 scored objectives (§P4, expert
+solve <=40 min) cannot honestly contain 50 verified checks. Vendors quoting
+40-50 "parameters" are almost always counting quiz items or self-report
+scales - the category we win against. Our defensible position is the opposite
+one: *fewer parameters, each verified against live infrastructure*.
+
+**Recommended copy:**
+> "Assessed against a 28-point framework - 4 competency dimensions across 7
+> security domains - with every parameter verified against the live cloud
+> account the candidate worked in."
+
+That is one sentence, provider-agnostic, literally true, and it survives a
+buyer asking to see the list.
+
+### What changed in code to make it true
+
+1. `engine/taxonomy.mjs` - dimensions, domains, and `countParameters()`.
+2. **All four labs now tagged.** IAM and Bedrock previously carried NO
+   competency tags at all, so two of four labs silently rendered outside the
+   framework - the claim would have been false the moment anyone checked.
+3. `frame` stamped on every stored result, on BOTH the AWS and Azure submit
+   paths, so the number is computed from what shipped rather than maintained
+   by hand.
+
+### Still to do
+
+- Surface `frame.parameters` in the report header and the marketing copy.
+- Decide domain coverage per level deliberately (an L2 hitting 2 of 7 domains
+  is fine; claiming breadth it does not have is not).

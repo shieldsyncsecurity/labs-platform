@@ -82,7 +82,8 @@ $ENGINE_MODULES = @(
   "azure-infra.mjs",
   "graders.azure.mjs",
   "recinfra.mjs",
-  "timeline.mjs"
+  "timeline.mjs",
+  "taxonomy.mjs"
 )
 
 # IMPORT-CLOSURE GUARD. This list is hand-maintained, and a NEW module imported by
