@@ -8,6 +8,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import type { AuthUser, Entitlement } from "./types";
+import { entitlementTypeOf } from "./types";
 import { getLab } from "@/lib/labs";
 import { COGNITO_ENABLED, cognitoSignIn, cognitoSignOut, cognitoGetUser } from "./cognito-adapter";
 
@@ -146,6 +147,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return entitlements.some((e) => {
         if (e.labSlug !== slug && e.labSlug !== "*") return false;
         if (e.accessUntil && new Date(e.accessUntil).getTime() < now) return false;
+        // A per-lab purchase whose budget is SPENT — all launches used, or the
+        // 7-day window lapsed — is not access anymore. Before this check, an
+        // exhausted grant kept hasAccess true until the 90-day accessUntil
+        // backstop, so the customer saw a Launch button that could only 403
+        // ("brief hiccup, try again") and never reached the re-purchase path.
+        // Now the panel falls into its existing "Get this lab" checkout branch,
+        // and a completed re-purchase (engine refills on a new orderId) flips
+        // it straight back to Launch.
+        if (entitlementTypeOf(e) === "PAY_PER_LAB") {
+          if (e.windowExpiresAt && new Date(e.windowExpiresAt).getTime() <= now) return false;
+          const cap = e.maxLaunches ?? 0;
+          if (cap > 0 && (e.launchCount ?? 0) >= cap) return false;
+        }
         return true;
       });
     },
