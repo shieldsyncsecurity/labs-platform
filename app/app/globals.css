@@ -73,7 +73,6 @@ body {
 :focus-visible {
   outline: 2px solid color-mix(in srgb, var(--color-brand) 70%, transparent);
   outline-offset: 2px;
-  border-radius: 2px;
 }
 
 /* level badge colours */
@@ -429,16 +428,23 @@ body {
    ASCII-ONLY on purpose: Lightning CSS (Next dev) silently drops every rule
    after a non-ASCII character in this file.
    ------------------------------------------------------------------------- */
-@media (pointer: coarse) {
+@media (pointer: coarse), (any-pointer: coarse) {
   a:not(.allow-tight),
   button:not(.allow-tight),
   [role="button"]:not(.allow-tight),
   summary:not(.allow-tight) {
     min-height: 44px;
+    /* min-height does nothing on a non-replaced INLINE box, so an anchor styled
+       `inline` silently ignored the rule above. inline-flex makes the height
+       real while still sitting in the text flow. Prose links are excluded
+       below - there, inline-flex would stop the link wrapping across lines. */
+    display: inline-flex;
+    align-items: center;
   }
   p a:not(.allow-tight),
   li a:not(.allow-tight) {
     min-height: 0;
+    display: inline;
     padding-block: 2px;
   }
   footer a:not(.allow-tight) {
