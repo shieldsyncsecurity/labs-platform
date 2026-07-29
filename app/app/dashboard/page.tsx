@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth/context";
 import { LABS, type Lab } from "@/lib/labs";
 import type { Completion } from "@/lib/server/store";
 import { CertificateButton } from "@/components/certificate-button";
+import { SignedOutNotice } from "@/components/signed-out-notice";
 
 // Compact card — level + free/locked + ~min on one row, 2-line-clamped summary,
 // one CTA. Denser than the old card so more fit per viewport without scrolling.
@@ -150,13 +151,10 @@ export default function DashboardPage() {
 
   if (!user) {
     return (
-      <div className="mx-auto max-w-md px-5 py-8 text-center sm:py-10">
-        <h1 className="text-2xl font-bold text-ink">Sign in to see your labs</h1>
-        <p className="mt-2 text-base text-ink-soft">Your dashboard shows the labs you can launch and your access windows.</p>
-        <Link href="/sign-in" className="mt-6 inline-block rounded-xl bg-brand px-6 py-3 text-base font-semibold text-white hover:bg-brand-strong">
-          Sign in
-        </Link>
-      </div>
+      <SignedOutNotice
+        heading="Sign in to see your labs"
+        sub="Your dashboard shows the labs you can launch and your access windows."
+      />
     );
   }
 

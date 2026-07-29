@@ -1,8 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useAuth } from "@/lib/auth/context";
 import { getLab } from "@/lib/labs";
+import { EntitlementStatus } from "@/components/entitlement-status";
+import { entitlementTypeOf } from "@/lib/auth/types";
+import { SignedOutNotice } from "@/components/signed-out-notice";
 
 export default function AccountPage() {
   const { user, loading, entitlements, signOut } = useAuth();
@@ -18,13 +20,10 @@ export default function AccountPage() {
 
   if (!user) {
     return (
-      <div className="mx-auto max-w-md px-5 py-8 text-center sm:py-10">
-        <h1 className="text-2xl font-bold text-ink">You&apos;re signed out</h1>
-        <p className="mt-2 text-base text-ink-soft">Sign in to see your entitlements and download your certificates.</p>
-        <Link href="/sign-in" className="mt-6 inline-block rounded-xl bg-brand px-6 py-3 text-base font-semibold text-white hover:bg-brand-strong">
-          Sign in
-        </Link>
-      </div>
+      <SignedOutNotice
+        heading="You're signed out"
+        sub="Sign in to see your entitlements and download your certificates."
+      />
     );
   }
 
@@ -49,12 +48,20 @@ export default function AccountPage() {
       ) : (
         <ul className="divide-y divide-line rounded-2xl border border-line bg-surface">
           {entitlements.map((e) => (
-            <li key={e.labSlug} className="flex items-center justify-between px-5 py-3 text-base">
-              <span className="text-ink">{e.labSlug === "*" ? "All AWS labs" : (getLab(e.labSlug)?.title ?? e.labSlug)}</span>
-              <span className="text-sm text-muted">
-                {e.kind}
-                {e.accessUntil ? ` · until ${new Date(e.accessUntil).toLocaleDateString()}` : ""}
-              </span>
+            <li key={e.labSlug} className="px-5 py-3">
+              <span className="text-base text-ink">{e.labSlug === "*" ? "All AWS labs" : (getLab(e.labSlug)?.title ?? e.labSlug)}</span>
+              {/* Was rendering the raw kind string + accessUntil (the 90-day backstop) —
+                  for a per-lab grant that read "until 23 Oct" when the real limit is 3
+                  launches / 7 days from first launch, understating how soon access
+                  actually ends. Reuse the same status logic the lab page already shows,
+                  instead of a second, incorrect summary of the same entitlement. */}
+              <EntitlementStatus entitlement={e} labSlug={e.labSlug !== "*" ? e.labSlug : undefined} />
+              {/* EntitlementStatus deliberately renders nothing for LIFETIME (no launch
+                  cap to report on the lab page) — but a bare row with no status text at
+                  all reads as unfinished here, so say plainly that it's uncapped. */}
+              {entitlementTypeOf(e) === "LIFETIME" && (
+                <p className="mt-3 text-sm text-ink-soft">Unlimited access — no launch cap.</p>
+              )}
             </li>
           ))}
         </ul>

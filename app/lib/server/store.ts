@@ -1,5 +1,11 @@
-import type { Entitlement, EntitlementType } from "@/lib/auth/types";
+import type { Entitlement } from "@/lib/auth/types";
+import { entitlementTypeOf } from "@/lib/auth/types";
 import { engineFetch } from "./engine";
+
+// Re-exported for existing server-side callers (app/api/launch/route.ts) — the
+// canonical definition now lives in lib/auth/types.ts so client components can
+// import it too, without dragging this module's next/headers chain along.
+export { entitlementTypeOf };
 
 // Entitlements are stored in DynamoDB via the engine — persistent across all
 // Cloudflare Worker invocations. We MUST go through engineFetch() so the
@@ -136,10 +142,6 @@ export async function rollbackLaunch(userId: string, labSlug: string): Promise<v
   }
 }
 
-/** Type guard: a row counts as the legacy/free shape when no v2 tag is set. */
-export function entitlementTypeOf(e: Entitlement): EntitlementType {
-  return e.type ?? "LIFETIME";
-}
 
 export async function listEntitlements(userId: string): Promise<Entitlement[]> {
   if (!userId) return [];

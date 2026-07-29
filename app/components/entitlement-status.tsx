@@ -1,5 +1,5 @@
 import type { Entitlement } from "@/lib/auth/types";
-import { entitlementTypeOf } from "@/lib/server/store";
+import { entitlementTypeOf } from "@/lib/auth/types";
 
 // Compact one-line status pill rendered above the lab title. Only renders for
 // PAY_PER_LAB (launch cap + 7-day window) and ACTIVE SUBSCRIPTION rows; LIFETIME
