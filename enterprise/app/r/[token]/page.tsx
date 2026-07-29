@@ -79,6 +79,8 @@ type DisplayRow = {
   passed?: number;
   totalCriteria?: number;
   hasReflection?: boolean;
+  /** True when another candidate finished on the SAME verified score. */
+  tied?: boolean;
   breakdownToken?: string;
   durationSec?: number;
   criteria?: ReportCriterion[];
@@ -141,6 +143,22 @@ export default async function AssessmentReportPage({
     }
   }
 
+  // Standard COMPETITION ranking: equal verified scores share a rank number, and
+  // the next rank skips accordingly (1,1,3). A shortlist has to be honest about
+  // where the assessment genuinely separated people and where it did not -
+  // ordering a tie by array position invents a distinction that was never measured.
+  const rankByIndex: number[] = [];
+  const tiedByIndex: boolean[] = [];
+  scored.forEach((s, i) => {
+    if (i > 0 && s.pct === scored[i - 1].pct) rankByIndex[i] = rankByIndex[i - 1];
+    else rankByIndex[i] = i + 1;
+  });
+  scored.forEach((s, i) => {
+    tiedByIndex[i] =
+      (i > 0 && scored[i - 1].pct === s.pct) ||
+      (i < scored.length - 1 && scored[i + 1].pct === s.pct);
+  });
+
   const matchedIds = new Set<string>();
   const displayRows: DisplayRow[] = scored.map(({ row, pct, vs }, i) => {
     const prefix = row?.inviteToken ? row.inviteToken.slice(0, 8) : "";
@@ -154,7 +172,8 @@ export default async function AssessmentReportPage({
       key: rosterRow?.id ?? (prefix || `result-${i + 1}`),
       name,
       status: "Submitted",
-      rank: i + 1,
+      rank: rankByIndex[i],
+      tied: tiedByIndex[i],
       pct,
       passed: vs.passed,
       totalCriteria: vs.total,
@@ -274,7 +293,17 @@ export default async function AssessmentReportPage({
                     >
                       <td className="px-5 py-4">
                         {isScored ? (
-                          <RankBadge rank={r.rank!} />
+                          <span className="inline-flex items-center gap-1.5">
+                            <RankBadge rank={r.rank!} />
+                            {r.tied ? (
+                              <span
+                                className="text-[10px] font-semibold uppercase tracking-wide text-muted"
+                                title="Another candidate finished on the same verified score. The assessment did not separate them - use the competency breakdown and the interview to decide."
+                              >
+                                tied
+                              </span>
+                            ) : null}
+                          </span>
                         ) : (
                           <span
                             className="inline-flex h-7 w-7 flex-none items-center justify-center text-muted"
