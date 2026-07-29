@@ -414,3 +414,59 @@ body {
     animation: none;
   }
 }
+
+/* -------------------------------------------------------------------------
+   Touch-target + motion baseline (2026-07-25)
+
+   Measured on the live site at mobile width: footer/legal links rendered only
+   ~20px tall and header nav ~36px - both below the comfortable-tap threshold,
+   on the surface that paid ad traffic lands on. Fixed in CSS so every existing
+   and future control inherits it, rather than hand-editing each component.
+
+   Guarded by (pointer: coarse): DESKTOP LAYOUT IS UNCHANGED. Opt out with
+   .allow-tight where a control manages its own hit area.
+
+   ASCII-ONLY on purpose: Lightning CSS (Next dev) silently drops every rule
+   after a non-ASCII character in this file.
+   ------------------------------------------------------------------------- */
+@media (pointer: coarse) {
+  a:not(.allow-tight),
+  button:not(.allow-tight),
+  [role="button"]:not(.allow-tight),
+  summary:not(.allow-tight) {
+    min-height: 44px;
+  }
+  p a:not(.allow-tight),
+  li a:not(.allow-tight) {
+    min-height: 0;
+    padding-block: 2px;
+  }
+  footer a:not(.allow-tight) {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
+  input,
+  select,
+  textarea {
+    min-height: 44px;
+    /* iOS Safari zooms the page when a focused input is under 16px. */
+    font-size: max(16px, 1em);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a,
+  button,
+  [role="button"],
+  input,
+  select,
+  textarea {
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease,
+      box-shadow 150ms ease,
+      opacity 150ms ease;
+  }
+}
