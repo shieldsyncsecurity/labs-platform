@@ -67,3 +67,12 @@ export interface AuthClient {
   signOut(): Promise<void>;
   getEntitlements(userId: string): Promise<Entitlement[]>;
 }
+
+/** Type guard: a row counts as the legacy/free shape when no v2 tag is set.
+ *  Lives here (not lib/server/store.ts) so client components can import it —
+ *  store.ts transitively pulls in next/headers via lib/server/engine.ts, which
+ *  webpack refuses to bundle into a "use client" module even when the only thing
+ *  actually used is this one pure line. */
+export function entitlementTypeOf(e: Entitlement): EntitlementType {
+  return e.type ?? "LIFETIME";
+}
