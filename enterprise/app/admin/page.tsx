@@ -76,7 +76,7 @@ export default async function AdminDashboardPage() {
             </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-line bg-surface">
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto [mask-image:linear-gradient(to_right,black_calc(100%-40px),transparent)] sm:[mask-image:none]">
                 <table className="w-full min-w-[640px] border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-line bg-canvas text-xs uppercase tracking-wide text-muted">

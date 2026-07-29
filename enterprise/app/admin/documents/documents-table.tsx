@@ -125,7 +125,7 @@ export default function DocumentsTable({ initialDocs }: { initialDocs: DocRow[] 
           {note}
         </p>
       ) : null}
-      <div className="overflow-x-auto rounded-xl border border-line bg-surface">
+      <div className="overflow-x-auto [mask-image:linear-gradient(to_right,black_calc(100%-40px),transparent)] sm:[mask-image:none] rounded-xl border border-line bg-surface">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead>
             <tr className="border-b border-line text-xs uppercase tracking-wide text-muted">
