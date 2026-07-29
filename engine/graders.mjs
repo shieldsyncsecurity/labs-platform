@@ -499,9 +499,9 @@ async function gradeBedrockPromptInjection(creds, accountId) {
   }
 
   return [
-    { id: "guardrail-attached", domain: "ai_security", dimension: "correctness", description: "A Bedrock Guardrail exists with a denied-topic/content policy configured.", passed: guardrailOk, ...unk(guardrailErr) },
-    { id: "invoke-least-privilege", domain: "identity", dimension: "rigor", description: "The assistant's invoke role allows bedrock:InvokeModel scoped to the Nova Lite model ARN only — no bedrock:* and no Resource '*'.", passed: invokeOk, ...unk(invokeErr) },
-    { id: "model-logging-enabled", domain: "detection", dimension: "rigor", description: "Bedrock model-invocation logging is configured with a destination.", passed: loggingOk, ...unk(loggingErr) },
+    { id: "guardrail-attached", domain: "ai_guardrails", dimension: "correctness", description: "A Bedrock Guardrail exists with a denied-topic/content policy configured.", passed: guardrailOk, ...unk(guardrailErr) },
+    { id: "invoke-least-privilege", domain: "ai_access", dimension: "rigor", description: "The assistant's invoke role allows bedrock:InvokeModel scoped to the Nova Lite model ARN only — no bedrock:* and no Resource '*'.", passed: invokeOk, ...unk(invokeErr) },
+    { id: "model-logging-enabled", domain: "ai_data", dimension: "rigor", description: "Bedrock model-invocation logging is configured with a destination.", passed: loggingOk, ...unk(loggingErr) },
   ];
 }
 

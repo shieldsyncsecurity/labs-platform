@@ -118,66 +118,85 @@ it bites at the *shortlist* level, not just the percentile level.
 
 ---
 
-## 4. The GENERIC claim — cloud, lab and vendor agnostic (2026-07-25)
+---
 
-The owner's ask: market a parameter count the way any assessment vendor does
-("we test on N parameters"), independent of which lab, which cloud, which
-vendor. Per-lab numbers cannot carry that. A shared FRAME can.
+## 4. The portfolio-wide frame — all four tracks (2026-07-25)
 
-### The frame, now in code (`engine/taxonomy.mjs`)
+The product is four tracks, not one cloud:
 
-Every scored check is one cell of **dimension x domain**:
+| Track | Content |
+|---|---|
+| AWS security | cloud posture labs |
+| Azure security | cloud posture labs |
+| AI security | runs on the providers' model services (Bedrock, Azure OpenAI) |
+| SOC / detection & response | SIEM: **Sentinel or Wazuh** · SOAR: **Sentinel or Shuffle** |
 
-- **4 dimensions** (how well): objective correctness, security rigor,
-  no new exposure, operational safety.
-- **7 domains** (what surface): identity & access, data protection, network
-  exposure, logging & detection, incident response, AI/model security,
-  governance guardrails.
+SOC is a different KIND of work from cloud posture - detection engineering,
+triage, playbook authoring - so a cloud-config-shaped taxonomy could never
+represent it. The frame now covers all four.
 
-= **28 assessable parameter classes.** Cloud-neutral by construction: the same
-cell is satisfied by an AWS bucket policy, an Azure storage account or a GCP
-bucket, so a new provider maps in without re-marketing. Entra maps to IAM,
-Key Vault to KMS, NSG to security group, Activity Log to CloudTrail.
+### The frame (`engine/taxonomy.mjs`)
 
-### Two numbers, kept apart
+**4 dimensions x 13 domains = 52 parameter classes.**
 
-| Claim | Value | Meaning |
+| Group | Domains | Live today |
 |---|---|---|
-| **Framework** | "a 28-point assessment framework: 4 competency dimensions across 7 security domains" | platform CAPABILITY - true today, provider-independent |
-| **Per assessment** | computed and stamped on every result as `frame.parameters` | what THIS candidate was actually verified on |
+| Cloud posture | identity, data protection, network exposure, workload & compute, governance guardrails | 2 of 5 |
+| Detection & response | log pipeline & telemetry, detection engineering, alert triage, response automation (SOAR), containment & recovery | 0 of 5 |
+| AI security | model guardrails, model & agent access, AI data protection | 3 of 3 |
 
-Per-assessment counts as they stand today: S3 **11**, Azure Storage **4**,
-IAM **3**, Bedrock **3**. The content plan's 5 objectives x 2-4 sub-checks
-puts a full level at **10-20**.
+Every domain names its provider equivalents, so a new vendor maps in without a
+new domain: Sentinel analytics rules and Wazuh decoders are both
+*detection engineering*; Sentinel playbooks and Shuffle workflows are both
+*response automation*.
 
-### Why not simply claim a bigger per-candidate number
+### The three numbers - never merge them
 
-A 60-minute work sample with a hard cap of 5 scored objectives (§P4, expert
-solve <=40 min) cannot honestly contain 50 verified checks. Vendors quoting
-40-50 "parameters" are almost always counting quiz items or self-report
-scales - the category we win against. Our defensible position is the opposite
-one: *fewer parameters, each verified against live infrastructure*.
+| Number | Value | What it honestly means |
+|---|---|---|
+| **Framework** | **52** parameter classes | what the assessment MODEL can express. A design statement. |
+| **Live coverage** | **20** (4 x 5 shipped domains) | what a shipped lab actually grades today |
+| **Per assessment** | computed as `frame.parameters` | what THIS candidate was verified on (S3 = 11) |
 
-**Recommended copy:**
-> "Assessed against a 28-point framework - 4 competency dimensions across 7
-> security domains - with every parameter verified against the live cloud
-> account the candidate worked in."
+### Recommended copy
 
-That is one sentence, provider-agnostic, literally true, and it survives a
-buyer asking to see the list.
+Safe, and it survives a buyer asking to see the list:
 
-### What changed in code to make it true
+> "Candidates are assessed against a **52-point framework** - 4 competency
+> dimensions across 13 security domains spanning AWS, Azure, AI and SOC - with
+> every parameter verified against live infrastructure, not a quiz."
 
-1. `engine/taxonomy.mjs` - dimensions, domains, and `countParameters()`.
-2. **All four labs now tagged.** IAM and Bedrock previously carried NO
-   competency tags at all, so two of four labs silently rendered outside the
-   framework - the claim would have been false the moment anyone checked.
-3. `frame` stamped on every stored result, on BOTH the AWS and Azure submit
-   paths, so the number is computed from what shipped rather than maintained
-   by hand.
+If pressed on what a single assessment covers, the honest follow-up is: *"each
+assessment verifies the parameters relevant to that role and level - typically
+10-20 - and the report lists every one."*
 
-### Still to do
+**Do NOT say** "we test each candidate on 52 parameters." A 60-minute work
+sample with a hard cap of 5 scored objectives cannot contain 52 verified checks,
+and that is a feature: vendors quoting 40-50 are counting quiz items or
+self-report scales, which is the category we win against.
 
-- Surface `frame.parameters` in the report header and the marketing copy.
-- Decide domain coverage per level deliberately (an L2 hitting 2 of 7 domains
-  is fine; claiming breadth it does not have is not).
+### What this makes visible: the SOC track is the biggest marketing gap
+
+**0 of 5 detection & response domains are live.** SOC is the track with the most
+assessable surface in the frame and the least built. Each of the five domains is
+a genuinely gradeable work sample:
+
+| Domain | What a lab would verify (deterministic, state-inspected) |
+|---|---|
+| Log pipeline & telemetry | connector/agent onboarding, retention, closing a named coverage gap |
+| Detection engineering | authored analytic fires on the seeded attack, does NOT fire on the seeded benign traffic, ATT&CK technique mapped |
+| Alert triage | correct severity + attribution on a seeded incident, decoy alert left alone |
+| Response automation (SOAR) | playbook enriches, gates on approval, contains the right entity, handles a failure path |
+| Containment & recovery | right credential/host isolated, decoy untouched, service still up |
+
+The detection-engineering one is especially strong: "your rule caught the real
+attack and stayed quiet on the noise" is deterministic, hard to fake, and maps
+directly to what a SOC lead interviews for. Wazuh is the cheaper build (self-
+hosted, no per-GB ingest); Sentinel is the better enterprise demo.
+
+### Follow-ups
+
+- Surface `frame.parameters` in the report header and marketing copy.
+- Add a CI guard asserting every `domain:`/`dimension:` tag in a grader resolves
+  against the taxonomy. Renaming domains for this expansion silently invalidated
+  two Bedrock tags - caught by hand this time, which is not a control.
