@@ -252,9 +252,22 @@ async function gradeS3(creds, accountId) {
   // inflate the score and make variants incomparable. The always-present ones
   // still demand real work in every variant (the data bucket is public in all of
   // them), or are "don't break it" checks that apply regardless.
+  // PER-RESOURCE SUB-CHECKS. A criterion stays PASS only when every bucket
+  // satisfies it (semantics unchanged, so scoring and ranking are untouched),
+  // but it now carries the per-bucket detail. Without this a candidate who
+  // secured the data bucket and missed the assets bucket scored EXACTLY the
+  // same as one who did nothing at all - five of the six criteria here are
+  // buckets.every(), so partial progress was being discarded wholesale.
+  // Reliability/statistics are still computed at the CRITERION level (sub-checks
+  // within a criterion are correlated, so treating them as independent items
+  // would be fake precision) - these exist to make the report legible and to
+  // aim the interviewer at the exact resource that was missed.
+  const shortName = (b) => (b.startsWith("sslab-data-") ? "data bucket" : b.startsWith("sslab-assets-") ? "assets bucket" : b);
+  const subs = (fn) => buckets.map((b) => ({ id: b, label: shortName(b), passed: !!fn(b) }));
+
   const criteria = [
     // Correctness — did they achieve the required secure end-state (the core objective)?
-    { id: "no-public-buckets", dimension: "correctness", description: "No lab bucket allows anonymous public read.", passed: buckets.every(notPublic), ...unk(probeErr) },
+    { id: "no-public-buckets", dimension: "correctness", description: "No lab bucket allows anonymous public read.", passed: buckets.every(notPublic), subChecks: subs(notPublic), ...unk(probeErr) },
   ];
   // Security rigor — did they harden properly (least-privilege + defence-in-depth), not just the minimum?
   // These three are the variant-dependent ones. When the variant is unreadable we
@@ -265,16 +278,16 @@ async function gradeS3(creds, accountId) {
     criteria.push({ id: "least-privilege-iam", dimension: "rigor", description: "The 'auditor' user no longer has s3:* on Resource '*'.", passed: !auditorBroad, ...unk(auditorErr), ...vunk });
   }
   if (plants.enc) {
-    criteria.push({ id: "encryption-required", dimension: "rigor", description: "Each bucket denies unencrypted PutObject.", passed: buckets.every(encDeny), ...unk(probeErr), ...vunk });
+    criteria.push({ id: "encryption-required", dimension: "rigor", description: "Each bucket denies unencrypted PutObject.", passed: buckets.every(encDeny), subChecks: subs(encDeny), ...unk(probeErr), ...vunk });
   }
   if (plants.tls) {
-    criteria.push({ id: "tls-only", dimension: "rigor", description: "Each bucket denies non-TLS (HTTP) requests.", passed: buckets.every(tlsDeny), ...unk(probeErr), ...vunk });
+    criteria.push({ id: "tls-only", dimension: "rigor", description: "Each bucket denies non-TLS (HTTP) requests.", passed: buckets.every(tlsDeny), subChecks: subs(tlsDeny), ...unk(probeErr), ...vunk });
   }
   criteria.push(
     // No new exposure — did the fix avoid leaving/opening an anonymous door?
-    { id: "no-anonymous-grant", dimension: "no_new_exposure", description: "No bucket policy grants a wildcard (anonymous) principal.", passed: buckets.every(noAnonGrant), ...unk(probeErr) },
+    { id: "no-anonymous-grant", dimension: "no_new_exposure", description: "No bucket policy grants a wildcard (anonymous) principal.", passed: buckets.every(noAnonGrant), subChecks: subs(noAnonGrant), ...unk(probeErr) },
     // Operational safety — did they secure the workload without destroying it?
-    { id: "resources-intact", dimension: "operational_safety", description: "Both lab buckets still exist (secured, not deleted).", passed: bothIntact, ...unk(existUnverified) }
+    { id: "resources-intact", dimension: "operational_safety", description: "Both lab buckets still exist (secured, not deleted).", passed: bothIntact, subChecks: subs((b) => info[b].exists), ...unk(existUnverified) }
   );
   return criteria;
 }

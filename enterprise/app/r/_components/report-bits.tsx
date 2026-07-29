@@ -327,12 +327,23 @@ export function RankBadge({ rank }: { rank: number }) {
 // this file: only what we can verify is shown, and there is still no /100 or
 // hire/no-hire verdict.
 
+export type ReportSubCheck = {
+  id?: string;
+  label?: string;
+  passed?: boolean;
+};
+
 export type ReportCriterion = {
   id?: string;
   description?: string;
   passed?: boolean;
   unknown?: boolean;
   dimension?: string;
+  /** Per-resource detail behind a criterion. The criterion still passes only
+   *  when ALL of these do (scoring is unchanged) - these exist so a failed
+   *  criterion says WHICH resource was missed instead of just "failed", and so
+   *  partial progress is visible rather than discarded. */
+  subChecks?: ReportSubCheck[];
 };
 
 // Display order + hiring-manager-facing label & meaning for each graded dimension.
@@ -424,6 +435,25 @@ export function CompetencyProfile({ criteria }: { criteria: ReportCriterion[] })
                 >
                   <span className="text-sm text-ink-soft">
                     {c?.description ?? c?.id ?? `Check ${i + 1}`}
+                    {/* Partial progress: show which resource passed and which did
+                        not, so a failed check is actionable instead of opaque.
+                        Only rendered when the sub-checks actually disagree - an
+                        all-pass or all-fail criterion says nothing extra. */}
+                    {Array.isArray(c?.subChecks) &&
+                    c.subChecks.length > 1 &&
+                    c.subChecks.some((x) => x?.passed) &&
+                    c.subChecks.some((x) => !x?.passed) ? (
+                      <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                        {c.subChecks.map((sc, j) => (
+                          <span
+                            key={sc?.id ?? j}
+                            className={`text-[11px] ${sc?.passed ? "text-emerald-700" : "text-rose-700"}`}
+                          >
+                            {sc?.passed ? "✓" : "✗"} {sc?.label ?? sc?.id}
+                          </span>
+                        ))}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="flex-none">
                     <PassBadge passed={c?.passed} unknown={c?.unknown} />
