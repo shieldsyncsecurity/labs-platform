@@ -447,6 +447,22 @@ export function LabPanel({ slug, objectives, ready }: { slug: string; objectives
         setFlash("alreadyactive");
         return;
       }
+      if (r.status === 403) {
+        // Entitlement said yes when the page loaded, but the budget is spent NOW
+        // (launches used up in another tab/device, or the 7-day window lapsed while
+        // the page sat open). Previously this fell through to the generic "brief
+        // hiccup — try again" copy, telling a paying customer to retry a launch
+        // that can never succeed. Refreshing entitlements lets hasAccess() see the
+        // spent budget and flip this panel to its "Get this lab" checkout card.
+        const d = await r.json().catch(() => ({}));
+        setSession(null);
+        if (d.error === "LAUNCH_CAP_REACHED" || d.error === "WINDOW_EXPIRED" || d.error === "SUBSCRIPTION_INACTIVE") {
+          await refreshEntitlements();
+          return;
+        }
+        setFlash("launcherror");
+        return;
+      }
       if (!r.ok) { setSession(null); setFlash("launcherror"); return; }
       const d = (await r.json()) as { sessionId: string; expiresAt?: string };
       try { sessionStorage.setItem(key, d.sessionId); } catch {}
