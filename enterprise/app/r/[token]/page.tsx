@@ -242,8 +242,15 @@ export default async function AssessmentReportPage({
           </p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
-          <div className="overflow-x-auto">
+        <>
+          {/* The table is wider than a phone. Say so, and fade the cut edge, so
+              an employer on mobile discovers correctness / time / reflection
+              rather than assuming the layout broke at the viewport edge. */}
+          <p className="mb-2 text-xs text-muted sm:hidden">
+            Swipe the table sideways for correctness, time on task and reflection.
+          </p>
+          <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+          <div className="overflow-x-auto [mask-image:linear-gradient(to_right,black_calc(100%-40px),transparent)] sm:[mask-image:none]">
             <table className="w-full min-w-[820px] border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-line bg-canvas/70 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
@@ -302,7 +309,7 @@ export default async function AssessmentReportPage({
                           <span className="text-muted">&mdash;</span>
                         )}
                       </td>
-                      <td className="px-5 py-4 tabular-nums text-ink-soft">
+                      <td className="whitespace-nowrap px-5 py-4 tabular-nums text-ink-soft">
                         {isScored ? (
                           formatMins(r.durationSec)
                         ) : (
@@ -344,8 +351,9 @@ export default async function AssessmentReportPage({
                 })}
               </tbody>
             </table>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       <p className="mt-6 text-xs leading-relaxed text-muted">

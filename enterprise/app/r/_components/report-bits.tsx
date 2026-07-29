@@ -28,7 +28,7 @@ export function ReportShell({
   return (
     <div className="flex min-h-screen flex-col bg-canvas">
       <header className="sticky top-0 z-40 border-b border-line/80 bg-canvas/85 backdrop-blur-md">
-        <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-5 sm:px-6 lg:px-8">
+        <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-5 sm:px-6 lg:px-8">
           <Logo href="/" />
           <div className="flex items-center gap-3">
             <span className="hidden items-center gap-1.5 text-xs font-medium text-muted sm:inline-flex">
@@ -46,10 +46,10 @@ export function ReportShell({
       </header>
 
       {ribbon ? (
-        <div className="mx-auto w-full max-w-5xl px-5 pt-6 sm:px-6 lg:px-8">{ribbon}</div>
+        <div className="mx-auto w-full max-w-7xl px-5 pt-6 sm:px-6 lg:px-8">{ribbon}</div>
       ) : null}
 
-      <main className="mx-auto w-full max-w-5xl flex-1 px-5 py-10 sm:px-6 sm:py-14 lg:px-8">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-5 py-10 sm:px-6 sm:py-14 lg:px-8">
         {children}
       </main>
 

@@ -78,8 +78,14 @@ export function DemoComparisonTable({ candidates }: { candidates: DemoCandidate[
         </span>
       </div>
 
+      {/* The table is wider than a phone. Say so, and fade the cut edge, so a
+          prospect scrolling on mobile discovers Correctness / Time / Reflection
+          instead of assuming the layout broke at the viewport edge. */}
+      <p className="mb-2 text-xs text-muted sm:hidden">
+        Swipe the table sideways for correctness, time and reflection.
+      </p>
       <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto [mask-image:linear-gradient(to_right,black_calc(100%-40px),transparent)] sm:[mask-image:none]">
           <table className="w-full min-w-[760px] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-line bg-canvas/70 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
@@ -125,7 +131,7 @@ export function DemoComparisonTable({ candidates }: { candidates: DemoCandidate[
                       <span className="w-10 tabular-nums font-semibold text-ink">{pct}%</span>
                     </div>
                   </td>
-                  <td className="px-4 py-4 tabular-nums text-ink-soft">
+                  <td className="whitespace-nowrap px-4 py-4 tabular-nums text-ink-soft">
                     {c.timeUsedMin} min <span className="text-xs text-muted">/ 60</span>
                   </td>
                   <td className="px-4 py-4">
@@ -151,7 +157,7 @@ export function DemoComparisonTable({ candidates }: { candidates: DemoCandidate[
                         View →
                       </a>
                     ) : (
-                      <span className="text-xs text-muted" title="Each candidate gets a private per-candidate report link">
+                      <span className="whitespace-nowrap text-xs text-muted" title="Each candidate gets a private per-candidate report link">
                         Private link
                       </span>
                     )}
