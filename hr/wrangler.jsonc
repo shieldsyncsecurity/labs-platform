@@ -23,6 +23,9 @@
     "binding": "BROWSER"
   },
   "routes": [
+    // billing.shieldsyncsecurity.com is owned by the SEPARATE shieldsync-billing
+    // Worker — it must NOT be listed here, or an HR deploy steals the custom
+    // domain and client invoice links redirect to the HR staff login.
     { "pattern": "employee.shieldsyncsecurity.com", "custom_domain": true }
   ],
   // NON-SECRET vars only. Secrets are set with `wrangler secret put`:

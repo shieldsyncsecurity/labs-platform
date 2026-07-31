@@ -93,7 +93,15 @@ export function DocToolbar({
   const [busy, setBusy] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailState, setEmailState] = useState<string | null>(null);
+  // After a payslip (fixed-ref) save, the engine returns the archived docId.
+  // Capturing it lets Email auto-render the PDF server-side IN PLACE — no more
+  // "attach a file" on a slip that's already in history.
+  const [savedGenId, setSavedGenId] = useState<string | undefined>(undefined);
   const printedOnce = useRef(false);
+
+  // genId to drive the one-click (server-rendered) email: an explicit issued-page
+  // genId, or the one just saved on this generate page.
+  const effectiveGenId = email?.genId ?? savedGenId;
 
   // On the issued page after an issue+print flow: print the archived render once.
   useEffect(() => {
@@ -132,6 +140,7 @@ export function DocToolbar({
       }
       setSaved(true);
       const genId: string | undefined = data?.gen?.docId;
+      if (genId) setSavedGenId(genId); // enables one-click server-rendered email in place
       if (save.refSeries && genId) {
         // Print/inspect the ARCHIVED snapshot under its allocated ref.
         window.location.href = `/employees/${save.seq}/issued/${genId}${thenPrint ? "?autoprint=1" : ""}`;
@@ -198,18 +207,18 @@ export function DocToolbar({
           onSubmit={onEmail}
           style={{ marginTop: 8, border: "1px solid #e2e8f2", borderRadius: 10, padding: "10px 12px", background: "#fff", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12.5 }}
         >
-          {email.genId ? <input type="hidden" name="genId" value={email.genId} /> : null}
+          {effectiveGenId ? <input type="hidden" name="genId" value={effectiveGenId} /> : null}
           <input name="to" type="email" required defaultValue={email.defaultTo} placeholder="employee@email.com" style={{ ...input, minWidth: 200 }} />
           <input name="subject" required defaultValue={email.defaultSubject} style={{ ...input, flex: 1, minWidth: 220 }} />
           <label style={{ color: "#41506a", fontSize: 12 }}>
-            PDF{email.genId ? " (optional — server generates when omitted)" : ""}{" "}
-            <input name="file" type="file" required={!email.genId} accept="application/pdf" style={{ fontSize: 12 }} />
+            PDF{effectiveGenId ? " (optional — server generates when omitted)" : ""}{" "}
+            <input name="file" type="file" required={!effectiveGenId} accept="application/pdf" style={{ fontSize: 12 }} />
           </label>
           <button type="submit" style={{ ...printBtn, padding: "7px 12px" }}>Send</button>
           <span style={{ flexBasis: "100%", color: "#8a94a3", fontSize: 11 }}>
-            {email.genId
+            {effectiveGenId
               ? "The server renders this issued document to PDF and attaches it (attach a file only to override). Sent copies are archived + audited."
-              : "Attach the printed PDF of this document (Print → Save as PDF). The exact sent file is archived + audited."}
+              : "Save to history first (or attach the printed PDF) — then Send. The exact sent file is archived + audited."}
             {emailState ? <b style={{ color: "#1f3a5f" }}> {emailState}</b> : null}
           </span>
         </form>

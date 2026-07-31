@@ -18,11 +18,22 @@ function lastMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function buildPeriod(month: string, lop: number): PayPeriod {
+// Salary is credited on the 5th of the following month by default; the actual
+// credit date varies (bank holidays, a delayed run), so it's overridable via a
+// payDate=YYYY-MM-DD param. defaultPayIso() gives the 5th for the date picker.
+function defaultPayIso(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  const pd = new Date(y, m, 5); // 5th of the month AFTER the salary month
+  return `${pd.getFullYear()}-${String(pd.getMonth() + 1).padStart(2, "0")}-${String(pd.getDate()).padStart(2, "0")}`;
+}
+
+function buildPeriod(month: string, lop: number, payDateIso?: string): PayPeriod {
   const [y, m] = month.split("-").map(Number);
   const days = new Date(y, m, 0).getDate();
   const monthName = new Date(y, m - 1, 1).toLocaleString("en-GB", { month: "long" });
-  const pd = new Date(y, m, 5); // 5th of the following month
+  const pd = /^\d{4}-\d{2}-\d{2}$/.test(payDateIso ?? "")
+    ? new Date(payDateIso as string)
+    : new Date(y, m, 5); // default: 5th of the following month
   return {
     monthLabel: `${monthName} ${y}`,
     periodLabel: `01 - ${days} ${monthName} ${y}`,
@@ -53,7 +64,8 @@ export default async function GeneratePayslip({
 
   const month = /^\d{4}-\d{2}$/.test(sp.month ?? "") ? (sp.month as string) : lastMonth();
   const lop = Math.max(0, Number(sp.lop) || 0);
-  const period = buildPeriod(month, lop);
+  const payDateIso = /^\d{4}-\d{2}-\d{2}$/.test(sp.payDate ?? "") ? (sp.payDate as string) : defaultPayIso(month);
+  const period = buildPeriod(month, lop, payDateIso);
 
   // Deduction defaults: on a fresh open (no deduction params in the URL),
   // prefill from this employee's LAST ISSUED slip — the owner shouldn't re-tick
@@ -103,7 +115,7 @@ export default async function GeneratePayslip({
     period,
     earnings,
     deductionConfig: cfg,
-    remarks: `Salary for ${period.monthLabel} credited to the employee's bank account on ${period.payDate} via ${e.paymentMode.toLowerCase()}.`,
+    remarks: `Salary for ${period.monthLabel} credited to the employee's bank account on ${period.payDate} via ${(e.paymentMode ?? "Bank Transfer").toLowerCase()}.`,
   });
 
   // No-print config bar — set month + deductions on the generate step and Update.
@@ -114,6 +126,7 @@ export default async function GeneratePayslip({
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "center" }}>
         <label>Month <input type="month" name="month" defaultValue={month} style={cfgInput} /></label>
+        <label>Pay date <input type="date" name="payDate" defaultValue={payDateIso} style={cfgInput} /></label>
         <label><input type="checkbox" name="pf" defaultChecked={cfg.pf?.enabled} /> PF <span style={{ color: "#8a94a3" }}>(<input type="checkbox" name="pfCap" defaultChecked={sp.pfCap === "on"} /> cap ₹15k)</span></label>
         <label><input type="checkbox" name="esi" defaultChecked={cfg.esi?.enabled} /> ESI</label>
         <label><input type="checkbox" name="pt" defaultChecked={cfg.pt?.enabled} /> PT ₹<input name="ptAmt" type="number" min={0} defaultValue={String(cfg.pt?.amount ?? 0)} style={{ ...cfgInput, width: 70 }} /></label>
