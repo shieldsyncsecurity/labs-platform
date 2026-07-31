@@ -12,10 +12,14 @@ import type { Candidate } from "@/lib/candidate";
  * /api/candidates/[seq]/send the detail page uses, just reachable in one
  * click from where you're already looking at everyone.
  */
-export function CandidateRowActions({ candidate }: { candidate: Candidate }) {
+export function CandidateRowActions({ candidate, canWrite }: { candidate: Candidate; canWrite: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
+  // Send/resend is a candidate write; a read-only viewer's POST would 403, so
+  // render nothing for them rather than a button that dead-ends.
+  if (!canWrite) return null;
 
   // Once they've answered, there's nothing left to send — the row already
   // shows "✓ Submitted"; reviewing their answers is a real drill-down (there's

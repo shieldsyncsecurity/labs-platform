@@ -12,13 +12,23 @@ const fmtINR = (n: number) => "INR " + (Number(n) || 0).toLocaleString("en-IN");
 export default async function EmployeesPage() {
   const { isAdmin, access } = await getViewer();
   const showSalary = isAdmin || access.seeSalary;
-  const canAdd = isAdmin || can(access, "employees", "write");
+  // /employees/new needs employees:write AND the salary permission (the create
+  // form sets pay), so gate the add control on both or it dead-ends at /no-access.
+  const canAdd = isAdmin || (can(access, "employees", "write") && access.seeSalary);
 
   let employees: Employee[] = [];
   let error: string | null = null;
   try {
     const data = await hrFetch<{ employees?: Employee[] }>("/hr/employees");
     employees = data.employees ?? [];
+    // Administrator-only records don't exist for anyone else — same rule the
+    // middleware enforces on the detail pages and APIs. Fails closed: if the
+    // restriction list can't be read, staff see no records at all.
+    if (!isAdmin) {
+      const { restrictedSeqs } = await hrFetch<{ restrictedSeqs?: number[] }>("/hr/access");
+      const hidden = new Set(restrictedSeqs ?? []);
+      employees = employees.filter((e) => !hidden.has(e.seq));
+    }
   } catch {
     error =
       process.env.NODE_ENV !== "production"

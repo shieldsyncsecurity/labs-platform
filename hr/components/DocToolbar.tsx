@@ -80,6 +80,7 @@ export function DocToolbar({
   save,
   email,
   pdfHref,
+  canIssue = true,
 }: {
   backHref: string;
   backLabel: string;
@@ -87,6 +88,11 @@ export function DocToolbar({
   email?: EmailSpec;
   /** Issued pages: server-rendered PDF download of the archived snapshot. */
   pdfHref?: string;
+  /** May the viewer issue/email/print this document? Defaults to true for every
+   * existing caller; the payslip generator passes false when the viewer has
+   * payroll but not Letters (documents) write access, turning a wall of 403s
+   * into an honest "view-only" note instead of dead buttons. */
+  canIssue?: boolean;
 }) {
   const sp = useSearchParams();
   const [saved, setSaved] = useState(false);
@@ -115,6 +121,21 @@ export function DocToolbar({
   }, [sp]);
 
   const needsIssue = Boolean(save?.refSeries) && !saved;
+
+  // A payslip (a fixed-ref `save` spec) must be archived BEFORE it can be
+  // emailed. Emailing first files the PDF only as a loose 'sent' attachment and
+  // never registers it as an issued slip — the employee still shows unpaid and
+  // the slip is missing from /payslips + the FY summary. So require an
+  // effectiveGenId (set by email.genId on the issued page, or by savedGenId
+  // after Save to history) before Email is allowed. Mirrors the series-letter
+  // issue-then-email gate; the issued-page path (email.genId set) is unaffected.
+  const needsSaveBeforeEmail = Boolean(save) && !effectiveGenId;
+  const emailBlocked = needsIssue || needsSaveBeforeEmail;
+  const emailBlockedReason = needsIssue
+    ? "Issue the letter first (Save/Print) — emails must carry the real reference number"
+    : needsSaveBeforeEmail
+      ? "Save to history first"
+      : undefined;
 
   async function doSave(thenPrint: boolean): Promise<void> {
     if (!save) return;
@@ -172,37 +193,45 @@ export function DocToolbar({
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
         <Link href={backHref} style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; {backLabel}</Link>
-        <div style={{ display: "flex", gap: 8 }}>
-          {pdfHref ? <DownloadPdfButton href={pdfHref} /> : null}
-          {email ? (
-            <button
-              type="button"
-              onClick={() => setEmailOpen((v) => !v)}
-              disabled={needsIssue}
-              title={needsIssue ? "Issue the letter first (Save/Print) — emails must carry the real reference number" : undefined}
-              style={{ ...ghostBtn, opacity: needsIssue ? 0.5 : 1, cursor: needsIssue ? "not-allowed" : "pointer" }}
-            >
-              Email…
-            </button>
-          ) : null}
-          {save ? (
-            <button type="button" onClick={() => doSave(false)} disabled={busy || saved} style={{ ...ghostBtn, opacity: busy ? 0.6 : 1 }}>
-              {saved ? "Saved to history ✓" : busy ? "Saving…" : save.refSeries ? "Issue (save to history)" : "Save to history"}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => (save && !saved ? doSave(true) : printWhenReady())}
-            disabled={busy}
-            style={printBtn}
-            title={save && !saved ? "Issues (saves to history), then prints the archived copy" : undefined}
-          >
-            {save?.refSeries && !saved ? "Issue + Print" : "Print / Save as PDF"}
-          </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {canIssue ? (
+            <>
+              {pdfHref ? <DownloadPdfButton href={pdfHref} /> : null}
+              {email ? (
+                <button
+                  type="button"
+                  onClick={() => setEmailOpen((v) => !v)}
+                  disabled={emailBlocked}
+                  title={emailBlockedReason}
+                  style={{ ...ghostBtn, opacity: emailBlocked ? 0.5 : 1, cursor: emailBlocked ? "not-allowed" : "pointer" }}
+                >
+                  Email…
+                </button>
+              ) : null}
+              {save ? (
+                <button type="button" onClick={() => doSave(false)} disabled={busy || saved} style={{ ...ghostBtn, opacity: busy ? 0.6 : 1 }}>
+                  {saved ? "Saved to history ✓" : busy ? "Saving…" : save.refSeries ? "Issue (save to history)" : "Save to history"}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => (save && !saved ? doSave(true) : printWhenReady())}
+                disabled={busy}
+                style={printBtn}
+                title={save && !saved ? "Issues (saves to history), then prints the archived copy" : undefined}
+              >
+                {save?.refSeries && !saved ? "Issue + Print" : "Print / Save as PDF"}
+              </button>
+            </>
+          ) : (
+            <span style={{ fontSize: 12, color: "#7a5714", background: "#fdf4e3", border: "1px solid #f0dfb8", borderRadius: 6, padding: "6px 10px", maxWidth: 360, lineHeight: 1.4 }}>
+              You can view this slip but need Letters (documents) write access to save, email or print it.
+            </span>
+          )}
         </div>
       </div>
 
-      {email && emailOpen && !needsIssue ? (
+      {email && emailOpen && canIssue && !emailBlocked ? (
         <form
           onSubmit={onEmail}
           style={{ marginTop: 8, border: "1px solid #e2e8f2", borderRadius: 10, padding: "10px 12px", background: "#fff", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12.5 }}

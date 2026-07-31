@@ -68,7 +68,7 @@ export function InvoiceDoc({ invoice }: { invoice: Invoice }) {
             {/* Invoice header */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
               <div>
-                <div style={{ fontSize: 22, fontWeight: 900, color: "#1f3a5f", letterSpacing: ".5px" }}>TAX INVOICE</div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: "#1f3a5f", letterSpacing: ".5px" }}>{seller.gstin ? "TAX INVOICE" : "INVOICE"}</div>
                 <div style={{ fontSize: 13, color: "#5b6676", marginTop: 3 }}>{invoice.invId}</div>
               </div>
               <div style={{ textAlign: "right", fontSize: 12 }}>

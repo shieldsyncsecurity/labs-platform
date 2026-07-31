@@ -64,8 +64,12 @@ export function HireCandidateForm({ seq, prefill }: { seq: string; prefill: Hire
         return;
       }
       if (data.warning) alert(data.warning);
-      // Straight to their offer letter — the point of one-click hiring.
-      router.push(`/employees/${data.seq}/${data.isInternship ? "internship-offer" : "offer"}`);
+      // Land on the new employee's record, not straight into the offer letter:
+      // the offer route needs documents:write, so jumping there dead-ends anyone
+      // without it at /no-access. The record page surfaces a (gated) "Generate
+      // offer" control, so writers reach the letter in one more click and
+      // everyone else still lands somewhere useful.
+      router.push(`/employees/${data.seq}`);
       router.refresh();
     } catch {
       setError("Could not reach the server — check the connection and try again.");
@@ -123,7 +127,7 @@ export function HireCandidateForm({ seq, prefill }: { seq: string; prefill: Hire
       ) : null}
 
       <button type="submit" disabled={busy} style={{ ...primaryBtn, marginTop: 16, opacity: busy ? 0.6 : 1 }}>
-        {busy ? "Creating…" : "Create employee + open offer letter →"}
+        {busy ? "Creating…" : "Create employee & open their record →"}
       </button>
     </form>
   );

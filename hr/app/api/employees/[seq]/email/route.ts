@@ -29,6 +29,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
 
   let base64: string;
   let fileName: string;
+  let note: string | undefined;
+  let cta: { label: string; url: string } | undefined;
   if (file instanceof File && file.size > 0) {
     if (file.size > MAX_KYC_BYTES) {
       return NextResponse.json({ error: "PDF is larger than 4 MB." }, { status: 400 });
@@ -37,12 +39,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
     fileName = file.name;
   } else if (genId) {
     try {
-      const { pdf, gen } = await buildIssuedPdf(req, seq, genId);
+      const { pdf, gen, employeeName } = await buildIssuedPdf(req, seq, genId);
       if (pdf.length > MAX_KYC_BYTES) {
         return NextResponse.json({ error: "The rendered PDF exceeds 4 MB — attach a compressed file instead." }, { status: 400 });
       }
       base64 = Buffer.from(pdf).toString("base64");
-      fileName = pdfFileName(gen);
+      fileName = pdfFileName(gen, employeeName);
+      if (gen.docType === "internship-offer" || gen.docType === "offer") {
+        note =
+          "This is a digital copy for your reference only. You will receive and sign the original at the office on your joining date. Please confirm below that you have seen and agree to it.";
+        cta = { label: "I Accept This Offer", url: `${process.env.APP_URL ?? new URL(req.url).origin}/accept/${seq}/${genId}` };
+      }
     } catch (err) {
       if (err instanceof PdfUnavailableError) {
         return NextResponse.json(
@@ -59,7 +66,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
     const data = await hrFetch(`/hr/email`, {
       method: "POST",
       timeoutMs: 30000,
-      body: { toEmail: to, subject, fileName, base64, employeeSeq: Number(seq), actor },
+      body: { toEmail: to, subject, fileName, base64, employeeSeq: Number(seq), actor, note, cta },
     });
     return NextResponse.json(data);
   } catch (err) {

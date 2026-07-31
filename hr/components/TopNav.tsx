@@ -14,7 +14,7 @@ import { can, type Access, type Area } from "@/lib/access";
 // Each destination carries the permission it needs, so the menu is derived from
 // the same model the middleware enforces rather than a second hand-kept list
 // that drifts out of step with it.
-type NavItem = { href: string; label: string; match: (p: string) => boolean; area: Area; need: "read" | "write" };
+type NavItem = { href: string; label: string; match: (p: string) => boolean; area: Area; need: "read" | "write"; needsSalary?: boolean };
 type NavGroup = { label: string; items: NavItem[]; match: (p: string) => boolean };
 
 const GROUPS: NavGroup[] = [
@@ -37,8 +37,8 @@ const GROUPS: NavGroup[] = [
     label: "Payroll",
     match: (p) => p.startsWith("/payslips") || p.startsWith("/banking"),
     items: [
-      { href: "/payslips", label: "Run payroll", match: (p) => p.startsWith("/payslips") && !p.startsWith("/payslips/summary"), area: "payroll", need: "read" },
-      { href: "/payslips/summary", label: "FY Summary", match: (p) => p.startsWith("/payslips/summary"), area: "payroll", need: "read" },
+      { href: "/payslips", label: "Run payroll", match: (p) => p.startsWith("/payslips") && !p.startsWith("/payslips/summary"), area: "payroll", need: "read", needsSalary: true },
+      { href: "/payslips/summary", label: "FY Summary", match: (p) => p.startsWith("/payslips/summary"), area: "payroll", need: "read", needsSalary: true },
       { href: "/banking", label: "Banking", match: (p) => p.startsWith("/banking"), area: "banking", need: "read" },
     ],
   },
@@ -126,8 +126,11 @@ export function TopNav({ actor, isAdmin, access }: { actor?: string | null; isAd
 
   const initial = (actor ?? "?").trim().charAt(0).toUpperCase();
 
-  // Drop anything this person can't open, then drop groups left empty.
-  const allowed = (item: NavItem) => isAdmin || (access ? can(access, item.area, item.need) : false);
+  // Drop anything this person can't open, then drop groups left empty. Some
+  // destinations (the payroll screens) also require the salary permission on top
+  // of the area permission — their whole content is pay — so AND that in too.
+  const allowed = (item: NavItem) =>
+    isAdmin || (access ? can(access, item.area, item.need) && (!item.needsSalary || access.seeSalary) : false);
   const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter(allowed) })).filter((g) => g.items.length > 0);
   const canAddEmployee = isAdmin || (access ? can(access, "employees", "write") : false);
   const canAddCandidate = isAdmin || (access ? can(access, "candidates", "write") : false);
@@ -181,19 +184,50 @@ export function TopNav({ actor, isAdmin, access }: { actor?: string | null; isAd
           {groups.map((g) => (
             <NavGroupItem key={g.label} group={g} pathname={pathname} />
           ))}
-          {/* Admin-only: who can do what. Sits at the end of the row, quieter
-              than the day-to-day sections — it's setup, not routine work. */}
+          {/* Admin-only: Invoices, Financials, Tax and Access. Quieter than day-to-day sections — setup/governance. */}
           {isAdmin ? (
-            <Link
-              href="/access"
-              style={{
-                ...pillBase,
-                color: pathname.startsWith("/access") ? "#1f3a5f" : "#8a94a3",
-                background: pathname.startsWith("/access") ? "#eef2f8" : "transparent",
-              }}
-            >
-              Access
-            </Link>
+            <>
+              <Link
+                href="/invoices"
+                style={{
+                  ...pillBase,
+                  color: pathname.startsWith("/invoices") ? "#1f3a5f" : "#8a94a3",
+                  background: pathname.startsWith("/invoices") ? "#eef2f8" : "transparent",
+                }}
+              >
+                Invoices
+              </Link>
+              <Link
+                href="/financials"
+                style={{
+                  ...pillBase,
+                  color: pathname.startsWith("/financials") ? "#1f3a5f" : "#8a94a3",
+                  background: pathname.startsWith("/financials") ? "#eef2f8" : "transparent",
+                }}
+              >
+                Financials
+              </Link>
+              <Link
+                href="/tax"
+                style={{
+                  ...pillBase,
+                  color: pathname.startsWith("/tax") ? "#1f3a5f" : "#8a94a3",
+                  background: pathname.startsWith("/tax") ? "#eef2f8" : "transparent",
+                }}
+              >
+                Tax
+              </Link>
+              <Link
+                href="/access"
+                style={{
+                  ...pillBase,
+                  color: pathname.startsWith("/access") ? "#1f3a5f" : "#8a94a3",
+                  background: pathname.startsWith("/access") ? "#eef2f8" : "transparent",
+                }}
+              >
+                Access
+              </Link>
+            </>
           ) : null}
         </nav>
 

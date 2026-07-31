@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
+import { getViewer } from "@/lib/server/hr-access";
+import { can } from "@/lib/access";
 import { getQuestionnaire } from "@/lib/questionnaire";
 import { isRetentionDue, retentionDueDate, OUTCOME_OPTIONS, type Candidate } from "@/lib/candidate";
 import { AnswersView } from "@/components/QuestionnaireForm";
@@ -31,6 +33,12 @@ export default async function CandidateDetail({ params }: { params: Promise<{ se
     throw err;
   }
 
+  // Edit, tailor questions, schedule, send, set outcome, hire and delete are all
+  // candidate WRITES; a candidates:read viewer sees the record but none of the
+  // controls that would 403. Admin always passes.
+  const { isAdmin, access } = await getViewer();
+  const canWrite = isAdmin || can(access, "candidates", "write");
+
   const q = getQuestionnaire(c.questionnaireRole);
   const outcomeLabel = OUTCOME_OPTIONS.find((o) => o.value === c.outcome)?.label ?? c.outcome;
   const dueDate = retentionDueDate(c);
@@ -45,10 +53,12 @@ export default async function CandidateDetail({ params }: { params: Promise<{ se
             <span style={{ fontFamily: "monospace" }}>{c.candidateId}</span> · {c.roleAppliedFor} · {outcomeLabel}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <Link href={`/manage-candidates/${seq}/edit`} style={{ color: "#2f4fb0", fontSize: 12.5, fontWeight: 600 }}>Edit</Link>
-          <DeleteCandidateButton candidate={c} />
-        </div>
+        {canWrite ? (
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <Link href={`/manage-candidates/${seq}/edit`} style={{ color: "#2f4fb0", fontSize: 12.5, fontWeight: 600 }}>Edit</Link>
+            <DeleteCandidateButton candidate={c} />
+          </div>
+        ) : null}
       </div>
 
       {c.convertedEmployeeId ? (
@@ -100,42 +110,49 @@ export default async function CandidateDetail({ params }: { params: Promise<{ se
         </div>
       ) : null}
 
-      <div style={{ ...card, marginTop: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div>
-            <div style={{ fontWeight: 700, color: "#1f3a5f", fontSize: 14 }}>Questions for this candidate</div>
-            <p style={{ fontSize: 12, color: "#5b6676", margin: "4px 0 0", lineHeight: 1.55 }}>
-              {c.customQuestionnaire
-                ? "This candidate has a tailored questionnaire — you can keep editing it or reset to the standard one."
-                : "You can tailor the questions before sending the link — wording, options, add or remove anything."}
-            </p>
+      {canWrite ? (
+        <div style={{ ...card, marginTop: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontWeight: 700, color: "#1f3a5f", fontSize: 14 }}>Questions for this candidate</div>
+              <p style={{ fontSize: 12, color: "#5b6676", margin: "4px 0 0", lineHeight: 1.55 }}>
+                {c.customQuestionnaire
+                  ? "This candidate has a tailored questionnaire — you can keep editing it or reset to the standard one."
+                  : "You can tailor the questions before sending the link — wording, options, add or remove anything."}
+              </p>
+            </div>
+            <Link
+              href={`/manage-candidates/${seq}/questions`}
+              style={{ background: c.customQuestionnaire ? "#e7f0fd" : "#fff", color: "#1f3a5f", border: "1px solid #c3cee0", fontSize: 12.5, fontWeight: 700, borderRadius: 8, padding: "8px 14px", textDecoration: "none", whiteSpace: "nowrap" }}
+            >
+              {c.customQuestionnaire ? "Edit questions →" : "Tailor questions →"}
+            </Link>
           </div>
-          <Link
-            href={`/manage-candidates/${seq}/questions`}
-            style={{ background: c.customQuestionnaire ? "#e7f0fd" : "#fff", color: "#1f3a5f", border: "1px solid #c3cee0", fontSize: 12.5, fontWeight: 700, borderRadius: 8, padding: "8px 14px", textDecoration: "none", whiteSpace: "nowrap" }}
-          >
-            {c.customQuestionnaire ? "Edit questions →" : "Tailor questions →"}
-          </Link>
         </div>
-      </div>
+      ) : null}
 
       {/* Scheduling sits above the questionnaire: you interview first, then
-          send the questions. The page should read in the order the work happens. */}
-      <InterviewScheduler candidate={c} teamsConnected={graphConfigured()} />
-      <SendQuestionnaire candidate={c} />
-      <OutcomeControl candidate={c} />
+          send the questions. The page should read in the order the work happens.
+          All three are candidate writes, so they render only for writers. */}
+      {canWrite ? (
+        <>
+          <InterviewScheduler candidate={c} teamsConnected={graphConfigured()} />
+          <SendQuestionnaire candidate={c} />
+          <OutcomeControl candidate={c} />
+        </>
+      ) : null}
 
-      {!c.convertedEmployeeId ? (
+      {canWrite && !c.convertedEmployeeId ? (
         <div style={{ ...card, marginTop: 16 }}>
           <div style={{ fontWeight: 700, color: "#1f3a5f", fontSize: 14 }}>Hire this candidate</div>
           <p style={{ fontSize: 12, color: "#5b6676", margin: "5px 0 10px", lineHeight: 1.55 }}>
-            Creates the employee record (prefilled from their questionnaire) and takes you straight to their offer letter.
+            Creates the employee record (prefilled from their questionnaire) and opens it, where you can issue their offer letter.
           </p>
           <Link
             href={`/manage-candidates/${seq}/hire`}
             style={{ background: "#1f3a5f", color: "#fff", fontSize: 13, fontWeight: 700, borderRadius: 8, padding: "10px 16px", textDecoration: "none", display: "inline-block" }}
           >
-            Hire &rarr; create employee + offer
+            Hire &rarr; create employee record
           </Link>
         </div>
       ) : null}

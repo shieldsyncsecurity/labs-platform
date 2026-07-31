@@ -34,7 +34,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
     return NextResponse.json({ error: "You have already submitted this form." }, { status: 409 });
   }
 
-  const q = getQuestionnaire(view.questionnaireRole);
+  // Validate against the SAME questionnaire the candidate's page renders (see
+  // q/[token]/page.tsx): the tailored per-candidate copy when set, else the role
+  // default. Validating against only the role default false-blocks submissions
+  // for a tailored form and leaves its custom required fields unenforced.
+  const q = view.customQuestionnaire ?? getQuestionnaire(view.questionnaireRole);
   const { ok, missing } = validateAnswers(q, answers);
   if (!ok) {
     return NextResponse.json({ error: `Please complete: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? "…" : ""}` }, { status: 400 });

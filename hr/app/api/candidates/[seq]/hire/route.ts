@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getHrActor } from "@/lib/server/hr-session";
+import { getViewer } from "@/lib/server/hr-access";
+import { can } from "@/lib/access";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
 import { normalizeEmployee, allowsZeroGross, type Employee } from "@/lib/employee";
 import type { Candidate } from "@/lib/candidate";
@@ -13,6 +15,17 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request, { params }: { params: Promise<{ seq: string }> }) {
   const actor = await getHrActor();
   if (!actor) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+
+  // Hiring MINTS an employee record and writes its pay, so it needs the same
+  // permission the /api/employees POST enforces — not just candidates:write.
+  // The middleware only checks the latter (access-routes.ts gates /hire on
+  // candidates:write), so without this a recruiter who can't create employees
+  // or see salary could create one AND set their salary through this route.
+  const { isAdmin, access } = await getViewer();
+  if (!(isAdmin || (can(access, "employees", "write") && access.seeSalary))) {
+    return NextResponse.json({ error: "You do not have permission to create employee records." }, { status: 403 });
+  }
+
   const { seq } = await params;
 
   let input: Partial<Employee>;

@@ -38,7 +38,29 @@ export function requirementFor(pathname: string, method: string): Requirement {
   const p = pathname.replace(/\/+$/, "") || "/";
 
   // --- Public surface (mirrors middleware's own allowlist) ---
-  if (p === "/login" || p.startsWith("/api/auth/") || p.startsWith("/q/") || p.startsWith("/api/q/")) return PUBLIC;
+  // /my/* and /api/self/* are ALSO exempted directly in middleware.ts (before
+  // this map is even consulted) since they're ss_self-authenticated, not
+  // ss_hr-authenticated — listed here too only so this file stays an accurate
+  // map of the whole public surface.
+  if (
+    p === "/login" ||
+    p.startsWith("/api/auth/") ||
+    p.startsWith("/q/") ||
+    p.startsWith("/api/q/") ||
+    p === "/my" ||
+    p.startsWith("/my/") ||
+    p.startsWith("/api/self/") ||
+    // Offer-acceptance acknowledgment, reached from a link in the offer email.
+    // Also exempted directly in middleware.ts; listed here so this file stays
+    // an accurate map of the whole public surface.
+    p.startsWith("/accept/") ||
+    p.startsWith("/api/accept/") ||
+    // Public invoice view — token-authenticated (signed JWT, audience "ss-inv").
+    // A client with the share link can view their invoice without an HR session.
+    p.startsWith("/inv/")
+  ) {
+    return PUBLIC;
+  }
 
   // --- Signed in, nothing more ---
   // The dashboard filters its own cards; /no-access must never redirect to
@@ -47,6 +69,12 @@ export function requirementFor(pathname: string, method: string): Requirement {
 
   // --- Administrator only ---
   if (p === "/access" || p.startsWith("/api/access")) return ADMIN;
+  // Tax obligations calendar + TDS summary — financial data, admin only.
+  if (p === "/tax") return ADMIN;
+  // P&L / financials — derived from banking, admin only.
+  if (p === "/financials" || p.startsWith("/financials/")) return ADMIN;
+  // B2B invoices — billing data + share-link generation, admin only.
+  if (p === "/invoices" || p.startsWith("/invoices/") || p.startsWith("/api/invoices")) return ADMIN;
   // Names the tenant and the granted Graph roles — owner-only diagnostics.
   if (p === "/api/graph-check") return ADMIN;
 
@@ -62,7 +90,14 @@ export function requirementFor(pathname: string, method: string): Requirement {
   if (p === "/audit" || p.startsWith("/audit/") || p.startsWith("/api/audit")) return area("audit", "read");
 
   // --- Payroll ---
-  if (p === "/payslips" || p.startsWith("/payslips/")) return area("payroll", "read");
+  // These pages exist to display pay: the run-payroll list shows every active
+  // employee's gross, and the FY summary shows their full-year gross, TDS and
+  // net alongside their PAN. There is nothing left of them once pay is masked,
+  // so they require the salary permission outright rather than rendering blanks
+  // (or, worse, zeroes that read as "unpaid").
+  if (p === "/payslips" || p.startsWith("/payslips/")) {
+    return { kind: "area", area: "payroll", need: "read", alsoSeeSalary: true };
+  }
 
   // --- Recruiting ---
   if (p.startsWith("/manage-candidates")) {
@@ -80,8 +115,22 @@ export function requirementFor(pathname: string, method: string): Requirement {
 
   // --- Employees, and everything hanging off an employee record ---
   if (p.startsWith("/api/employees")) {
+    // Minting someone's self-serve PIN hands over a login credential that can
+    // read their letters and payslips — strictly more than "edit an employee",
+    // so it does NOT inherit the employees permission below.
+    if (/\/self-pin$/.test(p)) return ADMIN;
+    // Who may see a record at all is an owner decision, never a staff one.
+    if (/\/visibility$/.test(p)) return ADMIN;
     if (/\/docs(\/|$)/.test(p)) return byMethod("kyc", method); // the ID vault
     if (/\/generated(\/|$)/.test(p) || /\/issued(\/|$)/.test(p) || /\/email$/.test(p)) return byMethod("documents", method);
+    // Creating or editing the RECORD means writing pay — the request body
+    // carries grossMonthly and the salary structure. The FORM was already gated
+    // on the salary permission (/employees/new, /edit, /revise below); gating
+    // only the form left the API it posts to open, i.e. the same hole one layer
+    // down. Offboarding and deleting are excluded: they set neither.
+    if ((method === "POST" || method === "PUT" || method === "PATCH") && !/\/status$/.test(p)) {
+      return { kind: "area", area: "employees", need: "write", alsoSeeSalary: true };
+    }
     return byMethod("employees", method);
   }
   // Creating or revising an employee means setting their pay, so these need the
@@ -92,7 +141,7 @@ export function requirementFor(pathname: string, method: string): Requirement {
   if (p.startsWith("/employees/")) {
     // Letter builders write a document; the payslip builder runs payroll.
     if (/\/payslip$/.test(p)) return { kind: "area", area: "payroll", need: "write", alsoSeeSalary: true };
-    if (/\/(offer|internship-offer|leave|verification|confirmation|experience|completion)$/.test(p)) return area("documents", "write");
+    if (/\/(offer|internship-offer|leave|verification|confirmation|experience|completion|employment-history|resignation-acceptance)$/.test(p)) return area("documents", "write");
     if (/\/issued\//.test(p)) return area("documents", "read");
     if (/\/(edit|revise|convert)$/.test(p)) return { kind: "area", area: "employees", need: "write", alsoSeeSalary: true };
     return area("employees", "read"); // /employees/:seq

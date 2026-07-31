@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { hrFetch } from "@/lib/server/hr-engine";
+import { getViewer } from "@/lib/server/hr-access";
+import { can } from "@/lib/access";
 import { BankImport } from "@/components/BankImport";
 import { BankTxnRow } from "@/components/BankTxnRow";
 import { categoryLabel, formatINR, summarise, type BankTxn } from "@/lib/banking";
@@ -19,6 +21,11 @@ function monthLabel(m: string): string {
 
 export default async function BankingPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const sp = await searchParams;
+  // The "Money by person" table links each name to the employee record, which
+  // requires employees:read. A banking-only viewer would dead-end on click, so
+  // render the name as plain text unless they can actually open the record.
+  const { isAdmin, access } = await getViewer();
+  const canOpenEmployee = isAdmin || can(access, "employees", "read");
 
   let all: BankTxn[] = [];
   let employees: Employee[] = [];
@@ -238,7 +245,11 @@ export default async function BankingPage({ searchParams }: { searchParams: Prom
                         return (
                           <tr key={e.seq} style={{ borderTop: "1px solid #eef2f7" }}>
                             <td style={{ padding: "8px" }}>
-                              <Link href={`/employees/${e.seq}`} style={{ color: "#1f3a5f", fontWeight: 600, textDecoration: "none" }}>{e.name}</Link>
+                              {canOpenEmployee ? (
+                                <Link href={`/employees/${e.seq}`} style={{ color: "#1f3a5f", fontWeight: 600, textDecoration: "none" }}>{e.name}</Link>
+                              ) : (
+                                <span style={{ color: "#1f3a5f", fontWeight: 600 }}>{e.name}</span>
+                              )}
                               <div style={{ fontSize: 10.5, color: "#8a94a3" }}>{e.designation}</div>
                             </td>
                             <td style={{ padding: "8px", textAlign: "right", color: v.inAmt ? "#146c3c" : "#c3cee0", fontVariantNumeric: "tabular-nums" }}>{v.inAmt ? formatINR(v.inAmt) : "—"}</td>

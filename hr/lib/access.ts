@@ -47,7 +47,12 @@ export const AREA_META: Record<Area, { label: string; blurb: string; readMeans: 
     label: "Letters & issued documents",
     blurb: "Offer, appointment, leave, verification and experience letters.",
     readMeans: "See what has been issued to whom.",
-    writeMeans: "Issue new letters and withdraw ones sent in error.",
+    // Stated plainly because it is NOT closable by a permission: an offer or
+    // appointment letter states the salary, so anyone who can issue or reopen
+    // one necessarily reads the pay printed in it, whatever "Salary figures"
+    // below is set to. (Payslips are the exception — those are pure pay and DO
+    // require the salary permission, on the page and on the PDF.)
+    writeMeans: "Issue new letters and withdraw ones sent in error. Note: offer and appointment letters state the salary, so this also means seeing the pay written in those letters.",
   },
   payroll: {
     label: "Payroll",
@@ -107,6 +112,36 @@ export function assistantPreset(): Access {
     seeBankDetails: false,
   };
 }
+
+/** Read-only across day-to-day operations — someone who needs to see the state
+ * of recruiting, records and documents without being able to change anything or
+ * see money-enabling details. Deliberately NO payroll: every payroll surface
+ * also requires the salary permission, so `payroll: read` with `seeSalary: false`
+ * would be a dead-end that falsely advertises access this viewer can never use. */
+export function viewerPreset(): Access {
+  return {
+    areas: { candidates: "read", employees: "read", documents: "read", payroll: "none", kyc: "none", banking: "none", audit: "none" },
+    seeSalary: false,
+    seeBankDetails: false,
+  };
+}
+
+/** Named roles the admin can apply with one click at /access. Each is a
+ * STARTING POINT the admin then edits — never applied automatically. */
+export const ROLE_PRESETS: Array<{ key: string; label: string; blurb: string; make: () => Access }> = [
+  {
+    key: "assistant",
+    label: "Executive Assistant",
+    blurb: "Runs recruiting, maintains records, issues letters. No pay figures, no ID vault, no banking.",
+    make: assistantPreset,
+  },
+  {
+    key: "viewer",
+    label: "Read-only viewer",
+    blurb: "Sees recruiting, records and documents. Changes nothing, sees no pay figures.",
+    make: viewerPreset,
+  },
+];
 
 const RANK: Record<Level, number> = { none: 0, read: 1, write: 2 };
 

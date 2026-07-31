@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
+import { getViewer } from "@/lib/server/hr-access";
+import { can } from "@/lib/access";
 import { buildPayslip, prorateStructure, type DeductionConfig, type PayPeriod } from "@/lib/payslip";
 import { structureForMonth, toPayslipEmployee, type Employee } from "@/lib/employee";
 import { PayslipDoc } from "@/components/PayslipDoc";
@@ -53,6 +55,14 @@ export default async function GeneratePayslip({
 }) {
   const { seq } = await params;
   const sp = await searchParams;
+
+  // Issuing (Save to history), emailing and printing a slip all POST to routes
+  // that require Letters (documents) WRITE. A viewer with payroll+salary but
+  // without that can build and read this slip but not archive it — pass that
+  // through so the toolbar shows an honest view-only note instead of buttons
+  // that all 403. (Admin always passes.)
+  const { isAdmin, access } = await getViewer();
+  const canIssue = isAdmin || can(access, "documents", "write");
 
   let e: Employee;
   try {
@@ -151,6 +161,7 @@ export default async function GeneratePayslip({
           <DocToolbar
             backHref={`/payslips?month=${month}`}
             backLabel="Payslips"
+            canIssue={canIssue}
             save={{ seq, docType: "payslip", title: `Salary Slip - ${period.monthLabel}`, ref: `${e.employeeId} ${month}`, snapshot: payslip }}
             email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Salary Slip — ${period.monthLabel}` }}
           />

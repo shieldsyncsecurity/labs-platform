@@ -21,9 +21,17 @@ export default async function Home() {
   // is removed entirely rather than left as a heading with nothing under it.
   const { actor, isAdmin, access } = await getViewer();
   const allow = (area: Parameters<typeof can>[1], need: "read" | "write" = "read") => isAdmin || can(access, area, need);
+  // The payroll screens are pure pay — their routes need the salary permission
+  // on top of payroll:read — so anything linking to them is gated on both, or a
+  // payroll:read-without-salary viewer would land on /no-access.
+  const allowPay = isAdmin || (can(access, "payroll", "read") && access.seeSalary);
   const showRecruiting = allow("candidates") || allow("employees", "write");
-  const showRecords = allow("employees") || allow("kyc");
-  const showPayroll = allow("payroll") || allow("banking");
+  // Both records cards route through /employees (needs employees:read) — the KYC
+  // vault is only reachable via an employee record — so the section has content
+  // only when employees:read is held. Gating on kyc alone would leave a kyc-only
+  // viewer an empty heading whose one card dead-ends at /no-access.
+  const showRecords = allow("employees");
+  const showPayroll = allowPay || allow("banking");
   const nothing = !showRecruiting && !showRecords && !showPayroll && !allow("audit");
 
   const card: React.CSSProperties = {
@@ -57,7 +65,7 @@ export default async function Home() {
 
       {/* Standing payroll reminder — renders only when someone is actually unpaid,
           so its presence always means "act". Shown to whoever can run payroll. */}
-      {allow("payroll") ? <div style={{ marginTop: 18 }}><PayrollDueBanner /></div> : null}
+      {allowPay ? <div style={{ marginTop: 18 }}><PayrollDueBanner /></div> : null}
 
       {nothing ? (
         <div style={{ ...card, marginTop: 22, borderStyle: "dashed" }}>
@@ -101,7 +109,7 @@ export default async function Home() {
                 <div style={p}>Open an employee for verification, leave/NOC, confirmation, revision, or relieving letters.</div>
               </Link>
             ) : null}
-            {allow("kyc") ? (
+            {allow("employees") && allow("kyc") ? (
               <Link href="/employees" style={card}>
                 <div style={h}>Manage KYC documents</div>
                 <div style={p}>Upload or retrieve Aadhaar, PAN, bank proof — encrypted, every access logged.</div>
@@ -116,7 +124,7 @@ export default async function Home() {
         <section style={{ marginTop: 28 }}>
           <div style={sectionLabel}><span style={dot("#b0782f")} />Payroll</div>
           <div style={grid}>
-            {allow("payroll") ? (
+            {allowPay ? (
               <Link href="/payslips" style={card}>
                 <div style={h}>Run this month&rsquo;s payroll</div>
                 <div style={p}>Generate each active employee&rsquo;s salary slip — ✓ shows who&rsquo;s already done.</div>
@@ -128,10 +136,28 @@ export default async function Home() {
                 <div style={p}>Import the bank statement — see where money came from and went, and whether payroll actually left the account.</div>
               </Link>
             ) : null}
-            {allow("payroll") ? (
+            {allowPay ? (
               <Link href="/payslips/summary" style={card}>
                 <div style={h}>Prepare FY / tax numbers</div>
                 <div style={p}>April–March salary + TDS summary per employee, from issued slips (Form 16 input).</div>
+              </Link>
+            ) : null}
+            {isAdmin ? (
+              <Link href="/invoices" style={card}>
+                <div style={h}>Issue an invoice</div>
+                <div style={p}>Create and track B2B invoices for clients, OEM partners, and consulting engagements.</div>
+              </Link>
+            ) : null}
+            {isAdmin ? (
+              <Link href="/financials" style={card}>
+                <div style={h}>P&amp;L and financials</div>
+                <div style={p}>Monthly income vs. expenses from the bank ledger — cash-basis view to share with your CA.</div>
+              </Link>
+            ) : null}
+            {isAdmin ? (
+              <Link href="/tax" style={card}>
+                <div style={h}>Tax obligations</div>
+                <div style={p}>TDS on salary, advance tax schedule, GST calendar — derived from payslips + IDFC transactions.</div>
               </Link>
             ) : null}
           </div>

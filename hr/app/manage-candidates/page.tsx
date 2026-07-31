@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { hrFetch } from "@/lib/server/hr-engine";
+import { getViewer } from "@/lib/server/hr-access";
+import { can } from "@/lib/access";
 import { isRetentionDue, OUTCOME_OPTIONS, type Candidate } from "@/lib/candidate";
 import { CandidateRowActions } from "@/components/CandidateRowActions";
 
@@ -21,6 +23,11 @@ function fmtWhen(iso?: string): string {
 }
 
 export default async function CandidatesPage() {
+  // Adding candidates and sending/resending their questionnaire are candidate
+  // WRITES; a candidates:read viewer must not see controls that 403. Admin passes.
+  const { isAdmin, access } = await getViewer();
+  const canWrite = isAdmin || can(access, "candidates", "write");
+
   let candidates: Candidate[] = [];
   let error: string | null = null;
   try {
@@ -65,7 +72,7 @@ export default async function CandidatesPage() {
               </span>
             </td>
             <td style={{ padding: "10px", textAlign: "right" }}>
-              <CandidateRowActions candidate={c} />
+              <CandidateRowActions candidate={c} canWrite={canWrite} />
             </td>
           </tr>
         );
@@ -96,12 +103,14 @@ export default async function CandidatesPage() {
             Interview records. Separate from employees — kept only for this recruitment, not indefinitely.
           </p>
         </div>
-        <Link
-          href="/manage-candidates/new"
-          style={{ background: "#1f3a5f", color: "#fff", fontSize: 13, fontWeight: 700, borderRadius: 8, padding: "10px 16px", textDecoration: "none", whiteSpace: "nowrap" }}
-        >
-          + Add candidate
-        </Link>
+        {canWrite ? (
+          <Link
+            href="/manage-candidates/new"
+            style={{ background: "#1f3a5f", color: "#fff", fontSize: 13, fontWeight: 700, borderRadius: 8, padding: "10px 16px", textDecoration: "none", whiteSpace: "nowrap" }}
+          >
+            + Add candidate
+          </Link>
+        ) : null}
       </div>
 
       {error ? (
@@ -112,9 +121,11 @@ export default async function CandidatesPage() {
           <p style={{ fontSize: 12.5, color: "#8a94a3", marginTop: 5 }}>
             Add someone you&rsquo;ve interviewed, then email them the questionnaire link to capture their details.
           </p>
-          <Link href="/manage-candidates/new" style={{ display: "inline-block", marginTop: 14, color: "#2f4fb0", fontSize: 13, fontWeight: 700 }}>
-            Add your first candidate &rarr;
-          </Link>
+          {canWrite ? (
+            <Link href="/manage-candidates/new" style={{ display: "inline-block", marginTop: 14, color: "#2f4fb0", fontSize: 13, fontWeight: 700 }}>
+              Add your first candidate &rarr;
+            </Link>
+          ) : null}
         </div>
       ) : (
         <>
