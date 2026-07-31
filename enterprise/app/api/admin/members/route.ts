@@ -35,10 +35,31 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
-  const sub = body.sub?.trim();
-  if (!sub) return NextResponse.json({ error: "sub is required" }, { status: 400 });
-
   try {
+    // Provision: create the Cognito login AND bind the seat in one step (no sub yet --
+    // the engine mints it). This is the path that removes the manual AWS-console step.
+    // The pool id lives in this Worker's env; the engine's IAM scopes which pool it
+    // may write to, so a caller-supplied id can't reach another pool.
+    if (body.action === "provision") {
+      const provEmail = body.email?.trim();
+      const provOrgId = body.orgId?.trim();
+      if (!provEmail || !provOrgId) {
+        return NextResponse.json({ error: "email and orgId are required" }, { status: 400 });
+      }
+      const poolId = (process.env.COGNITO_POOL_ID ?? "").trim();
+      if (!poolId) {
+        return NextResponse.json({ error: "Cognito is not configured (no pool id)." }, { status: 503 });
+      }
+      const result = await entFetch("/ent/members/provision", {
+        method: "POST",
+        body: { email: provEmail, orgId: provOrgId, poolId, actor },
+      });
+      return NextResponse.json(result);
+    }
+
+    const sub = body.sub?.trim();
+    if (!sub) return NextResponse.json({ error: "sub is required" }, { status: 400 });
+
     if (body.action === "revoke") {
       await entFetch("/ent/members/delete", { method: "POST", body: { sub, actor } });
       return NextResponse.json({ ok: true });

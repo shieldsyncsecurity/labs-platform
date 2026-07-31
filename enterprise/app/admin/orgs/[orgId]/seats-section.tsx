@@ -8,16 +8,22 @@ import { useCallback, useEffect, useState } from "react";
  *  auth/callback checks the custom:orgId claim against the membership record
  *  written here, and denies the session if there is no match — so a Cognito
  *  attribute alone (however it got set) can never open someone else's tenant.
- *  Onboarding an employer is therefore two steps, and this is the second one.
+ *
+ *  "Provision login" does BOTH steps at once (create the Cognito user + bind the
+ *  seat), so onboarding an employer never needs the AWS console. The manual
+ *  "bind an existing user" form below stays for edge cases (someone who already
+ *  has a login, or moving a person between orgs).
  */
 
 type Member = { sub: string; orgId: string; email?: string; createdAt?: string; createdBy?: string };
 
 export default function SeatsSection({ orgId }: { orgId: string }) {
   const [members, setMembers] = useState<Member[] | null>(null);
+  const [provEmail, setProvEmail] = useState("");
   const [sub, setSub] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
+  const [provBusy, setProvBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -35,6 +41,32 @@ export default function SeatsSection({ orgId }: { orgId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function provision(e: React.FormEvent) {
+    e.preventDefault();
+    const addr = provEmail.trim();
+    if (!addr) return;
+    setProvBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/members", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "provision", orgId, email: addr }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error((d as { error?: string }).error ?? "failed");
+      }
+      setProvEmail("");
+      setMsg({ kind: "ok", text: `Login created and seat granted. ${addr} gets an email invite and can sign in.` });
+      await load();
+    } catch (err) {
+      setMsg({ kind: "err", text: err instanceof Error ? err.message : "Could not provision the login." });
+    } finally {
+      setProvBusy(false);
+    }
+  }
 
   async function bind(e: React.FormEvent) {
     e.preventDefault();
@@ -91,35 +123,28 @@ export default function SeatsSection({ orgId }: { orgId: string }) {
         </span>
       </div>
       <p className="mt-1 text-xs leading-relaxed text-muted">
-        Creating the Cognito user does <strong className="text-ink-soft">not</strong> grant access on its own.
-        A seat must be bound here — sign-in is denied unless the token&rsquo;s org matches this record.
+        Provision a login to create the employer&rsquo;s Cognito user and grant their seat in one step &mdash; no AWS
+        console needed. Sign-in stays denied unless a seat is bound here.
       </p>
 
-      <form onSubmit={bind} className="mt-4 flex flex-wrap items-end gap-2">
-        <label className="flex-1 min-w-56">
-          <span className="mb-1 block text-xs font-medium text-ink-soft">Cognito subject (sub)</span>
+      {/* Primary path: create the login AND bind the seat together. */}
+      <form onSubmit={provision} className="mt-4 flex flex-wrap items-end gap-2">
+        <label className="min-w-56 flex-1">
+          <span className="mb-1 block text-xs font-medium text-ink-soft">Employer email</span>
           <input
-            value={sub}
-            onChange={(e) => setSub(e.target.value)}
-            placeholder="e.g. 5468d4e8-9011-70d5-…"
-            className="w-full rounded-lg border border-line-strong bg-canvas px-3 py-2 font-mono text-xs text-ink outline-none focus:border-brand"
-          />
-        </label>
-        <label className="flex-1 min-w-48">
-          <span className="mb-1 block text-xs font-medium text-ink-soft">Email (label only)</span>
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            type="email"
+            value={provEmail}
+            onChange={(e) => setProvEmail(e.target.value)}
             placeholder="person@company.com"
             className="w-full rounded-lg border border-line-strong bg-canvas px-3 py-2 text-xs text-ink outline-none focus:border-brand"
           />
         </label>
         <button
           type="submit"
-          disabled={busy || !sub.trim()}
+          disabled={provBusy || !provEmail.trim()}
           className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-strong disabled:opacity-50"
         >
-          Grant seat
+          {provBusy ? "Creating…" : "Provision login"}
         </button>
       </form>
 
@@ -133,7 +158,10 @@ export default function SeatsSection({ orgId }: { orgId: string }) {
         {members && members.length > 0 ? (
           <ul className="overflow-hidden rounded-xl border border-line">
             {members.map((m) => (
-              <li key={m.sub} className="flex flex-wrap items-center justify-between gap-3 border-b border-line/70 px-4 py-3 last:border-b-0">
+              <li
+                key={m.sub}
+                className="flex flex-wrap items-center justify-between gap-3 border-b border-line/70 px-4 py-3 last:border-b-0"
+              >
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium text-ink">{m.email || "(no email recorded)"}</div>
                   <div className="truncate font-mono text-[11px] text-muted">{m.sub}</div>
@@ -155,6 +183,46 @@ export default function SeatsSection({ orgId }: { orgId: string }) {
           </p>
         ) : null}
       </div>
+
+      {/* Advanced/edge case: bind a user who already has a Cognito login (e.g. they
+          self-registered, or you are moving someone between orgs). Needs their sub. */}
+      <details className="mt-5 border-t border-line pt-4">
+        <summary className="cursor-pointer text-xs font-medium text-muted hover:text-ink-soft">
+          Bind an existing Cognito user (advanced)
+        </summary>
+        <p className="mt-2 text-xs leading-relaxed text-muted">
+          Use this only when the person already has a login. Creating the Cognito user does{" "}
+          <strong className="text-ink-soft">not</strong> grant access on its own &mdash; the seat bound here is what
+          auth checks.
+        </p>
+        <form onSubmit={bind} className="mt-3 flex flex-wrap items-end gap-2">
+          <label className="min-w-56 flex-1">
+            <span className="mb-1 block text-xs font-medium text-ink-soft">Cognito subject (sub)</span>
+            <input
+              value={sub}
+              onChange={(e) => setSub(e.target.value)}
+              placeholder="e.g. 5468d4e8-9011-70d5-…"
+              className="w-full rounded-lg border border-line-strong bg-canvas px-3 py-2 font-mono text-xs text-ink outline-none focus:border-brand"
+            />
+          </label>
+          <label className="min-w-48 flex-1">
+            <span className="mb-1 block text-xs font-medium text-ink-soft">Email (label only)</span>
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="person@company.com"
+              className="w-full rounded-lg border border-line-strong bg-canvas px-3 py-2 text-xs text-ink outline-none focus:border-brand"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={busy || !sub.trim()}
+            className="rounded-lg border border-line-strong bg-surface px-4 py-2 text-sm font-semibold text-ink-soft shadow-sm transition-colors hover:border-brand/40 hover:text-ink disabled:opacity-50"
+          >
+            Bind seat
+          </button>
+        </form>
+      </details>
     </section>
   );
 }

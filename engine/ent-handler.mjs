@@ -1676,6 +1676,74 @@ export async function handler(event) {
       return resp(200, { ok: true });
     }
 
+    if (method === "POST" && path === "/ent/members/provision") {
+      // Staff-only: create the Cognito user AND bind the seat in ONE step, so
+      // onboarding an employer never needs the AWS console. The Worker holds the pool
+      // id and passes it; IAM (policy-ent.json) is what actually scopes which pool
+      // this may write to. Email invite only - NEVER SMS - so it stays $0.
+      const email = String(parsed.email ?? "").trim().toLowerCase();
+      const orgId = String(parsed.orgId ?? "").trim();
+      const poolId = String(parsed.poolId ?? "").trim();
+      const actor = cleanActor(parsed.actor);
+      if (!email || !orgId || !poolId) return resp(400, { error: "email, orgId and poolId required" });
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return resp(400, { error: "invalid email" });
+      const org = await getOrg(orgId);
+      if (!org) return resp(404, { error: "no such org" });
+
+      // cognito-idp is a client-* package the nodejs runtime normally provides;
+      // import it LAZILY so a runtime that lacks it fails cleanly HERE (feature
+      // unavailable) instead of 500-ing the whole engine at load.
+      let CognitoIdentityProviderClient, AdminCreateUserCommand, AdminGetUserCommand;
+      try {
+        ({ CognitoIdentityProviderClient, AdminCreateUserCommand, AdminGetUserCommand } =
+          await import("@aws-sdk/client-cognito-identity-provider"));
+      } catch (e) {
+        console.error("[ent/members/provision] cognito-idp client unavailable:", e?.message);
+        return resp(501, { error: "PROVISION_UNAVAILABLE" });
+      }
+      const cog = new CognitoIdentityProviderClient({ region: "us-east-1" });
+
+      let sub;
+      try {
+        // Cognito-generated temp password, delivered by EMAIL only (no SNS/SMS cost).
+        // email_verified=true so they can sign in and reset immediately; custom:orgId
+        // mirrors the binding, but the membership record written below is what
+        // actually authorizes (auth/callback re-checks it, fail-closed).
+        const created = await cog.send(new AdminCreateUserCommand({
+          UserPoolId: poolId,
+          Username: email,
+          UserAttributes: [
+            { Name: "email", Value: email },
+            { Name: "email_verified", Value: "true" },
+            { Name: "custom:orgId", Value: orgId },
+          ],
+          DesiredDeliveryMediums: ["EMAIL"],
+        }));
+        sub = created?.User?.Attributes?.find((a) => a.Name === "sub")?.Value;
+      } catch (e) {
+        if (e?.name === "UsernameExistsException") {
+          // Already provisioned (or self-registered): look up the existing sub and just
+          // (re)bind the seat, so this is idempotent instead of a dead end.
+          try {
+            const got = await cog.send(new AdminGetUserCommand({ UserPoolId: poolId, Username: email }));
+            sub = got?.UserAttributes?.find((a) => a.Name === "sub")?.Value;
+          } catch (e2) {
+            console.error("[ent/members/provision] AdminGetUser failed:", e2?.name, e2?.message);
+            return resp(502, { error: "PROVISION_FAILED" });
+          }
+        } else {
+          // Full detail to CloudWatch ONLY; a fixed, safe string to the caller.
+          console.error("[ent/members/provision] AdminCreateUser failed:", e?.name, e?.message);
+          return resp(502, { error: "PROVISION_FAILED" });
+        }
+      }
+      if (!sub) return resp(502, { error: "PROVISION_FAILED" });
+
+      const m = await putMember({ sub, orgId, email, actor });
+      await audit({ orgId, actor, action: "member.provision", target: sub, detail: { email } });
+      return resp(200, { ok: true, member: m });
+    }
+
     if (method === "POST" && path === "/ent/rec/start") {
       const { inviteToken } = parsed;
       const invite = await getInvite(inviteToken);
@@ -2621,12 +2689,23 @@ export async function handler(event) {
       const invite = await getInvite(inviteToken);
       if (!invite) return resp(404, { error: "not found" });
 
-      // Idempotent: a double-submit (e.g. timer auto-submit racing a manual
-      // click) returns the already-computed result instead of re-grading a
-      // torn-down account.
+      // Idempotent + data-loss-safe. The STORED RESULT - not the invite status -
+      // is the source of truth for "already graded". Grading runs against a live
+      // account that teardown wipes seconds after the first submit, so re-grading
+      // yields a zero; overwriting a real result with that zero would silently
+      // destroy the candidate's grade. Checking the result first also closes the
+      // window where putResult succeeded but the following setInviteStatus (or the
+      // HTTP 200) was lost and the client retried - a timer auto-submit racing a
+      // manual click, a dropped response, a Lambda timeout right after the write.
+      const existingResult = await getResult(invite.assessmentId, inviteToken);
+      if (existingResult) {
+        return resp(200, { ok: true, submitted: true, result: existingResult });
+      }
       if (invite.status === "submitted") {
-        const existing = await getResult(invite.assessmentId, inviteToken);
-        return resp(200, { ok: true, submitted: true, result: existing });
+        // Marked submitted but no result persisted (rare). The account is already
+        // gone, so grading is impossible - report submitted with no result rather
+        // than grading a torn-down environment into a false zero.
+        return resp(200, { ok: true, submitted: true, result: null });
       }
       if (invite.status !== "started") {
         return resp(409, { error: "NOT_SUBMITTABLE" });
