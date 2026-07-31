@@ -33,9 +33,7 @@ export default function LandingPage() {
 
           <h1 className="bill-h1">View your invoice</h1>
           <p className="bill-lede">
-            If {COMPANY.shortName} has issued you an invoice, open the secure link
-            from your email to view and download it. Links are private to you and
-            don&apos;t require an account.
+            {`If ${COMPANY.shortName} has issued you an invoice, open the secure link from your email to view and download it. Links are private to you and don't require an account.`}
           </p>
 
           <div className="bill-contact">
