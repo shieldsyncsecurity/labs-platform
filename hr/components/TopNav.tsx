@@ -132,7 +132,9 @@ export function TopNav({ actor, isAdmin, access }: { actor?: string | null; isAd
   const allowed = (item: NavItem) =>
     isAdmin || (access ? can(access, item.area, item.need) && (!item.needsSalary || access.seeSalary) : false);
   const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter(allowed) })).filter((g) => g.items.length > 0);
-  const canAddEmployee = isAdmin || (access ? can(access, "employees", "write") : false);
+  // Creating a record sets pay, so /employees/new needs employees:write AND
+  // seeSalary — match that here or the quick-add link dead-ends at /no-access.
+  const canAddEmployee = isAdmin || (access ? can(access, "employees", "write") && access.seeSalary : false);
   const canAddCandidate = isAdmin || (access ? can(access, "candidates", "write") : false);
   const showQuickAdd = canAddEmployee || canAddCandidate;
 

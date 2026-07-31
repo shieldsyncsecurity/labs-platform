@@ -88,7 +88,7 @@ export default async function Home() {
                 <div style={p}>Add someone you&rsquo;ve interviewed and send the questionnaire, or follow up with anyone already in your pipeline — then hire in one click.</div>
               </Link>
             ) : null}
-            {allow("employees", "write") ? (
+            {allow("employees", "write") && (isAdmin || access.seeSalary) ? (
               <Link href="/employees/new" style={card}>
                 <div style={h}>Add a new employee</div>
                 <div style={p}>Create the employee record directly, then issue their appointment or internship offer letter.</div>

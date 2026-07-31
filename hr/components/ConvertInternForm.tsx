@@ -46,8 +46,11 @@ export function ConvertInternForm({ seq, currentDesignation }: { seq: string; cu
         setBusy(false);
         return;
       }
-      // Straight to the fresh full-time appointment letter.
-      router.push(`/employees/${seq}/offer`);
+      // Land on the employee record (not the /offer letter, which needs
+      // documents:write) — a converter with employees+salary but no Letters
+      // access would otherwise dead-end at /no-access. The record page surfaces
+      // a gated "Generate offer" control for those who can issue it.
+      router.push(`/employees/${seq}`);
       router.refresh();
     } catch {
       setError("Could not reach the server — check the connection and try again.");
