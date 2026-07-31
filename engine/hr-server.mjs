@@ -52,6 +52,69 @@ function load() {
 // --- questionnaire-link primitives (mirrored in the prod Lambda) ---
 const randomToken = () => randomBytes(24).toString("hex"); // 192-bit, unguessable
 const sha256hex = (s) => createHash("sha256").update(s).digest("hex");
+
+/**
+ * Mirrors publicEmployee() in hr-handler.mjs: the self-serve PIN hash, its salt
+ * and the brute-force counters are login secrets and never leave the engine.
+ */
+const PIN_SECRET_FIELDS = ["selfPinHash", "selfPinSalt", "selfFailedAttempts", "selfLockedUntil"];
+function publicEmployee(item) {
+  if (!item || typeof item !== "object") return item;
+  const out = { ...item };
+  for (const f of PIN_SECRET_FIELDS) delete out[f];
+  // The UI still needs to know WHETHER a PIN exists (to say "set up" vs
+  // "reissue", and to warn before replacing one) — that is a boolean, not a
+  // credential, so it is derived here rather than leaking the hash to infer it.
+  out.hasSelfPin = Boolean(item.selfPinHash);
+  return out;
+}
+
+/** Only an offer can be "accepted" — mirrors hr-handler.mjs. */
+const ACCEPTABLE_DOCTYPES = new Set(["offer", "internship-offer"]);
+
+// Mirrors the same function in hr-handler.mjs (the prod Lambda) — see there for
+// why the layout is table-based with everything inlined, and why every
+// interpolation is escaped. (http://localhost is allowed for the CTA here, and
+// ONLY here, so the accept button is previewable in dev; prod is https-only.)
+const esc = (s) =>
+  String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+function documentEmailHtml({ recipientName, subjectLine, note, cta }) {
+  const navy = "#1f3a5f";
+  const muted = "#5b6676";
+  const ctaUrl = cta && typeof cta.url === "string" && /^(https:\/\/|http:\/\/localhost)/i.test(cta.url) ? cta.url : null;
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#eef2f8;font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f8;padding:24px 0;">
+<tr><td align="center">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #d9dfea;">
+<tr><td style="background:${navy};padding:20px 28px;">
+<span style="color:#ffffff;font-size:18px;font-weight:700;">ShieldSync Security</span><br>
+<span style="color:#c7d2e6;font-size:12px;">Empowering Cybersecurity Futures</span>
+</td></tr>
+<tr><td style="padding:28px;">
+<p style="margin:0 0 16px;color:#1b2331;font-size:14px;line-height:1.6;">Dear ${esc(recipientName)},</p>
+<p style="margin:0 0 16px;color:#1b2331;font-size:14px;line-height:1.6;">Please find your document attached:</p>
+<p style="margin:0 0 20px;padding:12px 16px;background:#f4f7fb;border-left:3px solid ${navy};color:${navy};font-size:14px;font-weight:700;">${esc(subjectLine)}</p>
+${note ? `<p style="margin:0 0 16px;padding:12px 16px;background:#fdf4e3;border-left:3px solid #c99a2e;color:#7a5714;font-size:13px;line-height:1.6;">${esc(note)}</p>` : ""}
+${ctaUrl ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 22px;"><tr><td style="border-radius:8px;background:${navy};">
+<a href="${esc(ctaUrl)}" style="display:inline-block;padding:13px 30px;color:#ffffff;font-size:14.5px;font-weight:700;text-decoration:none;">${esc(cta.label)}</a>
+</td></tr></table>` : ""}
+<p style="margin:0 0 8px;color:#1b2331;font-size:14px;line-height:1.6;">If you have any questions, just reply to this email or write to
+<a href="mailto:info@shieldsyncsecurity.com" style="color:${navy};">info@shieldsyncsecurity.com</a>.</p>
+<p style="margin:24px 0 0;color:#1b2331;font-size:14px;line-height:1.6;">Regards,<br>ShieldSync Security Private Limited</p>
+</td></tr>
+<tr><td style="padding:16px 28px;border-top:1px solid #eef2f7;">
+<p style="margin:0;color:${muted};font-size:11px;line-height:1.6;">This is an automated message from the ShieldSync HR portal. Please do not share this email or its attachment with anyone other than the intended recipient.</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>`;
+}
 function timingSafeEqualHex(a, b) {
   const ba = Buffer.from(String(a), "hex");
   const bb = Buffer.from(String(b), "hex");
@@ -150,7 +213,7 @@ const server = http.createServer(async (req, res) => {
     // /hr/employees
     if (parts[0] === "hr" && parts[1] === "employees" && parts.length === 2) {
       if (req.method === "GET") {
-        return send(res, 200, { employees: db.employees });
+        return send(res, 200, { employees: db.employees.map(publicEmployee) });
       }
       if (req.method === "POST") {
         const body = await readBody(req);
@@ -167,7 +230,7 @@ const server = http.createServer(async (req, res) => {
         db.seq = seq;
         audit(db, body.actor, "employee.create", employee.employeeId, { name: employee.name });
         save(db);
-        return send(res, 200, { employee });
+        return send(res, 200, { employee: publicEmployee(employee) });
       }
     }
 
@@ -177,7 +240,7 @@ const server = http.createServer(async (req, res) => {
       const idx = db.employees.findIndex((e) => e.seq === seq);
       if (req.method === "GET") {
         if (idx < 0) return send(res, 404, { error: "NOT_FOUND" });
-        return send(res, 200, { employee: db.employees[idx] });
+        return send(res, 200, { employee: publicEmployee(db.employees[idx]) });
       }
       if (req.method === "PUT") {
         if (idx < 0) return send(res, 404, { error: "NOT_FOUND" });
@@ -197,6 +260,11 @@ const server = http.createServer(async (req, res) => {
           // never silently reactivate an exited employee).
           status: cur.status ?? "active",
           lastWorkingDay: cur.lastWorkingDay,
+          // Engine-owned credential fields — see the prod handler for why.
+          selfPinHash: cur.selfPinHash,
+          selfPinSalt: cur.selfPinSalt,
+          selfFailedAttempts: cur.selfFailedAttempts,
+          selfLockedUntil: cur.selfLockedUntil,
           createdAt: cur.createdAt,
           updatedAt: new Date().toISOString(),
         };
@@ -204,7 +272,7 @@ const server = http.createServer(async (req, res) => {
         const grossChanged = cur.grossMonthly !== updated.grossMonthly;
         audit(db, body.actor, "employee.update", updated.employeeId, grossChanged ? { grossFrom: cur.grossMonthly, grossTo: updated.grossMonthly } : {});
         save(db);
-        return send(res, 200, { employee: updated });
+        return send(res, 200, { employee: publicEmployee(updated) });
       }
       if (req.method === "DELETE") {
         if (idx < 0) return send(res, 404, { error: "NOT_FOUND" });
@@ -249,7 +317,54 @@ const server = http.createServer(async (req, res) => {
         lastWorkingDay: db.employees[idx].lastWorkingDay,
       });
       save(db);
-      return send(res, 200, { employee: db.employees[idx] });
+      return send(res, 200, { employee: publicEmployee(db.employees[idx]) });
+    }
+
+    // /hr/employees/:seq/self-pin — admin sets/resets the self-serve PIN (dev mirror of the Lambda route)
+    if (parts[0] === "hr" && parts[1] === "employees" && parts[3] === "self-pin" && parts.length === 4 && req.method === "POST") {
+      const seq = Number(parts[2]);
+      const idx = db.employees.findIndex((e) => e.seq === seq);
+      if (idx < 0) return send(res, 404, { error: "NOT_FOUND" });
+      const body = await readBody(req);
+      const pin = String(body.pin ?? "").trim();
+      if (!/^\d{4,8}$/.test(pin)) return send(res, 400, { error: "BAD_PIN" });
+      const salt = randomBytes(16).toString("hex");
+      db.employees[idx].selfPinHash = sha256hex(salt + pin);
+      db.employees[idx].selfPinSalt = salt;
+      db.employees[idx].selfFailedAttempts = 0;
+      delete db.employees[idx].selfLockedUntil;
+      db.employees[idx].updatedAt = new Date().toISOString();
+      audit(db, body.actor, "employee.self-pin.set", db.employees[idx].employeeId, {});
+      save(db);
+      return send(res, 200, { ok: true });
+    }
+
+    // /hr/self/login — PUBLIC self-serve surface, Employee ID + PIN (dev mirror)
+    if (parts[0] === "hr" && parts[1] === "self" && parts[2] === "login" && parts.length === 3 && req.method === "POST") {
+      const body = await readBody(req);
+      const m = /^SSS\/EMP\/(\d+)$/i.exec(String(body.employeeId ?? "").trim());
+      const pin = String(body.pin ?? "").trim();
+      if (!m || !pin) return send(res, 401, { error: "INVALID" });
+      const seq = Number(m[1]);
+      const idx = db.employees.findIndex((e) => e.seq === seq);
+      const emp = idx >= 0 ? db.employees[idx] : null;
+      if (!emp || !emp.selfPinHash) return send(res, 401, { error: "INVALID" });
+      if (emp.selfLockedUntil && new Date(emp.selfLockedUntil) > new Date()) {
+        return send(res, 423, { error: "LOCKED", until: emp.selfLockedUntil });
+      }
+      const ok = timingSafeEqualHex(emp.selfPinHash, sha256hex((emp.selfPinSalt || "") + pin));
+      if (!ok) {
+        emp.selfFailedAttempts = (emp.selfFailedAttempts || 0) + 1;
+        if (emp.selfFailedAttempts >= 5) emp.selfLockedUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+        audit(db, "self-serve", "self.login.fail", emp.employeeId, { attempts: emp.selfFailedAttempts });
+        save(db);
+        return send(res, 401, { error: "INVALID" });
+      }
+      emp.selfFailedAttempts = 0;
+      delete emp.selfLockedUntil;
+      audit(db, "self-serve", "self.login.success", emp.employeeId, {});
+      save(db);
+      return send(res, 200, { seq, name: emp.name });
     }
 
     // /hr/employees/:seq/docs (KYC) — dev store: metadata in JSON, bytes in KYC_DIR
@@ -362,7 +477,7 @@ const server = http.createServer(async (req, res) => {
       if (parts.length === 4 && req.method === "GET") {
         const list = db.documents
           .filter((d) => d.employeeSeq === seq && d.category === "generated")
-          .map(({ docId, docType, title, ref, generatedBy, generatedAt }) => ({ docId, docType, title, ref, generatedBy, generatedAt }))
+          .map(({ docId, docType, title, ref, generatedBy, generatedAt, acceptedAt }) => ({ docId, docType, title, ref, generatedBy, generatedAt, acceptedAt: acceptedAt ?? null }))
           .sort((a, b) => (a.generatedAt < b.generatedAt ? 1 : -1));
         return send(res, 200, { generated: list });
       }
@@ -373,6 +488,43 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, {
           gen: { docId: d.docId, docType: d.docType, title: d.title, ref: d.ref, generatedBy: d.generatedBy, generatedAt: d.generatedAt, snapshot: JSON.parse(d.snapshotJson || "{}") },
         });
+      }
+
+      // Acceptance acknowledgment (mirrors the prod Lambda) — first accept
+      // wins, offers only.
+      if (parts.length === 6 && parts[5] === "accept" && req.method === "GET") {
+        const d = db.documents.find((x) => x.employeeSeq === seq && x.docId === parts[4] && x.category === "generated");
+        if (!d || !ACCEPTABLE_DOCTYPES.has(d.docType)) return send(res, 404, { error: "NOT_FOUND" });
+        return send(res, 200, { docType: d.docType, title: d.title, ref: d.ref, acceptedAt: d.acceptedAt || null });
+      }
+      if (parts.length === 6 && parts[5] === "accept" && req.method === "POST") {
+        const body = await readBody(req);
+        const d = db.documents.find((x) => x.employeeSeq === seq && x.docId === parts[4] && x.category === "generated");
+        if (!d || !ACCEPTABLE_DOCTYPES.has(d.docType)) return send(res, 404, { error: "NOT_FOUND" });
+        if (!d.acceptedAt) {
+          const acceptedName = String(body.acceptedName ?? "").trim().slice(0, 120);
+          d.acceptedAt = new Date().toISOString();
+          d.acceptedIp = body.ip || "";
+          d.acceptedName = acceptedName;
+          audit(db, "self-serve", "doc.accept", `${seq}/${parts[4]}`, { docType: d.docType, ref: d.ref, acceptedName });
+          save(db);
+          console.log(`[hr:dev] accept notify — ${d.docType} ${d.ref} for employeeSeq ${seq}, name "${acceptedName}" (no email in dev)`);
+        }
+        return send(res, 200, { ok: true, acceptedAt: d.acceptedAt });
+      }
+      // Void an acceptance recorded in error (mirrors the prod Lambda).
+      if (parts.length === 6 && parts[5] === "accept" && req.method === "DELETE") {
+        const body = await readBody(req);
+        const d = db.documents.find((x) => x.employeeSeq === seq && x.docId === parts[4] && x.category === "generated");
+        if (!d) return send(res, 404, { error: "NOT_FOUND" });
+        audit(db, body.actor, "doc.accept.void", `${seq}/${parts[4]}`, {
+          ref: d.ref, voidedAcceptedAt: d.acceptedAt ?? null, voidedAcceptedName: d.acceptedName ?? null,
+        });
+        delete d.acceptedAt;
+        delete d.acceptedIp;
+        delete d.acceptedName;
+        save(db);
+        return send(res, 200, { ok: true });
       }
 
       // Withdraw an issued document (mirrors the prod Lambda) — audited WITH
@@ -398,17 +550,29 @@ const server = http.createServer(async (req, res) => {
       if (bytes.length === 0 || bytes.length > MAX_KYC) return send(res, 400, { error: bytes.length ? "TOO_LARGE" : "EMPTY" });
       if (sniffType(bytes) !== "application/pdf") return send(res, 400, { error: "PDF_ONLY" });
 
+      // Same pre-send validation as prod (hr-handler.mjs): reject a bogus seq
+      // rather than archiving the sent copy under employeeSeq 0, where no docs
+      // listing would ever surface it. Without this, a caller tested only
+      // against this dev engine passes here and 502s in production.
+      const seqCheck = Number(body.employeeSeq);
+      if (!Number.isInteger(seqCheck) || seqCheck <= 0) return send(res, 400, { error: "BAD_SEQ" });
+      if (!db.employees.some((e) => e.seq === seqCheck)) return send(res, 404, { error: "EMPLOYEE_NOT_FOUND" });
+
       const key = process.env.RESEND_API_KEY;
       let delivery = { simulated: true };
       if (key) {
+        const recipientEmp = db.employees.find((e) => e.seq === Number(body.employeeSeq));
+        const recipientName = (recipientEmp?.name || "").split(/\s+/)[0] || "there";
+        const subjectLine = body.subject || "Document from ShieldSync HR";
         const r = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
           body: JSON.stringify({
             from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
             to: [to],
-            subject: body.subject || "Document from ShieldSync HR",
-            text: body.bodyText || "Please find the attached document.\n\n— ShieldSync Security Private Limited (HR)",
+            subject: subjectLine,
+            text: body.bodyText || `Dear ${recipientName},\n\nPlease find your document attached: ${subjectLine}.\n\nRegards,\nShieldSync Security Private Limited`,
+            html: documentEmailHtml({ recipientName, subjectLine, note: body.note, cta: body.cta }),
             attachments: [{ filename: body.fileName || "document.pdf", content: bytes.toString("base64") }],
           }),
         });
@@ -824,7 +988,7 @@ const server = http.createServer(async (req, res) => {
     // Admins are NOT stored here; admin identity comes from HR_ADMIN_EMAILS in
     // the app, so nothing written through this route can grant admin rights.
     if (parts[0] === "hr" && parts[1] === "access" && parts.length === 2) {
-      if (req.method === "GET") return send(res, 200, { grants: db.grants ?? {} });
+      if (req.method === "GET") return send(res, 200, { grants: db.grants ?? {}, restrictedSeqs: db.restrictedSeqs ?? [] });
       if (req.method === "PUT") {
         const body = await readBody(req);
         const email = String(body.email ?? "").trim().toLowerCase();
@@ -836,6 +1000,20 @@ const server = http.createServer(async (req, res) => {
         save(db);
         return send(res, 200, { grants: db.grants });
       }
+    }
+
+    // Admin-only record visibility (mirrors the prod Lambda's /hr/restricted).
+    if (parts[0] === "hr" && parts[1] === "restricted" && parts.length === 2 && req.method === "PUT") {
+      const body = await readBody(req);
+      const seqN = Number(body.seq);
+      if (!Number.isInteger(seqN) || seqN <= 0) return send(res, 400, { error: "BAD_SEQ" });
+      const set = new Set(db.restrictedSeqs ?? []);
+      if (body.restricted) set.add(seqN);
+      else set.delete(seqN);
+      db.restrictedSeqs = [...set];
+      audit(db, body.actor, "employee.visibility", String(seqN), { restricted: !!body.restricted });
+      save(db);
+      return send(res, 200, { restrictedSeqs: db.restrictedSeqs });
     }
 
     if (parts[0] === "hr" && parts[1] === "audit" && parts.length === 2) {

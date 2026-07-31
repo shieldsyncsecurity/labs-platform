@@ -233,6 +233,38 @@ export function buildConfirmationLetter(
   };
 }
 
+/**
+ * Resignation acceptance letter — issued promptly when a resignation is
+ * tendered, NOT at exit (that's the Experience/Relieving letter, issued on
+ * the actual last working day). Needs status=exited + lastWorkingDay on the
+ * record, but is dated to when the resignation was accepted, not the exit
+ * date — the two are usually weeks apart because of the notice period.
+ */
+export function buildResignationAcceptanceLetter(
+  e: Employee,
+  opts: { ref: string; date: string; noticeDays?: number },
+): SimpleLetter {
+  const first = firstName(e.name);
+  const lwd = e.lastWorkingDay || "the last working day on record";
+  return {
+    runLabel: "Resignation Acceptance Letter",
+    title: "ACCEPTANCE OF RESIGNATION",
+    ref: opts.ref,
+    date: opts.date,
+    to: { name: e.name },
+    salutation: `Dear ${first},`,
+    paragraphs: [
+      `We refer to your resignation from the position of ${e.designation} at ${COMPANY.legalName}, and write to confirm that the Company has accepted it.`,
+      opts.noticeDays
+        ? `As per the terms of your engagement, you are required to serve a notice period of ${opts.noticeDays} days. Accordingly, your last working day with the Company will be ${lwd}.`
+        : `Your last working day with the Company will be ${lwd}.`,
+      `Please ensure a smooth handover of your responsibilities, and the return of all Company property, documents, and access credentials in your possession, before your last working day.`,
+      `We thank you for your contribution during your time with the Company and wish you success in your future endeavours.`,
+    ],
+    signatory: DEFAULT_SIGNATORY,
+  };
+}
+
 /** Internship completion certificate — issued after an internship engagement ends. */
 export function buildCompletionCertificate(
   e: Employee,
@@ -252,6 +284,55 @@ export function buildCompletionCertificate(
       `${first}'s performance and conduct during the internship were found to be satisfactory, and the assigned learning milestones and deliverables were completed within the internship timeline.`,
       `We wish ${first} continued success in all future endeavours.`,
     ],
+    signatory: DEFAULT_SIGNATORY,
+  };
+}
+
+/**
+ * Employment history certificate — for engagements that ran through more than
+ * one phase (e.g. an unpaid internship that converted into paid employment).
+ * Same "This is to certify..." register as the standard experience letter; the
+ * phase breakdown uses the same LetterTable grid the leave/increment letters
+ * already render, not a new visual pattern.
+ */
+export function buildEmploymentHistoryLetter(
+  e: Employee,
+  opts: {
+    ref: string;
+    date: string;
+    phases: Array<{ from: string; to: string; designation: string; engagement: string }>;
+    salaryNote?: string; // e.g. "a monthly salary of INR 30,000 (Rupees Thirty Thousand only)"
+    noticeDays?: number; // if the exit followed a served notice period
+  },
+): SimpleLetter {
+  const first = firstName(e.name);
+  const lwd = e.lastWorkingDay || "the last working day on record";
+
+  const paragraphs2: string[] = [];
+  if (opts.salaryNote) {
+    paragraphs2.push(`During the period of paid engagement, ${first} drew ${opts.salaryNote}.`);
+  }
+  paragraphs2.push(`Throughout the engagement, ${first}'s conduct and performance were found to be satisfactory.`);
+  paragraphs2.push(
+    opts.noticeDays
+      ? `${first} tendered resignation and was relieved of all duties and responsibilities with effect from the close of business on ${lwd}, after duly serving a notice period of ${opts.noticeDays} days.`
+      : `${first} was relieved of all duties and responsibilities with effect from the close of business on ${lwd}, upon completion of the applicable exit formalities.`,
+  );
+  paragraphs2.push(`We thank ${first} for the contribution made to the Company and wish ${first} success in all future endeavours.`);
+
+  return {
+    runLabel: "Employment History Certificate",
+    title: "CERTIFICATE OF EMPLOYMENT & INTERNSHIP",
+    ref: opts.ref,
+    date: opts.date,
+    salutation: "To Whom It May Concern,",
+    paragraphs: [`This is to certify that ${e.name} (ID: ${e.employeeId}) was engaged with ${COMPANY.legalName} across the following phases:`],
+    table: {
+      kind: "grid",
+      headers: ["Period", "Designation", "Engagement"],
+      rows: opts.phases.map((p) => [`${p.from} – ${p.to}`, p.designation, p.engagement]),
+    },
+    paragraphs2,
     signatory: DEFAULT_SIGNATORY,
   };
 }

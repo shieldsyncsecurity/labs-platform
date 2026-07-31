@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AREA_META, AREAS, assistantPreset, noAccess, type Access, type Area, type Level } from "@/lib/access";
+import { AREA_META, AREAS, noAccess, ROLE_PRESETS, type Access, type Area, type Level } from "@/lib/access";
 
 type Person = { email: string; isAdmin: boolean; access: Access | null; configured: boolean };
 
@@ -67,20 +67,36 @@ function PersonCard({ person }: { person: Person }) {
         <div style={{ flex: 1 }} />
         <button
           type="button"
-          onClick={() => setAccess(assistantPreset())}
-          disabled={busy}
-          style={{ background: "none", border: "1px dashed #c3cee0", color: "#41506a", fontSize: 12, fontWeight: 600, borderRadius: 7, padding: "6px 11px", cursor: "pointer" }}
-        >
-          Use assistant preset
-        </button>
-        <button
-          type="button"
           onClick={() => setAccess(noAccess())}
           disabled={busy}
           style={{ background: "none", border: "none", color: "#c0344c", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
         >
           Revoke everything
         </button>
+      </div>
+
+      {/* Named roles — one-click starting points the admin then fine-tunes
+          below. A role here fills the matrix; it is not saved until Save. */}
+      <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {ROLE_PRESETS.map((r) => (
+          <button
+            key={r.key}
+            type="button"
+            onClick={() => setAccess(r.make())}
+            disabled={busy}
+            title={r.blurb}
+            style={{
+              background: "#f4f7fb", border: "1px solid #c3d8f0", color: "#1f3a5f",
+              fontSize: 12, fontWeight: 700, borderRadius: 8, padding: "7px 13px", cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            {r.label}
+            <span style={{ display: "block", fontWeight: 400, fontSize: 10.5, color: "#5b6676", maxWidth: 250, lineHeight: 1.35, marginTop: 2 }}>
+              {r.blurb}
+            </span>
+          </button>
+        ))}
       </div>
 
       <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
@@ -138,7 +154,7 @@ function PersonCard({ person }: { person: Person }) {
         </div>
         {(
           [
-            { key: "seeSalary" as const, label: "Salary figures", hint: "Gross, annual CTC and the basic / HRA / conveyance / special split." },
+            { key: "seeSalary" as const, label: "Salary figures", hint: "Gross, annual CTC and the basic / HRA / conveyance / special split — on records, payroll screens, payslips and the audit trail. An offer or appointment letter states the pay in its own text, so anyone who can issue letters still sees it there." },
             { key: "seeBankDetails" as const, label: "Bank details & PAN", hint: "Account number, IFSC and PAN on employee records." },
           ]
         ).map((row) => (

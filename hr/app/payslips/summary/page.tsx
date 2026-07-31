@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { hrFetch } from "@/lib/server/hr-engine";
+import { getViewer } from "@/lib/server/hr-access";
+import { visibleEmployees } from "@/lib/server/employee-view";
 import { COMPANY } from "@/lib/company";
 import { formatINR, type Payslip } from "@/lib/payslip";
 import type { Employee } from "@/lib/employee";
@@ -34,7 +36,10 @@ export default async function FySummary({ searchParams }: { searchParams: Promis
 
   let employees: Employee[] = [];
   try {
-    employees = (await hrFetch<{ employees?: Employee[] }>("/hr/employees")).employees ?? [];
+    const all = (await hrFetch<{ employees?: Employee[] }>("/hr/employees")).employees ?? [];
+    // This page prints name, employee id, PAN and full-FY gross/TDS totals —
+    // administrator-only records must not appear on it for anyone else.
+    employees = await visibleEmployees(all, await getViewer());
   } catch {
     return (
       <main style={{ maxWidth: 640, margin: "0 auto", padding: "48px 24px", fontFamily: "Arial, sans-serif" }}>

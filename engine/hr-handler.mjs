@@ -92,6 +92,51 @@ function resp(status, obj) {
   };
 }
 
+// Branded HTML for a document-delivery email (letters/certificates/payslips
+// sent from the portal). Table-based layout with every style inline — that's
+// not house style, it's a compatibility requirement: Gmail, Outlook, and most
+// mobile mail apps strip <style> blocks and flexbox/grid from email HTML, so
+// anything not inlined silently reverts to unstyled text in exactly the
+// clients this needs to look right in.
+// EVERY interpolation below is esc()'d. The subject is caller-supplied and
+// reaches here from the self-serve document viewer too — i.e. the lowest-trust
+// authenticated principal in the system — so unescaped HTML here would let
+// someone inject styled links into a genuine, DKIM-signed email from our own
+// domain. A benign subject containing "<" would also silently eat the layout.
+// cta.url is additionally scheme-checked: only https links become a button.
+function documentEmailHtml({ recipientName, subjectLine, note, cta }) {
+  const navy = "#1f3a5f";
+  const muted = "#5b6676";
+  const ctaUrl = cta && typeof cta.url === "string" && /^https:\/\//i.test(cta.url) ? cta.url : null;
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#eef2f8;font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f8;padding:24px 0;">
+<tr><td align="center">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #d9dfea;">
+<tr><td style="background:${navy};padding:20px 28px;">
+<span style="color:#ffffff;font-size:18px;font-weight:700;">ShieldSync Security</span><br>
+<span style="color:#c7d2e6;font-size:12px;">Empowering Cybersecurity Futures</span>
+</td></tr>
+<tr><td style="padding:28px;">
+<p style="margin:0 0 16px;color:#1b2331;font-size:14px;line-height:1.6;">Dear ${esc(recipientName)},</p>
+<p style="margin:0 0 16px;color:#1b2331;font-size:14px;line-height:1.6;">Please find your document attached:</p>
+<p style="margin:0 0 20px;padding:12px 16px;background:#f4f7fb;border-left:3px solid ${navy};color:${navy};font-size:14px;font-weight:700;">${esc(subjectLine)}</p>
+${note ? `<p style="margin:0 0 16px;padding:12px 16px;background:#fdf4e3;border-left:3px solid #c99a2e;color:#7a5714;font-size:13px;line-height:1.6;">${esc(note)}</p>` : ""}
+${ctaUrl ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 22px;"><tr><td style="border-radius:8px;background:${navy};">
+<a href="${esc(ctaUrl)}" style="display:inline-block;padding:13px 30px;color:#ffffff;font-size:14.5px;font-weight:700;text-decoration:none;">${esc(cta.label)}</a>
+</td></tr></table>` : ""}
+<p style="margin:0 0 8px;color:#1b2331;font-size:14px;line-height:1.6;">If you have any questions, just reply to this email or write to
+<a href="mailto:info@shieldsyncsecurity.com" style="color:${navy};">info@shieldsyncsecurity.com</a>.</p>
+<p style="margin:24px 0 0;color:#1b2331;font-size:14px;line-height:1.6;">Regards,<br>ShieldSync Security Private Limited</p>
+</td></tr>
+<tr><td style="padding:16px 28px;border-top:1px solid #eef2f7;">
+<p style="margin:0;color:${muted};font-size:11px;line-height:1.6;">This is an automated message from the ShieldSync HR portal. Please do not share this email or its attachment with anyone other than the intended recipient.</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>`;
+}
+
 async function writeAudit(actor, action, target, detail) {
   await ddb.send(
     new PutCommand({
@@ -186,6 +231,73 @@ async function notifySubmission(cand, answers) {
     else await writeAudit("system", "candidate.submission.notify", cand.candidateId, { to });
   } catch (e) {
     console.warn(`[hr] submission notification threw: ${e?.message ?? e}`);
+  }
+}
+
+/**
+ * The self-serve PIN credential — a salted SHA-256 hash, its salt, and the
+ * brute-force counters. These are LOGIN SECRETS, not record fields: nothing
+ * outside this engine has any use for them, and the single-round hash over a
+ * 4-8 digit PIN would be an offline crack of seconds if it ever escaped.
+ *
+ * Stripped centrally on the way OUT, because the leak was never in one place:
+ * a record edit, an offboard, and a create all echoed the whole DynamoDB item
+ * back to the caller. Read paths inside the engine (login, /self-pin) use the
+ * raw item and are unaffected.
+ */
+const PIN_SECRET_FIELDS = ["selfPinHash", "selfPinSalt", "selfFailedAttempts", "selfLockedUntil"];
+function publicEmployee(item) {
+  if (!item || typeof item !== "object") return item;
+  const out = { ...item };
+  for (const f of PIN_SECRET_FIELDS) delete out[f];
+  // The UI still needs to know WHETHER a PIN exists (to say "set up" vs
+  // "reissue", and to warn before replacing one) — that is a boolean, not a
+  // credential, so it is derived here rather than leaking the hash to infer it.
+  out.hasSelfPin = Boolean(item.selfPinHash);
+  return out;
+}
+
+/** Only an OFFER can be "accepted". Without this, the public accept URL
+ * resolves for any issued document — a payslip, an experience letter — and
+ * would stamp acceptance on it under page copy about signing an offer on your
+ * joining date. Enforced on both the GET and the POST so neither leaks the
+ * existence of a non-offer document. */
+const ACCEPTABLE_DOCTYPES = new Set(["offer", "internship-offer"]);
+
+/** Best-effort admin alert when a candidate clicks "I Accept" — same
+ * fire-and-forget shape as notifySubmission() above; never blocks the accept. */
+async function notifyAccept(emp, gen, acceptedName) {
+  try {
+    const to = (process.env.HR_SUBMISSION_TO || process.env.HR_REMINDER_TO || "").trim();
+    const key = process.env.RESEND_API_KEY;
+    if (!to || !key) {
+      // Must be loud: this email is the ONLY proactive signal that someone
+      // accepted. Silently returning would mean a misconfigured env var loses
+      // acceptances with nothing in CloudWatch to explain it.
+      console.warn(`[hr] ${emp?.name ?? "someone"} accepted ${gen?.ref ?? ""} but ${!to ? "HR_SUBMISSION_TO" : "RESEND_API_KEY"} is unset — no alert sent`);
+      return;
+    }
+    const portal = process.env.HR_PORTAL_URL || "https://employee.shieldsyncsecurity.com";
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
+        to: to.split(",").map((s) => s.trim()).filter(Boolean),
+        subject: `${emp.name} accepted ${gen.title || gen.docType} — ${gen.ref}`,
+        html:
+          `<div style="font-family:Arial,Helvetica,sans-serif">` +
+          `<p style="font-size:14px;color:#1b2331">Someone clicked <b>I Accept</b> on ${esc(gen.title || gen.docType)} (${esc(gen.ref)}), issued to ${esc(emp.name)}.</p>` +
+          `<p style="font-size:14px;color:#1b2331">Name typed on the confirmation: <b>${esc(acceptedName || "(not provided)")}</b></p>` +
+          `<p style="font-size:13px"><a href="${portal}/employees/${emp.seq}/issued/${gen.docId}" style="color:#2f4fb0;font-weight:700">Open the document &rarr;</a></p>` +
+          `<p style="font-size:11.5px;color:#5b6676">This is an acknowledgment that the emailed copy was seen and agreed to — not a verified signature. The signed physical original remains the record.</p>` +
+          `</div>`,
+        text: `Someone clicked I Accept on ${gen.title || gen.docType} (${gen.ref}), issued to ${emp.name}. Name typed: ${acceptedName || "(not provided)"}.\n${portal}/employees/${emp.seq}/issued/${gen.docId}`,
+      }),
+    });
+    if (!r.ok) console.warn(`[hr] accept notification failed: ${r.status}`);
+  } catch (e) {
+    console.warn(`[hr] accept notification threw: ${e?.message ?? e}`);
   }
 }
 
@@ -334,7 +446,7 @@ export async function handler(event) {
         const out = await ddb.send(new ScanCommand({ TableName: T_EMP }));
         // seq <= 0 rows are counters (0 = employee ids; negatives = letter-ref series).
         const employees = (out.Items ?? []).filter((i) => i.seq > 0).sort((a, b) => a.seq - b.seq);
-        return resp(200, { employees });
+        return resp(200, { employees: employees.map(publicEmployee) });
       }
       if (method === "POST") {
         // Atomic id counter lives at seq=0.
@@ -353,7 +465,7 @@ export async function handler(event) {
         const employee = { ...body.employee, employeeId: `SSS/EMP/${String(seq).padStart(4, "0")}`, seq, createdAt: now, updatedAt: now };
         await ddb.send(new PutCommand({ TableName: T_EMP, Item: employee }));
         await writeAudit(body.actor, "employee.create", employee.employeeId, { name: employee.name });
-        return resp(200, { employee });
+        return resp(200, { employee: publicEmployee(employee) });
       }
     }
 
@@ -372,7 +484,7 @@ export async function handler(event) {
       if (method === "GET") {
         const out = await ddb.send(new GetCommand({ TableName: T_EMP, Key: { seq } }));
         if (!out.Item) return resp(404, { error: "NOT_FOUND" });
-        return resp(200, { employee: out.Item });
+        return resp(200, { employee: publicEmployee(out.Item) });
       }
       if (method === "PUT") {
         const cur = await ddb.send(new GetCommand({ TableName: T_EMP, Key: { seq } }));
@@ -386,6 +498,15 @@ export async function handler(event) {
           // reactivate an exited employee.
           status: cur.Item.status ?? "active",
           lastWorkingDay: cur.Item.lastWorkingDay,
+          // The self-serve PIN credential and its brute-force counters are
+          // engine-owned, exactly like status: they change only via /self-pin
+          // and the login handler. Without pinning them, a generic record edit
+          // that echoes back a previously-read employee object would silently
+          // reinstate a stale PIN hash or clear an active lockout.
+          selfPinHash: cur.Item.selfPinHash,
+          selfPinSalt: cur.Item.selfPinSalt,
+          selfFailedAttempts: cur.Item.selfFailedAttempts,
+          selfLockedUntil: cur.Item.selfLockedUntil,
           createdAt: cur.Item.createdAt,
           updatedAt: new Date().toISOString(),
         };
@@ -412,7 +533,7 @@ export async function handler(event) {
         }
         const grossChanged = cur.Item.grossMonthly !== employee.grossMonthly;
         await writeAudit(body.actor, "employee.update", employee.employeeId, grossChanged ? { grossFrom: cur.Item.grossMonthly, grossTo: employee.grossMonthly } : {});
-        return resp(200, { employee });
+        return resp(200, { employee: publicEmployee(employee) });
       }
       if (method === "DELETE") {
         const cur = await ddb.send(new GetCommand({ TableName: T_EMP, Key: { seq } }));
@@ -551,7 +672,90 @@ export async function handler(event) {
       }
       const employee = out.Attributes;
       await writeAudit(body.actor, status === "exited" ? "employee.offboard" : "employee.reactivate", employee.employeeId, { lastWorkingDay: employee.lastWorkingDay });
-      return resp(200, { employee });
+      // ALL_NEW returns the ENTIRE item, including the PIN credential — this is
+      // reachable from the plain "Mark exited" button, so it must be stripped.
+      return resp(200, { employee: publicEmployee(employee) });
+    }
+
+    // ---- /hr/employees/:seq/self-pin — admin sets/resets the self-serve PIN ----
+    // Field-scoped update, same reasoning as /status: never touch the rest of
+    // the record. A fresh salt on every (re)set means a leaked old hash can
+    // never be replayed once the PIN is changed.
+    if (parts[0] === "hr" && parts[1] === "employees" && parts[3] === "self-pin" && parts.length === 4 && method === "POST") {
+      const seq = Number(parts[2]);
+      const pin = String(body.pin ?? "").trim();
+      if (!/^\d{4,8}$/.test(pin)) return resp(400, { error: "BAD_PIN" });
+      const salt = randomBytes(16).toString("hex");
+      const pinHash = sha256(Buffer.from(salt + pin));
+      let out;
+      try {
+        out = await ddb.send(
+          new UpdateCommand({
+            TableName: T_EMP,
+            Key: { seq },
+            ConditionExpression: "attribute_exists(#s)",
+            UpdateExpression: "SET selfPinHash = :h, selfPinSalt = :salt, selfFailedAttempts = :z, updatedAt = :u REMOVE selfLockedUntil",
+            ExpressionAttributeNames: { "#s": "seq" },
+            ExpressionAttributeValues: { ":h": pinHash, ":salt": salt, ":z": 0, ":u": new Date().toISOString() },
+            ReturnValues: "ALL_NEW",
+          }),
+        );
+      } catch (e) {
+        if (e.name === "ConditionalCheckFailedException") return resp(404, { error: "NOT_FOUND" });
+        throw e;
+      }
+      await writeAudit(body.actor, "employee.self-pin.set", out.Attributes.employeeId, {});
+      return resp(200, { ok: true });
+    }
+
+    // ---- /hr/self/login — PUBLIC self-serve surface, Employee ID + PIN ----
+    // Reachable without an HR session (same shape as the questionnaire hole
+    // below): the caller proves identity with the PIN, not a cookie. Locks
+    // after 5 bad attempts for 15 minutes — a PIN is much lower-entropy than
+    // the 192-bit questionnaire token, so this endpoint (not the hash) is the
+    // real defence against guessing.
+    if (parts[0] === "hr" && parts[1] === "self" && parts[2] === "login" && parts.length === 3 && method === "POST") {
+      const m = /^SSS\/EMP\/(\d+)$/i.exec(String(body.employeeId ?? "").trim());
+      const pin = String(body.pin ?? "").trim();
+      if (!m || !pin) return resp(401, { error: "INVALID" });
+      const seq = Number(m[1]);
+      const emp = (await ddb.send(new GetCommand({ TableName: T_EMP, Key: { seq } }))).Item;
+      if (!emp || !emp.selfPinHash) return resp(401, { error: "INVALID" });
+      if (emp.selfLockedUntil && new Date(emp.selfLockedUntil) > new Date()) {
+        return resp(423, { error: "LOCKED", until: emp.selfLockedUntil });
+      }
+      const a = Buffer.from(emp.selfPinHash, "hex");
+      const b = Buffer.from(sha256(Buffer.from((emp.selfPinSalt || "") + pin)), "hex");
+      const ok = a.length === b.length && timingSafeEqual(a, b);
+      if (!ok) {
+        const attempts = (emp.selfFailedAttempts || 0) + 1;
+        const locked = attempts >= 5;
+        await ddb.send(
+          new UpdateCommand({
+            TableName: T_EMP,
+            Key: { seq },
+            UpdateExpression: locked
+              ? "SET selfFailedAttempts = :a, selfLockedUntil = :lu"
+              : "SET selfFailedAttempts = :a",
+            ExpressionAttributeValues: {
+              ":a": attempts,
+              ...(locked ? { ":lu": new Date(Date.now() + 15 * 60 * 1000).toISOString() } : {}),
+            },
+          }),
+        );
+        await writeAudit("self-serve", "self.login.fail", emp.employeeId, { attempts, locked });
+        return resp(401, { error: "INVALID" });
+      }
+      await ddb.send(
+        new UpdateCommand({
+          TableName: T_EMP,
+          Key: { seq },
+          UpdateExpression: "SET selfFailedAttempts = :z REMOVE selfLockedUntil",
+          ExpressionAttributeValues: { ":z": 0 },
+        }),
+      );
+      await writeAudit("self-serve", "self.login.success", emp.employeeId, {});
+      return resp(200, { seq, name: emp.name });
     }
 
     // ---- /hr/employees/:seq/generated (issued-document history) ----
@@ -605,7 +809,9 @@ export async function handler(event) {
         );
         const generated = (out.Items ?? [])
           .filter((d) => d.category === "generated")
-          .map(({ docId, docType, title, ref, generatedBy, generatedAt }) => ({ docId, docType, title, ref, generatedBy, generatedAt }))
+          // acceptedAt rides along so the portal can answer "did they accept?"
+          // without depending on the notification email having been delivered.
+          .map(({ docId, docType, title, ref, generatedBy, generatedAt, acceptedAt }) => ({ docId, docType, title, ref, generatedBy, generatedAt, acceptedAt: acceptedAt ?? null }))
           .sort((a, b) => (a.generatedAt < b.generatedAt ? 1 : -1));
         return resp(200, { generated });
       }
@@ -615,6 +821,75 @@ export async function handler(event) {
         return resp(200, {
           gen: { docId: g.Item.docId, docType: g.Item.docType, title: g.Item.title, ref: g.Item.ref, generatedBy: g.Item.generatedBy, generatedAt: g.Item.generatedAt, snapshot: JSON.parse(g.Item.snapshotJson || "{}") },
         });
+      }
+
+      // Acceptance acknowledgment — a candidate-clicked "I accept" timestamp,
+      // NOT a legal e-signature. The physical original signed in person is
+      // still the real record; this is just a paper trail for "did she see
+      // it and say yes" before that. First accept wins (idempotent).
+      if (parts.length === 6 && parts[5] === "accept" && method === "GET") {
+        const g = await ddb.send(new GetCommand({ TableName: T_DOC, Key: { employeeSeq: seq, docId: parts[4] } }));
+        if (!g.Item || g.Item.category !== "generated" || !ACCEPTABLE_DOCTYPES.has(g.Item.docType)) return resp(404, { error: "NOT_FOUND" });
+        return resp(200, {
+          docType: g.Item.docType, title: g.Item.title, ref: g.Item.ref,
+          acceptedAt: g.Item.acceptedAt || null,
+        });
+      }
+      if (parts.length === 6 && parts[5] === "accept" && method === "POST") {
+        const g = await ddb.send(new GetCommand({ TableName: T_DOC, Key: { employeeSeq: seq, docId: parts[4] } }));
+        if (!g.Item || g.Item.category !== "generated" || !ACCEPTABLE_DOCTYPES.has(g.Item.docType)) return resp(404, { error: "NOT_FOUND" });
+        if (g.Item.acceptedAt) return resp(200, { ok: true, acceptedAt: g.Item.acceptedAt });
+
+        const acceptedAt = new Date().toISOString();
+        const acceptedName = String(body.acceptedName ?? "").trim().slice(0, 120);
+        try {
+          await ddb.send(
+            new UpdateCommand({
+              TableName: T_DOC, Key: { employeeSeq: seq, docId: parts[4] },
+              // Conditional write, not merely the read-check above: two clicks
+              // arriving together would otherwise both pass that check and the
+              // second would overwrite the first. "First accept wins" is the
+              // only integrity property this record has, so it is enforced by
+              // the database, not by a race-prone read-then-write.
+              ConditionExpression: "attribute_not_exists(acceptedAt)",
+              UpdateExpression: "SET acceptedAt = :a, acceptedIp = :ip, acceptedName = :n",
+              ExpressionAttributeValues: { ":a": acceptedAt, ":ip": body.ip || "", ":n": acceptedName },
+            }),
+          );
+        } catch (e) {
+          // Lost the race — someone else's accept landed first. Report theirs;
+          // do NOT audit or notify a second time for the same acceptance.
+          if (e?.name === "ConditionalCheckFailedException") {
+            const again = await ddb.send(new GetCommand({ TableName: T_DOC, Key: { employeeSeq: seq, docId: parts[4] } }));
+            return resp(200, { ok: true, acceptedAt: again.Item?.acceptedAt ?? acceptedAt });
+          }
+          throw e;
+        }
+        await writeAudit("self-serve", "doc.accept", `${seq}/${parts[4]}`, { docType: g.Item.docType, ref: g.Item.ref, acceptedName });
+        const empForNotify = await ddb.send(new GetCommand({ TableName: T_EMP, Key: { seq } }));
+        if (empForNotify.Item) {
+          await notifyAccept(empForNotify.Item, { ...g.Item, docId: parts[4] }, acceptedName);
+        }
+        return resp(200, { ok: true, acceptedAt });
+      }
+
+      // Void an acceptance recorded in error (a test click, the wrong person
+      // clicking a forwarded link). Deleting the whole document was previously
+      // the only way to undo one, which burnt its reference number. Admin-only
+      // at the app layer; the void is audited with the value it erased.
+      if (parts.length === 6 && parts[5] === "accept" && method === "DELETE") {
+        const g = await ddb.send(new GetCommand({ TableName: T_DOC, Key: { employeeSeq: seq, docId: parts[4] } }));
+        if (!g.Item || g.Item.category !== "generated") return resp(404, { error: "NOT_FOUND" });
+        await ddb.send(
+          new UpdateCommand({
+            TableName: T_DOC, Key: { employeeSeq: seq, docId: parts[4] },
+            UpdateExpression: "REMOVE acceptedAt, acceptedIp, acceptedName",
+          }),
+        );
+        await writeAudit(body.actor, "doc.accept.void", `${seq}/${parts[4]}`, {
+          ref: g.Item.ref, voidedAcceptedAt: g.Item.acceptedAt ?? null, voidedAcceptedName: g.Item.acceptedName ?? null,
+        });
+        return resp(200, { ok: true });
       }
 
       // Withdraw an issued document — for one genuinely issued in error (wrong
@@ -647,14 +922,20 @@ export async function handler(event) {
       const empCheck = await ddb.send(new GetCommand({ TableName: T_EMP, Key: { seq: seqCheck } }));
       if (!empCheck.Item) return resp(404, { error: "EMPLOYEE_NOT_FOUND" });
 
+      const recipientName = (empCheck.Item.name || "").split(/\s+/)[0] || "there";
+      const subjectLine = body.subject || "Document from ShieldSync HR";
+
       const r = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
         body: JSON.stringify({
           from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
           to: [to],
-          subject: body.subject || "Document from ShieldSync HR",
-          text: body.bodyText || "Please find the attached document.\n\n— ShieldSync Security Private Limited (HR)",
+          subject: subjectLine,
+          text:
+            body.bodyText ||
+            `Dear ${recipientName},\n\nPlease find your document attached: ${subjectLine}.\n\nIf you have any questions, reply to this email or write to info@shieldsyncsecurity.com.\n\nRegards,\nShieldSync Security Private Limited`,
+          html: documentEmailHtml({ recipientName, subjectLine, note: body.note, cta: body.cta }),
           attachments: [{ filename: body.fileName || "document.pdf", content: bytes.toString("base64") }],
         }),
       });
@@ -1062,6 +1343,144 @@ export async function handler(event) {
       return resp(200, { ok: true, simulated: false });
     }
 
+    // ---- /hr/tax/summary — aggregate TDS from all issued payslips ----
+    // Scans T_DOC for payslip documents and groups their TDS deductions by
+    // salary month so the /tax calendar can show what's been deducted vs paid.
+    if (parts[0] === "hr" && parts[1] === "tax" && parts[2] === "summary" && parts.length === 3 && method === "GET") {
+      const items = [];
+      let startKey;
+      do {
+        const out = await ddb.send(new ScanCommand({
+          TableName: T_DOC,
+          FilterExpression: "docType = :pt",
+          ExpressionAttributeValues: { ":pt": "payslip" },
+          ExclusiveStartKey: startKey,
+        }));
+        items.push(...(out.Items ?? []));
+        startKey = out.LastEvaluatedKey;
+      } while (startKey);
+
+      const byMonth = {};
+      for (const item of items) {
+        if (!item.snapshotJson) continue;
+        let snap;
+        try { snap = JSON.parse(item.snapshotJson); } catch { continue; }
+        // Prefer snap.month; fall back to last 7 chars of the ref (YYYY-MM suffix).
+        const month = snap.month ?? (typeof item.ref === "string" ? item.ref.slice(-7) : null);
+        if (!month || !/^\d{4}-\d{2}$/.test(month)) continue;
+        const tds = Number(snap.deductions?.tds) || 0;
+        const pf  = Number(snap.deductions?.pf)  || 0;
+        const esi = Number(snap.deductions?.esi) || 0;
+        const net = Number(snap.netPay) || 0;
+        if (!byMonth[month]) byMonth[month] = { tds: 0, pf: 0, esi: 0, netPay: 0, payslipCount: 0 };
+        byMonth[month].tds  += tds;
+        byMonth[month].pf   += pf;
+        byMonth[month].esi  += esi;
+        byMonth[month].netPay += net;
+        byMonth[month].payslipCount += 1;
+      }
+      return resp(200, { byMonth });
+    }
+
+    // ---------------- INVOICES (company-issued B2B invoices) ----------------
+    // Stored in T_DOC under the special partition employeeSeq = -30 so no
+    // new DynamoDB table is needed. Each invoice is one item with docType="invoice".
+    const INV_SEQ = -30;
+
+    if (parts[0] === "hr" && parts[1] === "invoices") {
+      // GET /hr/invoices — list all invoices
+      if (method === "GET" && parts.length === 2) {
+        const out = await ddb.send(new QueryCommand({
+          TableName: T_DOC,
+          KeyConditionExpression: "employeeSeq = :s",
+          ExpressionAttributeValues: { ":s": INV_SEQ },
+        }));
+        const invoices = (out.Items ?? [])
+          .filter(i => i.docType === "invoice")
+          .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+        return resp(200, { invoices });
+      }
+
+      // GET /hr/invoices/:id — get one
+      if (method === "GET" && parts.length === 3) {
+        const inv = await ddb.send(new GetCommand({ TableName: T_DOC, Key: { employeeSeq: INV_SEQ, docId: parts[2] } }));
+        if (!inv.Item) return resp(404, { error: "NOT_FOUND" });
+        return resp(200, { invoice: inv.Item });
+      }
+
+      // POST /hr/invoices — create
+      if (method === "POST" && parts.length === 2) {
+        const body = await req.json().catch(() => ({}));
+        if (!body.clientName || !body.description || !body.amount) return resp(400, { error: "MISSING_FIELDS" });
+        // Auto-number: count existing invoices for this month
+        const ym = (body.issueDate ?? new Date().toISOString().slice(0, 7)).slice(0, 7);
+        const existing = await ddb.send(new QueryCommand({
+          TableName: T_DOC,
+          KeyConditionExpression: "employeeSeq = :s",
+          ExpressionAttributeValues: { ":s": INV_SEQ },
+        }));
+        const monthCount = (existing.Items ?? []).filter(i => i.docType === "invoice" && (i.issueDate ?? "").startsWith(ym)).length;
+        const seq = String(monthCount + 1).padStart(3, "0");
+        const ymShort = ym.replace("-", "-");
+        const invId = `INV-${ymShort}-${seq}`;
+        const now = new Date().toISOString();
+        const item = {
+          employeeSeq: INV_SEQ,
+          docId: invId,
+          docType: "invoice",
+          invId,
+          clientName: body.clientName,
+          clientEmail: body.clientEmail ?? "",
+          clientGstin: body.clientGstin ?? "",
+          clientAddress: body.clientAddress ?? "",
+          description: body.description,
+          lineItems: body.lineItems ?? [],
+          amount: Number(body.amount),
+          gstRate: Number(body.gstRate ?? 0),
+          gstAmount: Number(body.gstAmount ?? 0),
+          totalAmount: Number(body.totalAmount ?? body.amount),
+          currency: "INR",
+          issueDate: body.issueDate ?? now.slice(0, 10),
+          dueDate: body.dueDate ?? "",
+          status: body.status ?? "draft",
+          notes: body.notes ?? "",
+          createdAt: now,
+          updatedAt: now,
+        };
+        await ddb.send(new PutCommand({ TableName: T_DOC, Item: item }));
+        await writeAudit(body.actor ?? "system", "invoice.create", invId, { clientName: body.clientName, amount: item.totalAmount });
+        return resp(201, { invoice: item });
+      }
+
+      // PUT /hr/invoices/:id — update
+      if (method === "PUT" && parts.length === 3) {
+        const invId = parts[2];
+        const existing = await ddb.send(new GetCommand({ TableName: T_DOC, Key: { employeeSeq: INV_SEQ, docId: invId } }));
+        if (!existing.Item) return resp(404, { error: "NOT_FOUND" });
+        const body = await req.json().catch(() => ({}));
+        const updated = { ...existing.Item, ...body, employeeSeq: INV_SEQ, docId: invId, docType: "invoice", updatedAt: new Date().toISOString() };
+        // Reverting away from "paid" must clear the payment stamp — inferStatus()
+        // treats any invoice with a paidDate as paid, so a stale paidDate makes the
+        // revert a no-op. PutCommand replaces the whole item, so deleting the keys
+        // removes them from the stored record (a shallow merge would leave them).
+        if (updated.status !== "paid") {
+          delete updated.paidDate;
+          delete updated.paidAmount;
+        }
+        await ddb.send(new PutCommand({ TableName: T_DOC, Item: updated }));
+        await writeAudit(body.actor ?? "system", "invoice.update", invId, { status: updated.status });
+        return resp(200, { invoice: updated });
+      }
+
+      // DELETE /hr/invoices/:id — delete
+      if (method === "DELETE" && parts.length === 3) {
+        const invId = parts[2];
+        await ddb.send(new DeleteCommand({ TableName: T_DOC, Key: { employeeSeq: INV_SEQ, docId: invId } }));
+        await writeAudit("system", "invoice.delete", invId, {});
+        return resp(200, { ok: true });
+      }
+    }
+
     // ---------------- BANKING (imported bank statement transactions) ----------------
     if (parts[0] === "hr" && parts[1] === "banking" && parts.length === 2) {
       if (method === "GET") {
@@ -1162,7 +1581,7 @@ export async function handler(event) {
       const KEY = { seq: -1 };
       if (method === "GET") {
         const cur = (await ddb.send(new GetCommand({ TableName: T_EMP, Key: KEY }))).Item;
-        return resp(200, { grants: cur?.grants ?? {} });
+        return resp(200, { grants: cur?.grants ?? {}, restrictedSeqs: cur?.restrictedSeqs ?? [] });
       }
       if (method === "PUT") {
         const email = String(body.email ?? "").trim().toLowerCase();
@@ -1171,12 +1590,33 @@ export async function handler(event) {
         const grants = { ...(cur?.grants ?? {}) };
         if (body.access === null) delete grants[email];
         else grants[email] = body.access;
-        await ddb.send(new PutCommand({ TableName: T_EMP, Item: { ...KEY, grants, updatedAt: new Date().toISOString() } }));
+        // restrictedSeqs lives on this same item — a grants write must carry it
+        // forward, not silently reset every record to visible.
+        await ddb.send(new PutCommand({ TableName: T_EMP, Item: { ...KEY, grants, restrictedSeqs: cur?.restrictedSeqs ?? [], updatedAt: new Date().toISOString() } }));
         // Audited with the full resulting permission set: "who could see what,
         // when" has to be reconstructable from the log alone.
         await writeAudit(body.actor, "access.update", email, { access: body.access ?? null });
         return resp(200, { grants });
       }
+    }
+
+    // ---- /hr/restricted (records visible to the administrator only) ----
+    // A restricted employee record disappears for every non-admin viewer:
+    // the app's middleware blocks /employees/:seq and /api/employees/:seq/*
+    // outright, and the list page drops the row. Admin views are unaffected.
+    if (parts[0] === "hr" && parts[1] === "restricted" && parts.length === 2 && method === "PUT") {
+      const seqN = Number(body.seq);
+      if (!Number.isInteger(seqN) || seqN <= 0) return resp(400, { error: "BAD_SEQ" });
+      const KEY = { seq: -1 };
+      const cur = (await ddb.send(new GetCommand({ TableName: T_EMP, Key: KEY }))).Item;
+      const set = new Set(cur?.restrictedSeqs ?? []);
+      if (body.restricted) set.add(seqN);
+      else set.delete(seqN);
+      await ddb.send(
+        new PutCommand({ TableName: T_EMP, Item: { ...KEY, grants: cur?.grants ?? {}, restrictedSeqs: [...set], updatedAt: new Date().toISOString() } }),
+      );
+      await writeAudit(body.actor, "employee.visibility", String(seqN), { restricted: !!body.restricted });
+      return resp(200, { restrictedSeqs: [...set] });
     }
 
     // ---- /hr/audit ----

@@ -18,6 +18,8 @@ export const SIMPLE_LETTER_TYPES = new Set([
   "increment",
   "confirmation",
   "completion",
+  "employment-history",
+  "resignation-acceptance",
 ]);
 
 /** Render a stored snapshot through the CURRENT components, or null for an

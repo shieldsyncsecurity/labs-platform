@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
 import { todayDisplay } from "@/lib/dates";
-import { buildOfferLetter } from "@/lib/documents/offer-letter";
+import { buildOfferLetter, defaultDutiesFor } from "@/lib/documents/offer-letter";
 import { DEFAULT_DUTIES, type Employee } from "@/lib/employee";
 import { OfferLetterDoc } from "@/components/OfferLetterDoc";
 import { DocToolbar } from "@/components/DocToolbar";
@@ -47,7 +47,7 @@ export default async function GenerateOffer({
       baseLocation: e.baseLocation,
       reportingTo: e.reportingTo,
     },
-    duties: e.duties.length ? e.duties : DEFAULT_DUTIES,
+    duties: e.duties.length ? e.duties : (defaultDutiesFor(e.designation) ?? DEFAULT_DUTIES),
     structure: e.structure,
     probationMonths: e.probationMonths,
   });

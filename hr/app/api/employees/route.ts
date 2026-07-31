@@ -1,17 +1,25 @@
 import { NextResponse } from "next/server";
 import { getHrActor } from "@/lib/server/hr-session";
+import { getViewer } from "@/lib/server/hr-access";
+import { visibleProjectedEmployees } from "@/lib/server/employee-view";
 import { hrFetch } from "@/lib/server/hr-engine";
-import { normalizeEmployee, allowsZeroGross } from "@/lib/employee";
+import { normalizeEmployee, allowsZeroGross, type Employee } from "@/lib/employee";
 
 export const dynamic = "force-dynamic";
 
 // List employees. Self-gates (middleware lets /api/* through to return JSON).
+//
+// The response is PROJECTED for the caller — administrator-only records are
+// dropped and salary/bank fields stripped unless they hold those permissions.
+// Returning the raw engine payload here would have made every field mask on
+// /employees decorative: same data, one tab over, no permission needed.
 export async function GET() {
   const actor = await getHrActor();
   if (!actor) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   try {
-    const data = await hrFetch<{ employees?: unknown[] }>("/hr/employees");
-    return NextResponse.json({ employees: data.employees ?? [] });
+    const viewer = await getViewer();
+    const data = await hrFetch<{ employees?: Employee[] }>("/hr/employees");
+    return NextResponse.json({ employees: await visibleProjectedEmployees(data.employees ?? [], viewer) });
   } catch {
     return NextResponse.json({ error: "Could not load employees." }, { status: 502 });
   }

@@ -39,7 +39,11 @@ export const LETTERHEAD_CSS = `
 .ss-addr .nm{ font-weight:700; font-size:12px; } .ss-addr .ad{ font-size:11.5px; color:#5b6676; margin-top:2px; }
 .ss-body{ font-size:12px; line-height:1.6; margin:10px 0; }
 .ss-sec{ font-size:13px; color:#1f3a5f; font-weight:800; margin:20px 0 8px; }
-.ss-ul{ margin:6px 0; padding-left:18px; } .ss-ul li{ font-size:12px; line-height:1.55; margin:4px 0; }
+/* list-style must be explicit — Tailwind's Preflight resets ul/ol to
+   list-style:none globally, so relying on the browser default here silently
+   rendered every bullet list in the app (offer letters, simple letters) with
+   no markers at all. */
+.ss-ul{ margin:6px 0; padding-left:18px; list-style:disc; } .ss-ul li{ font-size:12px; line-height:1.55; margin:4px 0; }
 
 .ss-sheet table{ width:100%; border-collapse:collapse; }
 .ss-kv td{ border:1px solid #d7deea; padding:7px 10px; font-size:12px; vertical-align:top; }
@@ -84,15 +88,49 @@ export const LETTERHEAD_CSS = `
    candidate signs and collects in person, and must read as the real thing. */
 .ss-watermark{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
   overflow:hidden; pointer-events:none; z-index:1; }
-.ss-watermark span{ font-size:54px; font-weight:800; color:#1f3a5f; opacity:.09;
-  transform:rotate(-32deg); white-space:nowrap; letter-spacing:.04em; }
+.ss-watermark span{ font-size:26px; font-weight:800; color:#1f3a5f; opacity:.10;
+  transform:rotate(-32deg); white-space:nowrap; letter-spacing:.03em; }
+
+/* Internship offer letter (v4, plain-language redesign) — scoped under
+   ss-int-* so the appointment letter, payslip, and simple letters (which share
+   ss-sec/ss-ul/ss-kv above) are completely unaffected by this. */
+.ss-int-glance{ border:1px solid #d7deea; border-radius:8px; overflow:hidden; margin:14px 0 4px; }
+.ss-int-glance .hd{ background:#1f3a5f; color:#fff; font-size:11px; font-weight:700; letter-spacing:1.4px;
+  padding:8px 14px; text-transform:uppercase; }
+.ss-int-glance .grid{ display:flex; flex-wrap:wrap; }
+.ss-int-glance .cell{ flex:1 1 50%; min-width:200px; padding:9px 14px; border-top:1px solid #d7deea; }
+.ss-int-glance .cell.odd{ border-right:1px solid #d7deea; }
+.ss-int-glance .k{ font-size:9px; letter-spacing:.8px; text-transform:uppercase; color:#5b6676; font-weight:700; }
+.ss-int-glance .v{ font-size:13px; color:#1b2331; margin-top:3px; }
+.ss-int-glance .pay{ display:flex; align-items:baseline; gap:12px; background:#eef2f8;
+  border-top:1px solid #d7deea; padding:11px 14px; flex-wrap:wrap; }
+.ss-int-glance .pay .plab{ font-size:9px; letter-spacing:.8px; text-transform:uppercase; color:#5b6676;
+  font-weight:700; align-self:center; }
+.ss-int-glance .pay .amt{ font-size:19px; font-weight:800; color:#1f3a5f; }
+.ss-int-glance .pay .note{ font-size:12px; color:#5b6676; }
+
+.ss-int-clause{ margin:15px 0 0; }
+.ss-int-clause h2{ display:flex; align-items:center; gap:9px; font-size:13.5px; color:#1f3a5f; font-weight:800;
+  margin:0 0 7px; padding-bottom:5px; border-bottom:1px solid #d7deea; letter-spacing:.2px; }
+.ss-int-clause h2 .num{ flex:none; width:19px; height:19px; border-radius:50%; background:#1f3a5f; color:#fff;
+  font-size:10.5px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+.ss-int-clause .intro{ font-size:12.5px; color:#1b2331; margin:0 0 6px; line-height:1.6; }
+.ss-int-clause ul{ list-style:none; margin:5px 0; padding:0; }
+.ss-int-clause li{ position:relative; font-size:12.5px; line-height:1.6; margin:5px 0; padding-left:15px; }
+.ss-int-clause li:before{ content:""; position:absolute; left:1px; top:6px; width:5px; height:5px;
+  background:#1f3a5f; border-radius:1px; }
 
 @media print {
   .ss-stage{ background:#fff !important; padding:0 !important; }
+  /* Margin is set on @page below, NOT as .ss-sheet padding — a padding value
+     here only shows up at the very top/bottom of the whole flowed block, so a
+     letter spanning more than one physical page would get full margins on
+     page 1 and the last page but content flush to the paper edge on every
+     page in between. @page margin is repeated on every page by the browser. */
   .ss-sheet{ box-shadow:none !important; margin:0 !important; max-width:none !important;
-    border-radius:0 !important; padding:22mm 18mm !important; }
+    border-radius:0 !important; padding:0 !important; }
   .ss-noprint{ display:none !important; }
   .ss-watermark{ display:none !important; }
-  @page{ size:A4; margin:0; }
+  @page{ size:A4; margin:22mm 18mm; }
 }
 `;

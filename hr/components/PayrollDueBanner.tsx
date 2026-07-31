@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { getPayrollDue } from "@/lib/server/payroll-due";
+import { getViewer } from "@/lib/server/hr-access";
+import { restrictedSeqs } from "@/lib/server/employee-view";
 
 /**
  * Standing reminder that someone hasn't been paid yet. Renders on the dashboard
@@ -13,7 +15,11 @@ import { getPayrollDue } from "@/lib/server/payroll-due";
 export async function PayrollDueBanner() {
   let s: Awaited<ReturnType<typeof getPayrollDue>>;
   try {
-    s = await getPayrollDue();
+    // This banner NAMES who hasn't been paid — administrator-only records must
+    // not be named here for staff viewers.
+    const { seqs, hideAll } = await restrictedSeqs(await getViewer());
+    if (hideAll) return null;
+    s = await getPayrollDue(new Date(), seqs);
   } catch {
     return null; // engine unreachable — the page's own error state covers it
   }

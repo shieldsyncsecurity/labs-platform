@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
 import { todayDisplay } from "@/lib/dates";
 import { buildInternshipOffer } from "@/lib/documents/internship";
@@ -42,9 +42,43 @@ export default async function GenerateInternshipOffer({
     );
   }
 
+  // Once a Letter of Intent has already been issued for this intern, this
+  // generator page is a stale draft form — it starts over from the generic
+  // template defaults and would silently drop every override that was
+  // patched onto the real issued copy (address, hours, tiered notice, etc).
+  // Send anyone who lands here straight to the actual issued document instead,
+  // unless they explicitly ask for a fresh draft with ?fresh=1 (re-issuing a
+  // second letter, e.g. after a genuine renegotiation).
+  if (sp.fresh !== "1") {
+    let generated: Array<{ docId: string; docType: string; generatedAt: string }> = [];
+    try {
+      generated = (await hrFetch<{ generated: typeof generated }>(`/hr/employees/${seq}/generated`)).generated ?? [];
+    } catch { /* best-effort — fall through to the generator on failure */ }
+    const issued = generated
+      .filter((g) => g.docType === "internship-offer")
+      .sort((a, b) => (a.generatedAt < b.generatedAt ? 1 : -1))[0];
+    if (issued) redirect(`/employees/${seq}/issued/${issued.docId}`);
+  }
+
   const now = new Date();
   const ref = sp.ref ?? `SSS/INT/${now.getFullYear()}/•••`;
-  const offer = buildInternshipOffer(e, { ref, date: todayDisplay(), mentor: sp.mentor });
+  // ?tieredNotice=1&probationMonths=1&probationNoticeDays=7&postNoticeMonths=1
+  // — an explicit opt-in override; omitted entirely keeps the standard flat
+  // fifteen (15) days' notice for everyone else.
+  const tieredNotice =
+    sp.tieredNotice === "1"
+      ? {
+          probationMonths: Number(sp.probationMonths) || 1,
+          probationNoticeDays: Number(sp.probationNoticeDays) || 7,
+          postNoticeMonths: Number(sp.postNoticeMonths) || 1,
+        }
+      : undefined;
+  // ?hoursGlance=...&hoursBody=...&hoursStretchEnd=... — explicit opt-in
+  // override; omitted entirely keeps the standard 12:00 noon – 8:00 PM hours.
+  const hours = sp.hoursGlance && sp.hoursBody
+    ? { glance: sp.hoursGlance, body: sp.hoursBody, stretchEnd: sp.hoursStretchEnd }
+    : undefined;
+  const offer = buildInternshipOffer(e, { ref, date: todayDisplay(), mentor: sp.mentor, tieredNotice, reportingTime: sp.reportingTime, hours });
 
   return (
     <InternshipOfferDoc
@@ -58,8 +92,8 @@ export default async function GenerateInternshipOffer({
           <DocToolbar
             backHref={`/employees/${seq}`}
             backLabel={e.name}
-            save={{ seq, docType: "internship-offer", title: "INTERNSHIP OFFER LETTER", refSeries: "int", refYear: now.getFullYear(), snapshot: offer }}
-            email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Your Internship Offer — ShieldSync Security` }}
+            save={{ seq, docType: "internship-offer", title: "LETTER OF INTENT — INTERNSHIP", refSeries: "int", refYear: now.getFullYear(), snapshot: offer }}
+            email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Your Letter of Intent — Internship — ShieldSync Security` }}
           />
         </>
       }

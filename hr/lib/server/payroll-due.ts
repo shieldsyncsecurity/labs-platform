@@ -76,9 +76,16 @@ function isExcluded(e: Employee): boolean {
   return EXCLUDED.has(n) || (id.length > 0 && EXCLUDED.has(id));
 }
 
-export async function getPayrollDue(now = new Date()): Promise<PayrollDue> {
+/**
+ * @param hiddenSeqs Employees this viewer may not see at all (administrator-only
+ *   records). Passed IN rather than resolved here so this module stays free of
+ *   request context and unit-testable — the caller already knows its viewer.
+ *   The banner NAMES who is owed, so a hidden record must not reach it.
+ */
+export async function getPayrollDue(now = new Date(), hiddenSeqs?: Set<number>): Promise<PayrollDue> {
   const month = payrollMonth(now);
-  const employees = (await hrFetch<{ employees?: Employee[] }>("/hr/employees")).employees ?? [];
+  const all = (await hrFetch<{ employees?: Employee[] }>("/hr/employees")).employees ?? [];
+  const employees = hiddenSeqs?.size ? all.filter((e) => !hiddenSeqs.has(e.seq)) : all;
   const active = employees.filter((e) => {
     if (e.status === "exited") return false;
     if (isExcluded(e)) return false;

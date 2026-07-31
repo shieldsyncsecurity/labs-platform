@@ -26,6 +26,7 @@ MONETIZATION_ROADMAP.md
 engine/.dev-data/
 
 # Build artifacts
+*.tsbuildinfo
 engine/deploy/engine.zip
 engine/bin/aws-nuke-linux
 engine/bin/aws-nuke.exe

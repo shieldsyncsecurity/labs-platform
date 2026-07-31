@@ -79,7 +79,7 @@ test("the permission editor is administrator-only", () => {
 
 test("reads need read, writes need write", () => {
   assert.deepEqual(req("/api/employees", "GET"), { kind: "area", area: "employees", need: "read" });
-  assert.deepEqual(req("/api/employees", "POST"), { kind: "area", area: "employees", need: "write" });
+  assert.deepEqual(req("/api/employees", "POST"), { kind: "area", area: "employees", need: "write", alsoSeeSalary: true });
   assert.deepEqual(req("/api/banking", "GET"), { kind: "area", area: "banking", need: "read" });
   assert.deepEqual(req("/api/banking/t_1", "DELETE"), { kind: "area", area: "banking", need: "write" });
 });
@@ -97,7 +97,7 @@ test("letters and payroll are separate from the employee record itself", () => {
   assert.deepEqual(req("/employees/7/offer"), { kind: "area", area: "documents", need: "write" });
   assert.deepEqual(req("/employees/7/leave"), { kind: "area", area: "documents", need: "write" });
   assert.deepEqual(req("/employees/7/payslip"), { kind: "area", area: "payroll", need: "write", alsoSeeSalary: true });
-  assert.deepEqual(req("/payslips"), { kind: "area", area: "payroll", need: "read" });
+  assert.deepEqual(req("/payslips"), { kind: "area", area: "payroll", need: "read", alsoSeeSalary: true });
   assert.deepEqual(req("/employees/7"), { kind: "area", area: "employees", need: "read" });
 });
 
@@ -142,6 +142,51 @@ test("the bulk export is administrator-only, not merely employee-read", () => {
   // metadata in one file. Anything less than admin would make the salary and
   // bank-detail masking decorative — download it all instead of reading the UI.
   assert.equal(req("/api/export").kind, "admin");
+});
+
+test("minting a self-serve PIN is administrator-only, not an employee edit", () => {
+  // A PIN is a LOGIN CREDENTIAL for that person's own document viewer. If this
+  // inherited the generic /api/employees mapping (employees:write), anyone who
+  // can edit a record could mint someone's PIN, sign in as them at /my/login,
+  // and read the letters and pay figures their own grant denies them.
+  assert.equal(req("/api/employees/9/self-pin", "POST").kind, "admin");
+});
+
+test("changing who can see a record is administrator-only", () => {
+  // Restricting a record to the owner is the control itself — a staff member
+  // must never be able to lift the restriction that hides a record from them.
+  assert.equal(req("/api/employees/9/visibility", "PUT").kind, "admin");
+});
+
+test("every letter builder needs documents:write, including the newer ones", () => {
+  // These were added later and fell through to employees:read — i.e. anyone who
+  // could merely OPEN a record could also issue a company letter from it.
+  for (const kind of ["offer", "internship-offer", "leave", "verification", "confirmation", "experience", "completion", "employment-history", "resignation-acceptance"]) {
+    assert.deepEqual(req(`/employees/9/${kind}`), { kind: "area", area: "documents", need: "write" }, kind);
+  }
+});
+
+test("the offer-acceptance surface is public — it is opened by people with no account", () => {
+  assert.equal(req("/accept/9/g_123").kind, "public");
+  assert.equal(req("/api/accept/9/g_123", "POST").kind, "public");
+});
+
+test("the APIs that WRITE pay require the salary permission, like their forms do", () => {
+  // The forms (/employees/new, /edit, /revise) always required this; the API
+  // they post to did not, which is the same hole one layer down.
+  for (const [p, m] of [["/api/employees", "POST"], ["/api/employees/9", "PUT"], ["/api/employees/9", "PATCH"]]) {
+    assert.equal(req(p, m).alsoSeeSalary, true, `${m} ${p} must require salary visibility`);
+  }
+  // Offboarding and deleting set neither pay nor structure — they must NOT be
+  // dragged behind the salary permission.
+  assert.equal(req("/api/employees/9/status", "POST").alsoSeeSalary, undefined);
+  assert.equal(req("/api/employees/9", "DELETE").alsoSeeSalary, undefined);
+});
+
+test("the payroll listings require the salary permission — they are nothing without pay", () => {
+  for (const p of ["/payslips", "/payslips/summary"]) {
+    assert.equal(req(p).alsoSeeSalary, true, `${p} must require salary visibility`);
+  }
 });
 
 test("trailing slashes do not bypass the map", () => {

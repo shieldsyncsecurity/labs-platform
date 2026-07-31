@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getHrActor } from "@/lib/server/hr-session";
+import { guardAdminApi } from "@/lib/server/hr-access";
 import { hrFetch } from "@/lib/server/hr-engine";
 import type { Employee } from "@/lib/employee";
 
@@ -11,7 +12,12 @@ type GenRow = { docId: string; docType: string; title: string; ref: string; gene
 // issued-document snapshot, KYC metadata (never the bytes — those live only in
 // the encrypted store), and the audit trail. The system has intentional
 // hard-delete; this JSON is the recovery artifact. The export itself is audited.
+// This returns the ENTIRE data plane in one file — every salary, every issued
+// snapshot. The edge middleware maps it to ADMIN, and this repeats the check
+// here so the protection does not depend on a matcher pattern staying correct.
 export async function GET() {
+  const denied = await guardAdminApi();
+  if (denied) return denied;
   const actor = await getHrActor();
   if (!actor) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
 

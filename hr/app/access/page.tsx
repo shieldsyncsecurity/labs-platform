@@ -4,6 +4,7 @@ import { hrFetch } from "@/lib/server/hr-engine";
 import { hrAllowlist } from "@/lib/server/hr-token";
 import { normalizeAccess } from "@/lib/access";
 import { AccessMatrix } from "@/components/AccessMatrix";
+import { SelfServePanel, type SelfServeRow } from "@/components/SelfServePanel";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,19 @@ export default async function AccessPage() {
     grants = (await hrFetch<{ grants?: Record<string, unknown> }>("/hr/access")).grants ?? {};
   } catch {
     unreachable = true;
+  }
+
+  // Self-serve logins are the OTHER half of "who can see what" — staff
+  // permissions above, employees' own document access here — so both live on
+  // this one page rather than being scattered across each employee record.
+  let selfServe: SelfServeRow[] = [];
+  try {
+    const { employees } = await hrFetch<{ employees?: SelfServeRow[] }>("/hr/employees");
+    selfServe = (employees ?? []).map(({ seq, name, employeeId, status, hasSelfPin }) => ({
+      seq, name, employeeId, status, hasSelfPin,
+    }));
+  } catch {
+    /* section simply doesn't render this load */
   }
 
   const admins = hrAdmins();
@@ -53,6 +67,12 @@ export default async function AccessPage() {
       <div style={{ marginTop: 22 }}>
         <AccessMatrix people={people} />
       </div>
+
+      {selfServe.length > 0 ? (
+        <div style={{ marginTop: 26 }}>
+          <SelfServePanel rows={selfServe} />
+        </div>
+      ) : null}
 
       <div style={{ fontSize: 11.5, color: "#8a94a3", marginTop: 24, borderTop: "1px solid #eef2f7", paddingTop: 14, lineHeight: 1.6 }}>
         Every change here is written to the{" "}

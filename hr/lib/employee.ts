@@ -78,6 +78,16 @@ export type Employee = {
   lastWorkingDay?: string; // display string, set on offboarding (status="exited")
   createdAt: string;
   updatedAt: string;
+
+  // self-serve login (read-only document access, /my/*) — set via
+  // /hr/employees/:seq/self-pin, verified via /hr/self/login. Never a
+  // plaintext PIN: only its salted hash and lockout counters ever reach here.
+  /** Whether a self-serve PIN exists. Derived by the engine — the hash and
+   * salt themselves never leave it (see publicEmployee in hr-handler.mjs). */
+  hasSelfPin?: boolean;
+  selfPinSalt?: string;
+  selfFailedAttempts?: number;
+  selfLockedUntil?: string; // ISO
 };
 
 export const DEFAULT_EMPLOYMENT_TYPE = "Full-time, permanent";

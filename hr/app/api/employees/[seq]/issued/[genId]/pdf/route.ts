@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getHrActor } from "@/lib/server/hr-session";
+import { getViewer } from "@/lib/server/hr-access";
 import { buildIssuedPdf, pdfFileName, PdfUnavailableError } from "@/lib/server/pdf";
 import { hrFetch } from "@/lib/server/hr-engine";
 import { HrEngineError } from "@/lib/server/hr-engine";
@@ -14,7 +15,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ seq: str
   const { seq, genId } = await params;
 
   try {
-    const { pdf, gen } = await buildIssuedPdf(req, seq, genId);
+    const { pdf, gen, employeeName } = await buildIssuedPdf(req, seq, genId);
+    // A payslip PDF is the pay figures — gating only the page that links here
+    // would leave the file itself downloadable by anyone with documents:read.
+    if (gen.docType === "payslip") {
+      const { isAdmin, access } = await getViewer();
+      if (!(isAdmin || access.seeSalary)) {
+        return NextResponse.json({ error: "You do not have access to salary information." }, { status: 403 });
+      }
+    }
     try {
       await hrFetch("/hr/audit", {
         method: "POST",
@@ -27,7 +36,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ seq: str
       status: 200,
       headers: {
         "content-type": "application/pdf",
-        "content-disposition": `attachment; filename="${pdfFileName(gen)}"`,
+        "content-disposition": `attachment; filename="${pdfFileName(gen, employeeName)}"`,
         "cache-control": "no-store",
       },
     });

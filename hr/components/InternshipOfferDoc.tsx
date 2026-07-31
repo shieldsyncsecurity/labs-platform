@@ -1,25 +1,13 @@
 import type React from "react";
 import { COMPANY } from "@/lib/company";
-import { INTERNSHIP_TAGLINE, type InternshipOffer } from "@/lib/documents/internship";
+import type { InternshipOffer } from "@/lib/documents/internship";
 import { LETTERHEAD_CSS } from "./letterhead-css";
 import { Masthead } from "./Masthead";
 import { SignatureBlock } from "./SignatureBlock";
 
-// Bullet items may carry a "Label: text" prefix — bold the label, matching the
-// issued internship offer's Confidentiality/IP/Conduct section style.
-function Bullet({ text }: { text: string }) {
-  const idx = text.indexOf(": ");
-  if (idx > 0 && idx < 40) {
-    return (
-      <li>
-        <b>{text.slice(0, idx + 1)}</b> {text.slice(idx + 2)}
-      </li>
-    );
-  }
-  return <li>{text}</li>;
-}
-
-/** Internship offer letter in the company's issued format (Princy reference). */
+/** Internship offer letter — plain-language redesign (v4, owner-approved 26 Jul 2026):
+ * an "at a glance" summary grid + a highlighted stipend band, followed by
+ * numbered clauses with circular badges rather than a plain running list. */
 export function InternshipOfferDoc({ offer, toolbar }: { offer: InternshipOffer; toolbar?: React.ReactNode }) {
   return (
     <div className="ss-stage">
@@ -31,21 +19,23 @@ export function InternshipOfferDoc({ offer, toolbar }: { offer: InternshipOffer;
       ) : null}
 
       <div className="ss-sheet">
-        <div className="ss-watermark"><span>DIGITAL COPY &mdash; COLLECT ORIGINAL IN PERSON</span></div>
+        {!offer.noWatermark ? (
+          <div className="ss-watermark"><span>DIGITAL COPY &mdash; COLLECT ORIGINAL IN PERSON</span></div>
+        ) : null}
         <div className="ss-run">
           <span>{COMPANY.legalName}</span>
-          <span className="r">Internship Offer Letter</span>
+          <span className="r">Letter of Intent &mdash; Internship</span>
         </div>
 
-        <Masthead variant="full" email={COMPANY.hrEmail} tagline={INTERNSHIP_TAGLINE} />
+        <Masthead variant="full" email={COMPANY.hrEmail} />
+
+        <div className="ss-title">
+          <h1 className="u">LETTER OF INTENT &mdash; INTERNSHIP</h1>
+        </div>
 
         <div className="ss-ref">
           <span>Ref: {offer.ref}</span>
           <span>Date: {offer.date}</span>
-        </div>
-
-        <div className="ss-title">
-          <h1 className="u">INTERNSHIP OFFER LETTER</h1>
         </div>
 
         <p className="ss-body" style={{ marginTop: 14 }}>
@@ -53,32 +43,44 @@ export function InternshipOfferDoc({ offer, toolbar }: { offer: InternshipOffer;
         </p>
         <p className="ss-body">{offer.intro}</p>
 
-        <h2 className="ss-sec">1. Internship Details</h2>
-        <table className="ss-kv">
-          <tbody>
-            {offer.detailRows.map((r) => (
-              <tr key={r.label}>
-                <td className="k">{r.label}</td>
-                <td>{r.value}</td>
-              </tr>
+        <div className="ss-int-glance">
+          <div className="hd">Internship at a Glance</div>
+          <div className="grid">
+            {offer.glanceRows.map((r, i) => (
+              <div key={r.label} className={`cell${i % 2 === 0 ? " odd" : ""}`}>
+                <div className="k">{r.label}</div>
+                <div className="v">{r.value}</div>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+          {/* An unpaid internship gets no stipend band at all — the "Stipend
+              and Leave" section already says plainly that none is payable.
+              A highlighted glance-table row is for a figure worth
+              summarising, not for announcing the absence of one. */}
+          {offer.stipend.amount !== "Unpaid" ? (
+            <div className="pay">
+              <span className="plab">Stipend</span>
+              <span className="amt">{offer.stipend.amount}</span>
+              <span className="note">{offer.stipend.note}</span>
+            </div>
+          ) : null}
+        </div>
 
         {offer.sections.map((s) => (
-          <div key={s.n}>
-            <h2 className="ss-sec">
-              {s.n}. {s.heading}
+          <section key={s.n} className="ss-int-clause">
+            <h2>
+              <span className="num">{s.n}</span>
+              {s.heading}
             </h2>
-            {s.intro ? <p className="ss-body">{s.intro}</p> : null}
+            {s.intro ? <p className="intro">{s.intro}</p> : null}
             {s.bullets ? (
-              <ul className="ss-ul">
+              <ul>
                 {s.bullets.map((b, i) => (
-                  <Bullet key={i} text={b} />
+                  <li key={i}>{b}</li>
                 ))}
               </ul>
             ) : null}
-          </div>
+          </section>
         ))}
 
         <p className="ss-body" style={{ marginTop: 14 }}>{offer.closing}</p>
