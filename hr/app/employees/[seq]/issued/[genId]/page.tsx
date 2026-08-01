@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
 import { getViewer } from "@/lib/server/hr-access";
+import { can } from "@/lib/access";
 import { renderIssued } from "@/lib/render-issued";
 import { DocToolbar } from "@/components/DocToolbar";
 import { humanizeTitle } from "@/lib/server/pdf";
@@ -44,6 +45,11 @@ export default async function IssuedDoc({ params }: { params: Promise<{ seq: str
     redirect(`/no-access?area=payroll`);
   }
 
+  // Withdraw an issued document (e.g. a payslip for the wrong month). Matches the
+  // DELETE route's gate (documents:write); admin always passes. No dead-end: the
+  // button only shows to someone whose DELETE would actually succeed.
+  const canWithdraw = isAdmin || can(access, "documents", "write");
+
   const toolbar = (
     <DocToolbar
       backHref={`/employees/${seq}`}
@@ -55,6 +61,8 @@ export default async function IssuedDoc({ params }: { params: Promise<{ seq: str
         defaultTo: employee?.personalEmail,
         defaultSubject: `${humanizeTitle(gen.title || "Document")}${gen.ref ? ` — ${gen.ref}` : ""}`,
       }}
+      withdraw={{ seq, genId: gen.docId, label: gen.title || gen.docType, ref: gen.ref }}
+      canWithdraw={canWithdraw}
     />
   );
 

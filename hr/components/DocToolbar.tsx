@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 const printBtn: React.CSSProperties = { background: "#1f3a5f", color: "#fff", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" };
 const ghostBtn: React.CSSProperties = { background: "#fff", color: "#1f3a5f", border: "1px solid #c3cee0", borderRadius: 6, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" };
 const input: React.CSSProperties = { padding: "7px 9px", fontSize: 12.5, border: "1px solid #d4dbe8", borderRadius: 6, background: "#fff" };
+const dangerBtn: React.CSSProperties = { background: "#fff", color: "#9a2233", border: "1px solid #e6b8bf", borderRadius: 6, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" };
 
 export type SaveSpec = {
   seq: string;
@@ -81,6 +82,8 @@ export function DocToolbar({
   email,
   pdfHref,
   canIssue = true,
+  withdraw,
+  canWithdraw = false,
 }: {
   backHref: string;
   backLabel: string;
@@ -93,6 +96,11 @@ export function DocToolbar({
    * payroll but not Letters (documents) write access, turning a wall of 403s
    * into an honest "view-only" note instead of dead buttons. */
   canIssue?: boolean;
+  /** Issued pages only: lets an admin/documents-writer withdraw a document
+   * issued in error (e.g. a payslip for the wrong month). The DELETE is audited
+   * server-side, so the resulting gap is always traceable to a decision. */
+  withdraw?: { seq: string; genId: string; label?: string; ref?: string };
+  canWithdraw?: boolean;
 }) {
   const sp = useSearchParams();
   const [saved, setSaved] = useState(false);
@@ -103,6 +111,7 @@ export function DocToolbar({
   // Capturing it lets Email auto-render the PDF server-side IN PLACE — no more
   // "attach a file" on a slip that's already in history.
   const [savedGenId, setSavedGenId] = useState<string | undefined>(undefined);
+  const [withdrawing, setWithdrawing] = useState(false);
   const printedOnce = useRef(false);
 
   // genId to drive the one-click (server-rendered) email: an explicit issued-page
@@ -189,10 +198,50 @@ export function DocToolbar({
     }
   }
 
+  // Withdraw a document issued in error (e.g. a payslip for the wrong month).
+  // Confirmed, then removed via the audited DELETE; on success we return to the
+  // employee record where the row is now gone.
+  async function onWithdraw(): Promise<void> {
+    if (!withdraw) return;
+    const what = withdraw.label || "document";
+    const refPart = withdraw.ref ? ` (${withdraw.ref})` : "";
+    if (!confirm(`Withdraw this ${what}${refPart}?\n\nIt is permanently removed from the employee's history. The withdrawal is recorded in the audit trail.`)) return;
+    setWithdrawing(true);
+    try {
+      const res = await fetch(`/api/employees/${withdraw.seq}/generated/${encodeURIComponent(withdraw.genId)}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error ?? "Could not withdraw the document.");
+        setWithdrawing(false);
+        return;
+      }
+      window.location.href = `/employees/${withdraw.seq}`;
+    } catch {
+      alert("Could not withdraw — check the connection and try again.");
+      setWithdrawing(false);
+    }
+  }
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-        <Link href={backHref} style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; {backLabel}</Link>
+        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+          <Link href={backHref} style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; {backLabel}</Link>
+          {withdraw && canWithdraw ? (
+            <button
+              type="button"
+              onClick={onWithdraw}
+              disabled={withdrawing}
+              title="Withdraw a document issued in error — permanently removes it from history (audited)"
+              style={{ ...dangerBtn, opacity: withdrawing ? 0.6 : 1 }}
+            >
+              {withdrawing ? "Withdrawing…" : "Withdraw"}
+            </button>
+          ) : null}
+        </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {canIssue ? (
             <>
