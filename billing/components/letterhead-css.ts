@@ -1,6 +1,9 @@
-// Letterhead CSS — identical to hr/components/letterhead-css.ts.
-// Intentionally duplicated rather than cross-imported so billing/ can build
-// independently without pulling in the hr/ dependency tree.
+// Letterhead CSS — a REDUCED SUBSET of hr/components/letterhead-css.ts,
+// carrying only the masthead/stage/sheet classes billing actually uses (the
+// full hr version is larger). Intentionally duplicated rather than
+// cross-imported so billing/ can build independently without pulling in the
+// hr/ dependency tree. The shared .ss-stage / .ss-sheet / .ss-mast rules must
+// be kept in sync with hr by hand when either side changes.
 export const LETTERHEAD_CSS = `
 .ss-stage { background:#6b7280; padding:28px 16px 48px; }
 .ss-sheet { background:#fff; margin:0 auto 26px; padding:46px 52px 40px;

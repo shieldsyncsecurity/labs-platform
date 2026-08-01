@@ -1,3 +1,4 @@
+import "server-only";
 // Verify-only — billing portal never issues tokens, only reads them.
 // Must use the same key as hr/lib/server/inv-token.ts (same HR_SESSION_SECRET).
 import { jwtVerify } from "jose";

@@ -12,6 +12,9 @@
     "test": "node tests/run.mjs",
     "dev:all": "node dev-all.mjs"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "@cloudflare/puppeteer": "^1.1.0",

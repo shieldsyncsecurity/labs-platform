@@ -10,6 +10,9 @@
     "cf:preview": "npx opennextjs-cloudflare build && npx wrangler dev",
     "cf:deploy": "npx opennextjs-cloudflare build && npx wrangler deploy"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "jose": "^6.2.3",
     "next": "16.2.7",

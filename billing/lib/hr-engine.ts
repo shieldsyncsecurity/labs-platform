@@ -1,3 +1,4 @@
+import "server-only";
 // Read-only client for the HR engine — billing only ever GETs invoices.
 // Never import into client components.
 
