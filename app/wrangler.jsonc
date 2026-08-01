@@ -8,6 +8,13 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  // Persisted Workers logs — parity with hr/billing/enterprise. This is the busiest,
+  // payments-live Worker, so request logs matter most here when a Paytm checkout or
+  // Cognito flow fails. Enabled config-only; takes effect on the next app deploy.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
   "vars": {
     "ENGINE_URL": "https://lewssnjjhi.execute-api.us-east-1.amazonaws.com",
     "NEXT_PUBLIC_AUTH_MODE": "cognito",
