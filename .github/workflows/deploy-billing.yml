@@ -1,0 +1,41 @@
+name: Deploy billing app (Cloudflare)
+
+# Auto-deploy the billing Worker on push to master when billing/ changes —
+# push-to-deploy parity with deploy-labs.yml. Runs the SAME command as the manual
+# deploy: `opennextjs-cloudflare build` (= `next build --webpack` — webpack is
+# mandatory; Turbopack breaks OpenNext) then `wrangler deploy` to Worker
+# "shieldsync-billing" (custom domain billing.shieldsyncsecurity.com).
+#
+# (No unit-test suite in billing/ yet, so there's no test step — the webpack
+#  build still type-checks and fails the deploy on a type error.)
+#
+# Uses the SAME repo secrets as deploy-labs.yml (already configured):
+#   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
+#
+# Worker secrets (HR_SESSION_SECRET, HR_ENGINE_SECRET) live on the Worker —
+# `wrangler deploy` preserves them; this workflow never sets or reads them.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "billing/**"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: billing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Build (webpack) + deploy to Cloudflare
+        run: npm run cf:deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
