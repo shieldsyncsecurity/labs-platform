@@ -25,12 +25,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ in
   }
 
   const token = await signInvoiceToken(invId);
-  // Always use the billing domain for client-facing links in production;
-  // fall back to the current origin in dev (where billing.* doesn't exist).
+  // Client invoices are served ONLY by the separate billing Worker. In dev,
+  // point at the local billing dev server (`npm run dev` in billing/ → :3004);
+  // the HR portal no longer hosts an /inv view.
   const billingOrigin =
     process.env.NODE_ENV === "production"
       ? "https://billing.shieldsyncsecurity.com"
-      : _req.nextUrl.origin;
+      : "http://localhost:3004";
   const url = `${billingOrigin}/inv/${encodeURIComponent(token)}`;
   return NextResponse.json({ url, token });
 }

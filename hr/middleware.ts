@@ -75,9 +75,6 @@ export async function middleware(req: NextRequest) {
   // credential, same trust model as the questionnaire token above — it can
   // only read/accept that ONE issued document, nothing else.
   const isAccept = pathname.startsWith("/accept/") || pathname.startsWith("/api/accept/");
-  // Public invoice view: signed JWT encodes invId; client can view that one invoice,
-  // nothing else. Same trust model as the questionnaire token.
-  const isPublicInvoice = pathname.startsWith("/inv/");
 
   // Cross-origin write protection for state-changing API calls.
   if (isApi && !["GET", "HEAD", "OPTIONS"].includes(req.method)) {
@@ -90,7 +87,7 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  if (isQuestionnaire || isSelfServe || isAccept || isPublicInvoice) return next();
+  if (isQuestionnaire || isSelfServe || isAccept) return next();
 
   const token = req.cookies.get(HR_COOKIE)?.value;
   const session = token ? await verifyHrSession(token) : null;

@@ -2,7 +2,7 @@
 // No login required to view: the token IS the credential.
 // Same pattern as the candidate questionnaire token (hr-token.ts), using a
 // distinct audience ("ss-inv") so it can never be misused as an HR session.
-import { SignJWT, jwtVerify } from "jose";
+import { SignJWT } from "jose";
 
 const ALG = "HS256";
 const AUD = "ss-inv";
@@ -15,6 +15,9 @@ function secretKey(): Uint8Array {
   return new TextEncoder().encode("dev-only-inv-secret");
 }
 
+// Signing only. Verification happens in the SEPARATE billing Worker
+// (billing/lib/inv-token.ts) which renders the client-facing /inv view — the
+// HR portal issues the token but never serves the invoice itself.
 export async function signInvoiceToken(invId: string): Promise<string> {
   return new SignJWT({ invId })
     .setProtectedHeader({ alg: ALG })
@@ -22,14 +25,4 @@ export async function signInvoiceToken(invId: string): Promise<string> {
     .setIssuedAt()
     .setExpirationTime(`${TTL_SECONDS}s`)
     .sign(secretKey());
-}
-
-export async function verifyInvoiceToken(token: string): Promise<string | null> {
-  try {
-    const { payload } = await jwtVerify(token, secretKey(), { audience: AUD });
-    const invId = payload.invId;
-    return typeof invId === "string" ? invId : null;
-  } catch {
-    return null;
-  }
 }

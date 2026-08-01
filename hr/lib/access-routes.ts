@@ -54,10 +54,10 @@ export function requirementFor(pathname: string, method: string): Requirement {
     // Also exempted directly in middleware.ts; listed here so this file stays
     // an accurate map of the whole public surface.
     p.startsWith("/accept/") ||
-    p.startsWith("/api/accept/") ||
-    // Public invoice view — token-authenticated (signed JWT, audience "ss-inv").
-    // A client with the share link can view their invoice without an HR session.
-    p.startsWith("/inv/")
+    p.startsWith("/api/accept/")
+    // NOTE: client invoice viewing lives on the SEPARATE billing Worker
+    // (billing.shieldsyncsecurity.com/inv/<token>), NOT here — the staff domain
+    // hosts no public client-facing route.
   ) {
     return PUBLIC;
   }
