@@ -42,6 +42,23 @@ export async function PUT(req: Request, { params }: { params: Promise<{ seq: str
     return NextResponse.json({ error: "Name, designation, and date of joining are required." }, { status: 400 });
   }
 
+  // The edit form projects bank/PAN OUT for a viewer without seeBankDetails, so
+  // their submitted record carries those fields blank. Restore them from the
+  // stored record before the merge, so an editor who was never allowed to SEE
+  // bank/PAN cannot silently WIPE them by saving the form. Fails closed.
+  const viewer = await getViewer();
+  if (!(viewer.isAdmin || viewer.access.seeBankDetails)) {
+    const BANK_FIELDS = ["bankAccount", "bankName", "bankBranch", "ifsc", "pan", "aadhaarLast4", "uanPf"] as const;
+    try {
+      const current = (await hrFetch<{ employee: Employee }>(`/hr/employees/${encodeURIComponent(seq)}`)).employee;
+      for (const f of BANK_FIELDS) {
+        (employee as Record<string, unknown>)[f] = (current as Record<string, unknown>)[f];
+      }
+    } catch {
+      return NextResponse.json({ error: "Could not verify the record before saving. Please try again." }, { status: 502 });
+    }
+  }
+
   try {
     const data = await hrFetch(`/hr/employees/${encodeURIComponent(seq)}`, {
       method: "PUT",

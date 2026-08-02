@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { HR_COOKIE, isAdminEmail, verifyHrSession } from "@/lib/server/hr-token";
+import { HR_COOKIE, isAdminEmail, isAllowed, verifyHrSession } from "@/lib/server/hr-token";
 import { SELF_COOKIE, verifySelfSession } from "@/lib/server/self-token";
 import { hrFetch } from "@/lib/server/hr-engine";
 import { requirementFor } from "@/lib/access-routes";
@@ -111,6 +111,20 @@ export async function middleware(req: NextRequest) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     url.search = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
+    return NextResponse.redirect(url);
+  }
+
+  // Allowlist membership is re-checked LIVE on every request, not just at login.
+  // The env allowlist is a deploy-time decision, but the session lives up to 12h
+  // (HR_COOKIE_MAX_AGE) — without this, removing someone from HR_ALLOWLIST left
+  // their existing ss_hr session (and grants) working until it lapsed. Admins are
+  // exempt: their access is env-derived and deliberately unrevocable (and they
+  // remain on the allowlist anyway). No I/O — reads the env allowlist directly.
+  if (!isAdminEmail(session.email) && !isAllowed(session.email ?? "")) {
+    if (isApi) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+    const url = req.nextUrl.clone();
+    url.pathname = "/login";
+    url.search = "";
     return NextResponse.redirect(url);
   }
 

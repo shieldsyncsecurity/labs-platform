@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getHrActor } from "@/lib/server/hr-session";
+import { getViewer } from "@/lib/server/hr-access";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
 import { MAX_KYC_BYTES } from "@/lib/kyc";
 import { buildIssuedPdf, pdfFileName, PdfUnavailableError } from "@/lib/server/pdf";
@@ -40,6 +41,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
   } else if (genId) {
     try {
       const { pdf, gen, employeeName } = await buildIssuedPdf(req, seq, genId);
+      // A payslip PDF IS the pay figures (gross/deductions/net). This route only
+      // gated on being signed in, so a documents:write + seeSalary:false grant
+      // (the EA preset) could email any employee's slip to an arbitrary inbox —
+      // bypassing the seeSalary mask the page/PDF/summary all enforce. Mirror
+      // pdf/route.ts: the docType is only known after the snapshot resolves, so
+      // the check must live here, not in the URL->permission map.
+      if (gen.docType === "payslip") {
+        const { isAdmin, access } = await getViewer();
+        if (!(isAdmin || access.seeSalary)) {
+          return NextResponse.json({ error: "You do not have access to salary information." }, { status: 403 });
+        }
+      }
       if (pdf.length > MAX_KYC_BYTES) {
         return NextResponse.json({ error: "The rendered PDF exceeds 4 MB — attach a compressed file instead." }, { status: 400 });
       }

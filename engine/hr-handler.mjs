@@ -715,12 +715,23 @@ export async function handler(event) {
     // the 192-bit questionnaire token, so this endpoint (not the hash) is the
     // real defence against guessing.
     if (parts[0] === "hr" && parts[1] === "self" && parts[2] === "login" && parts.length === 3 && method === "POST") {
+      // Constant-time floor across the 401 paths: a non-provisioned account
+      // returns after one GetCommand, but a wrong PIN on a REAL account does
+      // sha256 + timingSafeEqual + two DynamoDB writes first. Without a floor,
+      // an attacker sweeping SSS/EMP/<n> distinguishes provisioned accounts by
+      // latency. Every INVALID reply now takes the same minimum wall-clock time.
+      const t0 = Date.now();
+      const replyInvalid = async () => {
+        const wait = 250 - (Date.now() - t0);
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        return resp(401, { error: "INVALID" });
+      };
       const m = /^SSS\/EMP\/(\d+)$/i.exec(String(body.employeeId ?? "").trim());
       const pin = String(body.pin ?? "").trim();
-      if (!m || !pin) return resp(401, { error: "INVALID" });
+      if (!m || !pin) return await replyInvalid();
       const seq = Number(m[1]);
       const emp = (await ddb.send(new GetCommand({ TableName: T_EMP, Key: { seq } }))).Item;
-      if (!emp || !emp.selfPinHash) return resp(401, { error: "INVALID" });
+      if (!emp || !emp.selfPinHash) return await replyInvalid();
       if (emp.selfLockedUntil && new Date(emp.selfLockedUntil) > new Date()) {
         return resp(423, { error: "LOCKED", until: emp.selfLockedUntil });
       }
@@ -728,7 +739,14 @@ export async function handler(event) {
       const b = Buffer.from(sha256(Buffer.from((emp.selfPinSalt || "") + pin)), "hex");
       const ok = a.length === b.length && timingSafeEqual(a, b);
       if (!ok) {
-        const attempts = (emp.selfFailedAttempts || 0) + 1;
+        // If a previous lock has already EXPIRED, start a FRESH attempt window
+        // rather than carrying the old count forward. Otherwise one wrong PIN
+        // after each 15-min lock re-locks (5+1 >= 5) indefinitely — a targeted
+        // DoS against a guessable employee id with one request every 15 min.
+        // Below the threshold we also REMOVE any stale expired lock so the
+        // counter can accumulate a clean 1..5 window.
+        const priorLockExpired = emp.selfLockedUntil && new Date(emp.selfLockedUntil) <= new Date();
+        const attempts = (priorLockExpired ? 0 : emp.selfFailedAttempts || 0) + 1;
         const locked = attempts >= 5;
         await ddb.send(
           new UpdateCommand({
@@ -736,15 +754,14 @@ export async function handler(event) {
             Key: { seq },
             UpdateExpression: locked
               ? "SET selfFailedAttempts = :a, selfLockedUntil = :lu"
-              : "SET selfFailedAttempts = :a",
-            ExpressionAttributeValues: {
-              ":a": attempts,
-              ...(locked ? { ":lu": new Date(Date.now() + 15 * 60 * 1000).toISOString() } : {}),
-            },
+              : "SET selfFailedAttempts = :a REMOVE selfLockedUntil",
+            ExpressionAttributeValues: locked
+              ? { ":a": attempts, ":lu": new Date(Date.now() + 15 * 60 * 1000).toISOString() }
+              : { ":a": attempts },
           }),
         );
         await writeAudit("self-serve", "self.login.fail", emp.employeeId, { attempts, locked });
-        return resp(401, { error: "INVALID" });
+        return await replyInvalid();
       }
       await ddb.send(
         new UpdateCommand({

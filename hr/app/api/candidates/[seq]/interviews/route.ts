@@ -48,6 +48,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
   }
   const durationMinutes = Number(input.durationMinutes) > 0 ? Math.round(Number(input.durationMinutes)) : 45;
 
+  // A pasted meeting link is later rendered as an <a href> that an admin clicks.
+  // Reject anything that isn't a real http(s) URL — a "javascript:"/"data:" value
+  // would be stored verbatim and execute in the admin's session on click (XSS).
+  // This is the authoritative gate; the render also guards defensively.
+  const meetingUrl = input.meetingUrl?.trim() || undefined;
+  if (meetingUrl) {
+    let proto = "";
+    try {
+      proto = new URL(meetingUrl).protocol;
+    } catch {
+      /* not a parseable absolute URL */
+    }
+    if (proto !== "http:" && proto !== "https:") {
+      return NextResponse.json({ error: "The meeting link must be a valid http(s) URL." }, { status: 400 });
+    }
+  }
+
   let candidate: Candidate;
   try {
     candidate = (await hrFetch<{ candidate: Candidate }>(`/hr/candidates/${encodeURIComponent(seq)}`)).candidate;
@@ -62,7 +79,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
     panel: input.panel?.trim() || undefined,
     round: input.round?.trim() || undefined,
     notes: input.notes?.trim() || undefined,
-    meetingUrl: input.meetingUrl?.trim() || undefined,
+    meetingUrl,
   };
 
   // --- Real calendar meeting -------------------------------------------------

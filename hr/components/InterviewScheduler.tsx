@@ -155,7 +155,7 @@ export function InterviewScheduler({ candidate, teamsConnected }: { candidate: C
                   <span style={{ fontSize: 11, color: "#8a5a00", fontWeight: 700 }}>hold only</span>
                 )}
                 <div style={{ flex: 1 }} />
-                {iv.meetingUrl ? (
+                {iv.meetingUrl && /^https?:\/\//i.test(iv.meetingUrl) ? (
                   <a href={iv.meetingUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#2f4fb0", fontWeight: 700 }}>
                     Join
                   </a>
