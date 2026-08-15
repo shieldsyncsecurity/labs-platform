@@ -1,0 +1,46 @@
+name: Deploy HR portal (Cloudflare)
+
+# Auto-deploy the HR Worker on push to master when hr/ changes — push-to-deploy
+# parity with deploy-labs.yml / deploy-enterprise.yml. Runs the SAME command as
+# the manual deploy: `opennextjs-cloudflare build` (= `next build --webpack` —
+# webpack is mandatory; Turbopack breaks OpenNext) then `wrangler deploy` to
+# Worker "shieldsync-hr" (custom domain employee.shieldsyncsecurity.com).
+#
+# GATED ON TESTS: `npm test` (node tests/run.mjs — the payslip/access/time suite)
+# runs first; a failing test blocks the deploy so a regression can't reach prod.
+#
+# Uses the SAME repo secrets as deploy-labs.yml (already configured):
+#   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
+#
+# Worker secrets (HR_ENGINE_SECRET, HR_SESSION_SECRET, COGNITO_CLIENT_SECRET,
+# MS_CLIENT_SECRET) and vars (wrangler.jsonc) live on the Worker — `wrangler
+# deploy` preserves them; this workflow never sets or reads them. The HR ENGINE
+# (AWS Lambda) is NOT deployed here — that's engine/deploy/deploy-hr.ps1, and an
+# engine-only commit doesn't touch hr/ so it won't trigger this.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "hr/**"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hr
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Test (blocks the deploy on failure)
+        run: npm test
+      - name: Build (webpack) + deploy to Cloudflare
+        run: npm run cf:deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -27,7 +27,9 @@ export const COMPANY = {
   // HR correspondence address — used on letters (offer/appointment) so replies
   // and acceptances route to HR (the hr@ mailbox is the EA's portal seat), not
   // the general info@ inbox.
-  hrEmail: "hr@shieldsyncsecurity.com",
+  // hr@ does not exist as a mailbox — replies to it bounce. Everything
+  // people are invited to reply to must be a real inbox.
+  hrEmail: "info@shieldsyncsecurity.com",
   phone: "+91 97174 33114",
   website: "www.shieldsyncsecurity.com",
   // The letterhead location line, exactly as it appears on signed documents.
@@ -56,8 +58,8 @@ export function gstin(): string | null {
 // Default authorised signatory block (from the signed appointment letter and
 // payslips). Overridable per document if a different person signs.
 export const DEFAULT_SIGNATORY = {
-  name: "Ms. Rachna",
-  designation: "HR Director",
+  name: "Himanshu",
+  designation: "Founder",
 } as const;
 
 // Document reference schemes, matching the company's existing numbering.

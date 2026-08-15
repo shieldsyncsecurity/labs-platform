@@ -1,5 +1,8 @@
 import Link from "next/link";
 import { hrFetch } from "@/lib/server/hr-engine";
+import { getViewer } from "@/lib/server/hr-access";
+import { restrictedSeqs } from "@/lib/server/employee-view";
+import { fmtDetail } from "@/lib/audit-format";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Audit log — ShieldSync HR", robots: { index: false, follow: false } };
@@ -17,7 +20,26 @@ const ACTION_LABEL: Record<string, string> = {
   "kyc.delete": "Deleted KYC document",
   "doc.generate": "Issued document",
   "doc.email": "Emailed document",
+  "doc.pdf": "Downloaded PDF",
   "audit.export": "Exported audit log",
+  "data.export": "Exported data backup",
+  "employee.convert": "Converted intern to full-time",
+  "candidate.create": "Added candidate",
+  "candidate.update": "Updated candidate",
+  "candidate.delete": "Deleted candidate + responses",
+  "candidate.link": "Issued questionnaire link",
+  "candidate.invite": "Emailed questionnaire link",
+  "candidate.hire": "Hired candidate",
+  "questionnaire.view": "Candidate opened questionnaire",
+  "questionnaire.submit": "Candidate submitted questionnaire",
+  "doc.delete": "Withdrew issued document",
+  "doc.accept": "Offer accepted online",
+  "doc.accept.void": "Voided an acceptance",
+  "employee.self-pin.set": "Issued self-serve PIN",
+  "employee.visibility": "Changed record visibility",
+  "access.update": "Changed someone's permissions",
+  "self.login.success": "Self-serve sign-in",
+  "self.login.fail": "Failed self-serve sign-in",
 };
 
 function fmtWhen(iso?: string): string {
@@ -26,19 +48,32 @@ function fmtWhen(iso?: string): string {
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function fmtDetail(detail?: Record<string, unknown>): string {
-  if (!detail) return "";
-  return Object.entries(detail)
-    .filter(([, v]) => v !== undefined && v !== null && v !== "")
-    .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
-    .join(" · ");
-}
-
 export default async function AuditPage() {
+  const { isAdmin, access } = await getViewer();
+  const showSalary = isAdmin || access.seeSalary;
   let audit: AuditEvent[] = [];
   let error: string | null = null;
   try {
     audit = (await hrFetch<{ audit: AuditEvent[] }>("/hr/audit", { query: { limit: 200 } })).audit ?? [];
+    // Audit targets are "<seq>/<docId>" or an employeeId, so rows about an
+    // administrator-only record would name it (and its documents) to any staff
+    // member with audit:read — the record-level restriction has to hold here too.
+    if (!isAdmin) {
+      const { seqs, hideAll } = await restrictedSeqs({ actor: null, isAdmin, access });
+      const hidden = hideAll ? null : seqs;
+      if (hidden === null) {
+        audit = [];
+      } else if (hidden.size > 0) {
+        audit = audit.filter((a) => {
+          const target = String(a.target ?? "");
+          const seqPrefix = Number(target.split("/")[0]);
+          if (Number.isInteger(seqPrefix) && hidden.has(seqPrefix)) return false;
+          // employeeId form (SSS/EMP/0008) — match on the padded seq.
+          const idMatch = target.match(/SSS\/EMP\/(\d+)/);
+          return !(idMatch && hidden.has(Number(idMatch[1])));
+        });
+      }
+    }
   } catch {
     error =
       process.env.NODE_ENV !== "production"
@@ -54,12 +89,25 @@ export default async function AuditPage() {
           <h1 style={{ fontSize: 20, fontWeight: 800, color: "#1f3a5f", marginTop: 6 }}>Audit log</h1>
           <p style={{ fontSize: 12.5, color: "#5b6676" }}>Every action in the portal — who did what, when. Most recent first (last 200).</p>
         </div>
-        <a
-          href="/api/audit/export"
-          style={{ fontSize: 12.5, fontWeight: 700, color: "#1f3a5f", border: "1px solid #c3cee0", borderRadius: 8, padding: "7px 12px", textDecoration: "none", whiteSpace: "nowrap" }}
-        >
-          Export CSV
-        </a>
+        <div style={{ display: "flex", gap: 8 }}>
+          <a
+            href="/api/audit/export"
+            style={{ fontSize: 12.5, fontWeight: 700, color: "#1f3a5f", border: "1px solid #c3cee0", borderRadius: 8, padding: "7px 12px", textDecoration: "none", whiteSpace: "nowrap" }}
+          >
+            Export CSV
+          </a>
+          {/* The full backup is administrator-only (it contains every salary
+              and every issued snapshot) — don't offer staff a button that 403s. */}
+          {isAdmin ? (
+            <a
+              href="/api/export"
+              title="Full JSON backup: employees, issued-document snapshots, KYC metadata, audit trail"
+              style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", background: "#1f3a5f", border: "none", borderRadius: 8, padding: "8px 12px", textDecoration: "none", whiteSpace: "nowrap" }}
+            >
+              Full data backup
+            </a>
+          ) : null}
+        </div>
       </div>
 
       {error ? (
@@ -84,7 +132,7 @@ export default async function AuditPage() {
                 <td style={{ padding: "8px 10px", color: "#1b2331" }}>{a.actor}</td>
                 <td style={{ padding: "8px 10px", color: "#1f3a5f", fontWeight: 600 }}>{ACTION_LABEL[a.action ?? ""] ?? a.action}</td>
                 <td style={{ padding: "8px 10px", color: "#5b6676", fontFamily: "monospace", fontSize: 11.5 }}>{a.target}</td>
-                <td style={{ padding: "8px 10px", color: "#8a94a3" }}>{fmtDetail(a.detail)}</td>
+                <td style={{ padding: "8px 10px", color: "#8a94a3" }}>{fmtDetail(a.detail, showSalary)}</td>
               </tr>
             ))}
           </tbody>

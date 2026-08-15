@@ -35,6 +35,7 @@
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAudit/index/*",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntLeads",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntDocs",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntMembers",
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncEntAzureSpPool"
       ]
     },
@@ -97,6 +98,12 @@
       "Effect": "Allow",
       "Action": "cloudtrail:LookupEvents",
       "Resource": "*"
+    },
+    {
+      "Sid": "CognitoProvisionEmployerLogins",
+      "Effect": "Allow",
+      "Action": ["cognito-idp:AdminCreateUser", "cognito-idp:AdminGetUser"],
+      "Resource": "arn:aws:cognito-idp:us-east-1:750294427884:userpool/us-east-1_54vIGJe4R"
     }
   ]
 }

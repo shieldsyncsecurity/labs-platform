@@ -157,7 +157,7 @@ console.log("  Lifecycle: noncurrent versions expire after 30 days.");
 // PAN / bank / salary / snapshots / audit deserve the same auditable, revocable
 // key as the KYC files — not the AWS-owned default.
 const ddb = new DynamoDBClient({ region: REGION, credentials });
-for (const table of ["ShieldSyncHrEmployees", "ShieldSyncHrDocuments", "ShieldSyncHrAudit"]) {
+for (const table of ["ShieldSyncHrEmployees", "ShieldSyncHrDocuments", "ShieldSyncHrAudit", "ShieldSyncHrCandidates", "ShieldSyncHrBanking"]) {
   try {
     const d = await ddb.send(new DescribeTableCommand({ TableName: table }));
     const sse = d.Table?.SSEDescription;

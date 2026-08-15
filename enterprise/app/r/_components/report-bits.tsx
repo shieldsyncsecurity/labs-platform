@@ -28,7 +28,7 @@ export function ReportShell({
   return (
     <div className="flex min-h-screen flex-col bg-canvas">
       <header className="sticky top-0 z-40 border-b border-line/80 bg-canvas/85 backdrop-blur-md">
-        <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-5 sm:px-6 lg:px-8">
+        <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-5 sm:px-6 lg:px-8">
           <Logo href="/" />
           <div className="flex items-center gap-3">
             <span className="hidden items-center gap-1.5 text-xs font-medium text-muted sm:inline-flex">
@@ -46,10 +46,10 @@ export function ReportShell({
       </header>
 
       {ribbon ? (
-        <div className="mx-auto w-full max-w-5xl px-5 pt-6 sm:px-6 lg:px-8">{ribbon}</div>
+        <div className="mx-auto w-full max-w-7xl px-5 pt-6 sm:px-6 lg:px-8">{ribbon}</div>
       ) : null}
 
-      <main className="mx-auto w-full max-w-5xl flex-1 px-5 py-10 sm:px-6 sm:py-14 lg:px-8">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-5 py-10 sm:px-6 sm:py-14 lg:px-8">
         {children}
       </main>
 
@@ -327,12 +327,23 @@ export function RankBadge({ rank }: { rank: number }) {
 // this file: only what we can verify is shown, and there is still no /100 or
 // hire/no-hire verdict.
 
+export type ReportSubCheck = {
+  id?: string;
+  label?: string;
+  passed?: boolean;
+};
+
 export type ReportCriterion = {
   id?: string;
   description?: string;
   passed?: boolean;
   unknown?: boolean;
   dimension?: string;
+  /** Per-resource detail behind a criterion. The criterion still passes only
+   *  when ALL of these do (scoring is unchanged) - these exist so a failed
+   *  criterion says WHICH resource was missed instead of just "failed", and so
+   *  partial progress is visible rather than discarded. */
+  subChecks?: ReportSubCheck[];
 };
 
 // Display order + hiring-manager-facing label & meaning for each graded dimension.
@@ -424,6 +435,25 @@ export function CompetencyProfile({ criteria }: { criteria: ReportCriterion[] })
                 >
                   <span className="text-sm text-ink-soft">
                     {c?.description ?? c?.id ?? `Check ${i + 1}`}
+                    {/* Partial progress: show which resource passed and which did
+                        not, so a failed check is actionable instead of opaque.
+                        Only rendered when the sub-checks actually disagree - an
+                        all-pass or all-fail criterion says nothing extra. */}
+                    {Array.isArray(c?.subChecks) &&
+                    c.subChecks.length > 1 &&
+                    c.subChecks.some((x) => x?.passed) &&
+                    c.subChecks.some((x) => !x?.passed) ? (
+                      <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                        {c.subChecks.map((sc, j) => (
+                          <span
+                            key={sc?.id ?? j}
+                            className={`text-[11px] ${sc?.passed ? "text-emerald-700" : "text-rose-700"}`}
+                          >
+                            {sc?.passed ? "✓" : "✗"} {sc?.label ?? sc?.id}
+                          </span>
+                        ))}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="flex-none">
                     <PassBadge passed={c?.passed} unknown={c?.unknown} />

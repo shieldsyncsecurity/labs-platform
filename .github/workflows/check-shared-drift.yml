@@ -1,0 +1,35 @@
+name: Check shared-constant drift (hr <-> billing)
+
+# The company legal block (hr/lib/company.ts <-> billing/lib/company.ts) and the
+# invoice share-token constants (hr/lib/server/inv-token.ts SIGNS <->
+# billing/lib/inv-token.ts VERIFIES) are hand-duplicated across two independently
+# built Workers. This job fails the build if they diverge — before a stale invoice
+# or a 404-ing share link can reach a client. Pure node, no install.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "hr/lib/company.ts"
+      - "billing/lib/company.ts"
+      - "hr/lib/server/inv-token.ts"
+      - "billing/lib/inv-token.ts"
+      - "scripts/check-shared-drift.mjs"
+  pull_request:
+    paths:
+      - "hr/lib/company.ts"
+      - "billing/lib/company.ts"
+      - "hr/lib/server/inv-token.ts"
+      - "billing/lib/inv-token.ts"
+      - "scripts/check-shared-drift.mjs"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/check-shared-drift.mjs

@@ -71,7 +71,10 @@ const SCENES = [
 
 export function ProductTour() {
   const [active, setActive] = useState(0);
-  const [paused, setPaused] = useState(false);
+  // Starts PAUSED on purpose: nothing on this site auto-plays, and an
+  // auto-advancing tour swaps the scene out from under someone still
+  // reading it. The Play control is the deliberate opt-in.
+  const [paused, setPaused] = useState(true);
   const [cycle, setCycle] = useState(0);
   // Resolved once on mount; drives whether the timer ever runs.
   const [reduced, setReduced] = useState(false);
@@ -194,9 +197,17 @@ export function ProductTour() {
         <div
           key={cycle}
           className={
-            !paused ? "pt-progress h-full rounded-full bg-brand" : "h-full rounded-full bg-brand/40"
+            !paused
+              ? "pt-progress h-full rounded-full bg-brand"
+              : "h-full rounded-full bg-brand transition-[width] duration-300"
           }
-          style={{ animationDuration: `${SCENE_MS}ms` }}
+          style={
+            !paused
+              ? { animationDuration: `${SCENE_MS}ms` }
+              : // Paused: show WHERE you are, not a full pale bar that reads as
+                // "finished". Full-strength amber, per the no-pale-controls rule.
+                { width: `${((active + 1) / SCENES.length) * 100}%` }
+          }
         />
       </div>
 

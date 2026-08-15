@@ -34,7 +34,8 @@ export function DateField({ name, label, required, defaultValue }: { name: strin
         {label} {required ? <span style={{ color: "#c0344c" }}>*</span> : null}
       </label>
       <input type="hidden" name={name} value={display} />
-      <input id={name} type="date" value={iso} onChange={(e) => setIso(e.target.value)} style={input} />
+      {/* required on the VISIBLE control — the hidden input is exempt from validation */}
+      <input id={name} type="date" required={required} value={iso} onChange={(e) => setIso(e.target.value)} style={input} />
       {display ? <div style={{ fontSize: 10.5, color: "#8a94a3", marginTop: 3 }}>→ {display}</div> : null}
     </div>
   );

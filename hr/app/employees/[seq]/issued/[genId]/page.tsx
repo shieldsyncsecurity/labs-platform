@@ -1,49 +1,72 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
-import { OfferLetterDoc } from "@/components/OfferLetterDoc";
-import { PayslipDoc } from "@/components/PayslipDoc";
-import { SimpleLetterDoc } from "@/components/SimpleLetterDoc";
-import { InternshipOfferDoc } from "@/components/InternshipOfferDoc";
+import { getViewer } from "@/lib/server/hr-access";
+import { can } from "@/lib/access";
+import { renderIssued } from "@/lib/render-issued";
 import { DocToolbar } from "@/components/DocToolbar";
-import type { OfferLetter } from "@/lib/documents/offer-letter";
-import type { Payslip } from "@/lib/payslip";
-import type { SimpleLetter } from "@/lib/documents/letters";
-import type { InternshipOffer } from "@/lib/documents/internship";
+import { humanizeTitle } from "@/lib/server/pdf";
+import type { Employee } from "@/lib/employee";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Issued document", robots: { index: false, follow: false } };
 
-type Gen = { docType: string; title: string; ref: string; snapshot: unknown };
+type Gen = { docId: string; docType: string; title: string; ref: string; snapshot: unknown };
 
-// Re-render an issued document exactly as it was saved (from its frozen input
-// snapshot — the view components are pure functions of their props).
+/** Documents whose entire content IS pay — reading one is reading a salary. */
+const PAY_DOCTYPES = new Set(["payslip"]);
+
+// Re-render an issued document EXACTLY as archived (the snapshot is the input;
+// the view components are pure). This page is also the print + email surface —
+// what leaves the building is always the archived copy, never a live re-render.
 export default async function IssuedDoc({ params }: { params: Promise<{ seq: string; genId: string }> }) {
   const { seq, genId } = await params;
   let gen: Gen;
+  let employee: Employee | null = null;
   try {
     gen = (await hrFetch<{ gen: Gen }>(`/hr/employees/${seq}/generated/${genId}`)).gen;
   } catch (err) {
     if (err instanceof HrEngineError && err.status === 404) notFound();
     throw err;
   }
-
-  const toolbar = <DocToolbar backHref={`/employees/${seq}`} backLabel="Back to employee" />;
-
-  switch (gen.docType) {
-    case "offer":
-      return <OfferLetterDoc letter={gen.snapshot as OfferLetter} toolbar={toolbar} />;
-    case "payslip":
-      return <PayslipDoc payslip={gen.snapshot as Payslip} toolbar={toolbar} />;
-    case "verification":
-    case "experience":
-    case "leave":
-    case "increment":
-    case "confirmation":
-    case "completion":
-      return <SimpleLetterDoc letter={gen.snapshot as SimpleLetter} toolbar={toolbar} />;
-    case "internship-offer":
-      return <InternshipOfferDoc offer={gen.snapshot as InternshipOffer} toolbar={toolbar} />;
-    default:
-      notFound();
+  try {
+    employee = (await hrFetch<{ employee: Employee }>(`/hr/employees/${seq}`)).employee;
+  } catch {
+    /* employee may have been deleted; the archived doc still renders */
   }
+
+  // An issued PAYSLIP is a pay figure in document form: gross, every deduction,
+  // net. Re-opening one is `documents: read`, which is not the salary
+  // permission — so without this, someone barred from seeing pay on the record
+  // could read all of it from the archived slips instead. Letters that merely
+  // MENTION pay (an offer) are the document-issuer's own work and stay
+  // available; a payslip has no purpose except the numbers.
+  const { isAdmin, access } = await getViewer();
+  if (PAY_DOCTYPES.has(gen.docType) && !(isAdmin || access.seeSalary)) {
+    redirect(`/no-access?area=payroll`);
+  }
+
+  // Withdraw an issued document (e.g. a payslip for the wrong month). Matches the
+  // DELETE route's gate (documents:write); admin always passes. No dead-end: the
+  // button only shows to someone whose DELETE would actually succeed.
+  const canWithdraw = isAdmin || can(access, "documents", "write");
+
+  const toolbar = (
+    <DocToolbar
+      backHref={`/employees/${seq}`}
+      backLabel={employee?.name ?? "Back to employee"}
+      pdfHref={`/api/employees/${seq}/issued/${gen.docId}/pdf`}
+      email={{
+        seq,
+        genId: gen.docId,
+        defaultTo: employee?.personalEmail,
+        defaultSubject: `${humanizeTitle(gen.title || "Document")}${gen.ref ? ` — ${gen.ref}` : ""}`,
+      }}
+      withdraw={{ seq, genId: gen.docId, label: gen.title || gen.docType, ref: gen.ref }}
+      canWithdraw={canWithdraw}
+    />
+  );
+
+  const el = renderIssued(gen.docType, gen.snapshot, toolbar);
+  if (!el) notFound();
+  return el;
 }

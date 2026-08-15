@@ -137,6 +137,7 @@ export async function gradeStoragePublicExposure(ctx) {
     // Correctness — the core objective: is anonymous/public blob access actually stopped?
     {
       id: "no-anonymous-blob-access",
+      domain: "data_protection",
       dimension: "correctness",
       description: "The storage account blocks anonymous/public blob access.",
       passed: noAnonymousPass,
@@ -145,6 +146,7 @@ export async function gradeStoragePublicExposure(ctx) {
     // Security rigor — proper hardening (transport security + identity-based access), not the minimum.
     {
       id: "secure-transfer-required",
+      domain: "data_protection",
       dimension: "rigor",
       description: "Secure transfer (HTTPS-only) is required on the account.",
       passed: httpsOnly === true,
@@ -152,6 +154,7 @@ export async function gradeStoragePublicExposure(ctx) {
     },
     {
       id: "shared-key-access-disabled",
+      domain: "identity",
       dimension: "rigor",
       description: "Shared Key (account-key) access is disabled; data access requires Microsoft Entra ID.",
       passed: sharedKey === false,
@@ -160,6 +163,7 @@ export async function gradeStoragePublicExposure(ctx) {
     // Operational safety — secured the workload without destroying it.
     {
       id: "resources-intact",
+      domain: "data_protection",
       dimension: "operational_safety",
       description: "The storage account still exists (secured, not deleted).",
       passed: accountExists,

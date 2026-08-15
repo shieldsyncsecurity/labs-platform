@@ -192,7 +192,7 @@ export default function OrdersSection({ orgId, orders }: { orgId: string; orders
           No orders recorded for this org yet.
         </p>
       ) : (
-        <div className="mt-4 overflow-x-auto rounded-lg border border-line">
+        <div className="mt-4 overflow-x-auto [mask-image:linear-gradient(to_right,black_calc(100%-40px),transparent)] sm:[mask-image:none] rounded-lg border border-line">
           <table className="w-full min-w-[560px] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-line bg-canvas text-xs uppercase tracking-wide text-muted">

@@ -11,22 +11,44 @@ hands the learner a real-console URL, and tears it all down.
 > this README is just the workspace map + the per-lab contract.
 
 ## Structure
+
+This is a **monorepo**: four independent Next.js apps (each its own Cloudflare Worker +
+custom domain) plus one AWS-Lambda backend (`engine/`) that serves all of them. Each app
+has its own `README.md` — start there for that app's specifics.
+
 ```
 labs-platform/
 ├── README.md
 ├── AUTH_AND_DEPLOY_RUNBOOK.md   # ← operational source of truth (read first)
 ├── H3-LAUNCH-ATOMICITY-SPEC.md  # per-user launch-lock design (implemented)
+├── app/                         # labs storefront — labs.shieldsyncsecurity.com (PAYMENTS-LIVE).
+│                                #   Next.js on Cloudflare Workers (OpenNext). See app/README.md.
+├── hr/                          # HR doc portal — employee.shieldsyncsecurity.com
+│                                #   (offer letters + payslips + KYC). See hr/README.md.
+├── billing/                     # client invoices — billing.shieldsyncsecurity.com. See billing/README.md.
+├── enterprise/                  # B2B assessments — enterprise.shieldsyncsecurity.com. See enterprise/README.md.
+├── engine/                      # AWS Lambda backends for all apps (labs/hr/enterprise Session
+│                                #   Engines) + create-*.mjs table scripts + deploy scripts
+│                                #   (engine/deploy/deploy.ps1, deploy-hr.ps1, deploy-ent.ps1).
+│                                #   See engine/README.md.
 ├── labs/                        # one folder per lab (the scenarios)
 │   └── <slug>/
 │       ├── lab.json             # metadata: name, level, objectives, successCriteria
 │       ├── template.yaml        # CloudFormation — what gets deployed in the sandbox
 │       └── instructions.md      # learner-facing walkthrough (markdown)
-├── engine/                      # the Session Engine — Lambda (handler.mjs + labinfra.mjs
-│                                #   + graders.mjs) deployed via deploy/deploy.ps1; dev/test
-│                                #   helpers (load-test-waitroom, demo-waitroom, try-*)
-├── app/                         # the labs.shieldsyncsecurity.com Next.js app (Cloudflare Worker)
-└── infra/                       # SCPs + aws-nuke config (reference; teardown generates per-acct)
+├── docs/                        # design specs, runbooks, build plans, UI mockups
+├── scripts/                     # repo-level maintenance (e.g. sync-lab-settings.mjs)
+├── infra/                       # SCPs + aws-nuke config (reference; teardown generates per-acct)
+└── .github/workflows/           # push-to-deploy: deploy-labs / deploy-hr / deploy-billing /
+                                 #   deploy-enterprise (.yml) — each redeploys its Worker on a
+                                 #   push to master that touches that app's folder
 ```
+
+> **The Worker apps deploy themselves.** A push to `master` that touches `app/`, `hr/`,
+> `billing/`, or `enterprise/` triggers the matching `.github/workflows/deploy-*.yml`
+> (build with `next build --webpack` via OpenNext, then `wrangler deploy`). The `engine/`
+> Lambdas are the exception — they are **not** in CI; deploy them with the PowerShell
+> scripts in `engine/deploy/` (see `engine/README.md`).
 
 > **Vending is DIY, not Innovation Sandbox.** We build the Session Engine *as* the
 > vending/isolation/cleanup control plane on free AWS primitives (Organizations + SCPs +

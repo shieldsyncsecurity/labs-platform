@@ -1,6 +1,6 @@
 // LOCAL DEV HR engine (no AWS). A tiny dependency-free Node HTTP server that
 // implements the same /hr/* contract the production ShieldSyncHrEngine Lambda
-// will serve, backed by a JSON file in the OS temp dir. Lets the HR portal run
+// will serve, backed by a JSON file INSIDE THE REPO. Lets the HR portal run
 // end-to-end on localhost before any AWS provisioning.
 //
 //   node engine/hr-server.mjs           # listens on :4002
@@ -9,27 +9,132 @@
 // authenticates with x-engine-token: HR_ENGINE_SECRET (dev value below).
 // NOTE: this is DEV-ONLY scaffolding; prod data lives in DynamoDB + S3 (SSE-KMS)
 // via the Lambda — never this file store.
+//
+// STORAGE LOCATION: deliberately NOT os.tmpdir() — Windows periodically wipes
+// %TEMP%, which silently destroyed a real candidate's data once (2026-07-24).
+// Everything dev-only lives under engine/.dev-data/ instead, which persists
+// across reboots and %TEMP% cleanups. It's git-ignored (see .gitignore) so it
+// never gets committed, but it survives on disk like any other project file.
 
 import http from "node:http";
-import os from "node:os";
 import path from "node:path";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { createHash } from "node:crypto";
+
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 const PORT = Number(process.env.HR_ENGINE_PORT ?? 4002);
 const SECRET = process.env.HR_ENGINE_SECRET ?? "dev-hr-engine-secret";
-const DB = path.join(os.tmpdir(), "shieldsync-hr-dev-store.json");
-// KYC bytes live here in dev (prod: the SSE-KMS S3 bucket). Kept OUT of the repo.
-const KYC_DIR = path.join(os.tmpdir(), "shieldsync-hr-kyc");
+// Overridable so the E2E suite can run against a throwaway directory instead of
+// the developer's working data — a test that wipes your real dev store to prove
+// a point is a test nobody runs twice.
+const DEV_DATA_DIR = process.env.HR_DEV_DATA_DIR || path.join(import.meta.dirname, ".dev-data");
+mkdirSync(DEV_DATA_DIR, { recursive: true });
+const DB = path.join(DEV_DATA_DIR, "hr-dev-store.json");
+// KYC bytes live here in dev (prod: the SSE-KMS S3 bucket). Kept OUT of git
+// via .gitignore, but IN the project folder so it isn't at the mercy of OS
+// temp-cleanup.
+const KYC_DIR = path.join(DEV_DATA_DIR, "kyc");
 mkdirSync(KYC_DIR, { recursive: true });
+// Simulated emails (no RESEND_API_KEY) are written here as .html so you can
+// open and preview exactly what the recipient would receive.
+const MAIL_DIR = path.join(DEV_DATA_DIR, "mail");
 
+const EMPTY_DB = { employees: [], audit: [], documents: [], candidates: [], banking: [], grants: {}, seq: 7, candidateSeq: 0, refs: { "hr-2026": 14 } }; // next id after Diya (0007)
 function load() {
-  if (!existsSync(DB)) return { employees: [], audit: [], documents: [], seq: 7, refs: { "hr-2026": 14 } }; // next id after Diya (0007)
+  if (!existsSync(DB)) return { ...EMPTY_DB };
   try {
-    return JSON.parse(readFileSync(DB, "utf8"));
+    return { ...EMPTY_DB, ...JSON.parse(readFileSync(DB, "utf8")) };
   } catch {
-    return { employees: [], audit: [], documents: [], seq: 7, refs: { "hr-2026": 14 } };
+    return { ...EMPTY_DB };
   }
+}
+
+// --- questionnaire-link primitives (mirrored in the prod Lambda) ---
+const randomToken = () => randomBytes(24).toString("hex"); // 192-bit, unguessable
+const sha256hex = (s) => createHash("sha256").update(s).digest("hex");
+
+/**
+ * Mirrors publicEmployee() in hr-handler.mjs: the self-serve PIN hash, its salt
+ * and the brute-force counters are login secrets and never leave the engine.
+ */
+const PIN_SECRET_FIELDS = ["selfPinHash", "selfPinSalt", "selfFailedAttempts", "selfLockedUntil"];
+function publicEmployee(item) {
+  if (!item || typeof item !== "object") return item;
+  const out = { ...item };
+  for (const f of PIN_SECRET_FIELDS) delete out[f];
+  // The UI still needs to know WHETHER a PIN exists (to say "set up" vs
+  // "reissue", and to warn before replacing one) — that is a boolean, not a
+  // credential, so it is derived here rather than leaking the hash to infer it.
+  out.hasSelfPin = Boolean(item.selfPinHash);
+  return out;
+}
+
+/** Only an offer can be "accepted" — mirrors hr-handler.mjs. */
+const ACCEPTABLE_DOCTYPES = new Set(["offer", "internship-offer"]);
+
+// Mirrors the same function in hr-handler.mjs (the prod Lambda) — see there for
+// why the layout is table-based with everything inlined, and why every
+// interpolation is escaped. (http://localhost is allowed for the CTA here, and
+// ONLY here, so the accept button is previewable in dev; prod is https-only.)
+const esc = (s) =>
+  String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+function documentEmailHtml({ recipientName, subjectLine, note, cta }) {
+  const navy = "#1f3a5f";
+  const muted = "#5b6676";
+  const ctaUrl = cta && typeof cta.url === "string" && /^(https:\/\/|http:\/\/localhost)/i.test(cta.url) ? cta.url : null;
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#eef2f8;font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f8;padding:24px 0;">
+<tr><td align="center">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #d9dfea;">
+<tr><td style="background:${navy};padding:20px 28px;">
+<span style="color:#ffffff;font-size:18px;font-weight:700;">ShieldSync Security</span><br>
+<span style="color:#c7d2e6;font-size:12px;">Empowering Cybersecurity Futures</span>
+</td></tr>
+<tr><td style="padding:28px;">
+<p style="margin:0 0 16px;color:#1b2331;font-size:14px;line-height:1.6;">Dear ${esc(recipientName)},</p>
+<p style="margin:0 0 16px;color:#1b2331;font-size:14px;line-height:1.6;">Please find your document attached:</p>
+<p style="margin:0 0 20px;padding:12px 16px;background:#f4f7fb;border-left:3px solid ${navy};color:${navy};font-size:14px;font-weight:700;">${esc(subjectLine)}</p>
+${note ? `<p style="margin:0 0 16px;padding:12px 16px;background:#fdf4e3;border-left:3px solid #c99a2e;color:#7a5714;font-size:13px;line-height:1.6;">${esc(note)}</p>` : ""}
+${ctaUrl ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 22px;"><tr><td style="border-radius:8px;background:${navy};">
+<a href="${esc(ctaUrl)}" style="display:inline-block;padding:13px 30px;color:#ffffff;font-size:14.5px;font-weight:700;text-decoration:none;">${esc(cta.label)}</a>
+</td></tr></table>` : ""}
+<p style="margin:0 0 8px;color:#1b2331;font-size:14px;line-height:1.6;">If you have any questions, just reply to this email or write to
+<a href="mailto:info@shieldsyncsecurity.com" style="color:${navy};">info@shieldsyncsecurity.com</a>.</p>
+<p style="margin:24px 0 0;color:#1b2331;font-size:14px;line-height:1.6;">Regards,<br>ShieldSync Security Private Limited</p>
+</td></tr>
+<tr><td style="padding:16px 28px;border-top:1px solid #eef2f7;">
+<p style="margin:0;color:${muted};font-size:11px;line-height:1.6;">This is an automated message from the ShieldSync HR portal. Please do not share this email or its attachment with anyone other than the intended recipient.</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>`;
+}
+function timingSafeEqualHex(a, b) {
+  const ba = Buffer.from(String(a), "hex");
+  const bb = Buffer.from(String(b), "hex");
+  return ba.length === bb.length && timingSafeEqual(ba, bb);
+}
+/** What the PUBLIC token surface may return — never the whole record. */
+function publicCandidate(c) {
+  return {
+    name: c.name,
+    roleAppliedFor: c.roleAppliedFor,
+    questionnaireRole: c.questionnaireRole,
+    submittedAt: c.submittedAt,
+    answers: c.submittedAt ? c.answers : undefined,
+    // Filename only — so the form can show "uploaded ✓" if they come back.
+    salaryProofName: c.salaryProof?.fileName,
+    expiresAt: c.tokenExpiresAt,
+    // If the HR user tailored the questionnaire for this candidate, the
+    // public page uses that snapshot instead of loading the default from code.
+    customQuestionnaire: c.customQuestionnaire,
+  };
 }
 function save(db) {
   writeFileSync(DB, JSON.stringify(db, null, 2));
@@ -108,7 +213,7 @@ const server = http.createServer(async (req, res) => {
     // /hr/employees
     if (parts[0] === "hr" && parts[1] === "employees" && parts.length === 2) {
       if (req.method === "GET") {
-        return send(res, 200, { employees: db.employees });
+        return send(res, 200, { employees: db.employees.map(publicEmployee) });
       }
       if (req.method === "POST") {
         const body = await readBody(req);
@@ -125,7 +230,7 @@ const server = http.createServer(async (req, res) => {
         db.seq = seq;
         audit(db, body.actor, "employee.create", employee.employeeId, { name: employee.name });
         save(db);
-        return send(res, 200, { employee });
+        return send(res, 200, { employee: publicEmployee(employee) });
       }
     }
 
@@ -135,7 +240,7 @@ const server = http.createServer(async (req, res) => {
       const idx = db.employees.findIndex((e) => e.seq === seq);
       if (req.method === "GET") {
         if (idx < 0) return send(res, 404, { error: "NOT_FOUND" });
-        return send(res, 200, { employee: db.employees[idx] });
+        return send(res, 200, { employee: publicEmployee(db.employees[idx]) });
       }
       if (req.method === "PUT") {
         if (idx < 0) return send(res, 404, { error: "NOT_FOUND" });
@@ -155,6 +260,11 @@ const server = http.createServer(async (req, res) => {
           // never silently reactivate an exited employee).
           status: cur.status ?? "active",
           lastWorkingDay: cur.lastWorkingDay,
+          // Engine-owned credential fields — see the prod handler for why.
+          selfPinHash: cur.selfPinHash,
+          selfPinSalt: cur.selfPinSalt,
+          selfFailedAttempts: cur.selfFailedAttempts,
+          selfLockedUntil: cur.selfLockedUntil,
           createdAt: cur.createdAt,
           updatedAt: new Date().toISOString(),
         };
@@ -162,7 +272,7 @@ const server = http.createServer(async (req, res) => {
         const grossChanged = cur.grossMonthly !== updated.grossMonthly;
         audit(db, body.actor, "employee.update", updated.employeeId, grossChanged ? { grossFrom: cur.grossMonthly, grossTo: updated.grossMonthly } : {});
         save(db);
-        return send(res, 200, { employee: updated });
+        return send(res, 200, { employee: publicEmployee(updated) });
       }
       if (req.method === "DELETE") {
         if (idx < 0) return send(res, 404, { error: "NOT_FOUND" });
@@ -184,24 +294,77 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // /hr/employees/:seq/status — offboard / reactivate (partial merge)
+    // Positive-integer seq guard (parity with the Lambda's counter protection).
+    if (parts[0] === "hr" && parts[1] === "employees" && parts.length >= 3) {
+      const s = Number(parts[2]);
+      if (!Number.isInteger(s) || s <= 0) return send(res, 404, { error: "NOT_FOUND" });
+    }
+
+    // /hr/employees/:seq/status — offboard / reactivate (touches ONLY these fields)
     if (parts[0] === "hr" && parts[1] === "employees" && parts[3] === "status" && parts.length === 4 && req.method === "POST") {
       const seq = Number(parts[2]);
       const idx = db.employees.findIndex((e) => e.seq === seq);
       if (idx < 0) return send(res, 404, { error: "NOT_FOUND" });
       const body = await readBody(req);
       const status = body.status === "exited" ? "exited" : "active";
-      db.employees[idx] = {
-        ...db.employees[idx],
-        status,
-        lastWorkingDay: status === "exited" ? body.lastWorkingDay || db.employees[idx].lastWorkingDay || "" : undefined,
-        updatedAt: new Date().toISOString(),
-      };
+      const cur = db.employees[idx];
+      cur.status = status;
+      if (status === "exited") cur.lastWorkingDay = body.lastWorkingDay || "";
+      else delete cur.lastWorkingDay;
+      cur.updatedAt = new Date().toISOString();
+      db.employees[idx] = cur;
       audit(db, body.actor, status === "exited" ? "employee.offboard" : "employee.reactivate", db.employees[idx].employeeId, {
         lastWorkingDay: db.employees[idx].lastWorkingDay,
       });
       save(db);
-      return send(res, 200, { employee: db.employees[idx] });
+      return send(res, 200, { employee: publicEmployee(db.employees[idx]) });
+    }
+
+    // /hr/employees/:seq/self-pin — admin sets/resets the self-serve PIN (dev mirror of the Lambda route)
+    if (parts[0] === "hr" && parts[1] === "employees" && parts[3] === "self-pin" && parts.length === 4 && req.method === "POST") {
+      const seq = Number(parts[2]);
+      const idx = db.employees.findIndex((e) => e.seq === seq);
+      if (idx < 0) return send(res, 404, { error: "NOT_FOUND" });
+      const body = await readBody(req);
+      const pin = String(body.pin ?? "").trim();
+      if (!/^\d{4,8}$/.test(pin)) return send(res, 400, { error: "BAD_PIN" });
+      const salt = randomBytes(16).toString("hex");
+      db.employees[idx].selfPinHash = sha256hex(salt + pin);
+      db.employees[idx].selfPinSalt = salt;
+      db.employees[idx].selfFailedAttempts = 0;
+      delete db.employees[idx].selfLockedUntil;
+      db.employees[idx].updatedAt = new Date().toISOString();
+      audit(db, body.actor, "employee.self-pin.set", db.employees[idx].employeeId, {});
+      save(db);
+      return send(res, 200, { ok: true });
+    }
+
+    // /hr/self/login — PUBLIC self-serve surface, Employee ID + PIN (dev mirror)
+    if (parts[0] === "hr" && parts[1] === "self" && parts[2] === "login" && parts.length === 3 && req.method === "POST") {
+      const body = await readBody(req);
+      const m = /^SSS\/EMP\/(\d+)$/i.exec(String(body.employeeId ?? "").trim());
+      const pin = String(body.pin ?? "").trim();
+      if (!m || !pin) return send(res, 401, { error: "INVALID" });
+      const seq = Number(m[1]);
+      const idx = db.employees.findIndex((e) => e.seq === seq);
+      const emp = idx >= 0 ? db.employees[idx] : null;
+      if (!emp || !emp.selfPinHash) return send(res, 401, { error: "INVALID" });
+      if (emp.selfLockedUntil && new Date(emp.selfLockedUntil) > new Date()) {
+        return send(res, 423, { error: "LOCKED", until: emp.selfLockedUntil });
+      }
+      const ok = timingSafeEqualHex(emp.selfPinHash, sha256hex((emp.selfPinSalt || "") + pin));
+      if (!ok) {
+        emp.selfFailedAttempts = (emp.selfFailedAttempts || 0) + 1;
+        if (emp.selfFailedAttempts >= 5) emp.selfLockedUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+        audit(db, "self-serve", "self.login.fail", emp.employeeId, { attempts: emp.selfFailedAttempts });
+        save(db);
+        return send(res, 401, { error: "INVALID" });
+      }
+      emp.selfFailedAttempts = 0;
+      delete emp.selfLockedUntil;
+      audit(db, "self-serve", "self.login.success", emp.employeeId, {});
+      save(db);
+      return send(res, 200, { seq, name: emp.name });
     }
 
     // /hr/employees/:seq/docs (KYC) — dev store: metadata in JSON, bytes in KYC_DIR
@@ -314,7 +477,7 @@ const server = http.createServer(async (req, res) => {
       if (parts.length === 4 && req.method === "GET") {
         const list = db.documents
           .filter((d) => d.employeeSeq === seq && d.category === "generated")
-          .map(({ docId, docType, title, ref, generatedBy, generatedAt }) => ({ docId, docType, title, ref, generatedBy, generatedAt }))
+          .map(({ docId, docType, title, ref, generatedBy, generatedAt, acceptedAt }) => ({ docId, docType, title, ref, generatedBy, generatedAt, acceptedAt: acceptedAt ?? null }))
           .sort((a, b) => (a.generatedAt < b.generatedAt ? 1 : -1));
         return send(res, 200, { generated: list });
       }
@@ -325,6 +488,56 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, {
           gen: { docId: d.docId, docType: d.docType, title: d.title, ref: d.ref, generatedBy: d.generatedBy, generatedAt: d.generatedAt, snapshot: JSON.parse(d.snapshotJson || "{}") },
         });
+      }
+
+      // Acceptance acknowledgment (mirrors the prod Lambda) — first accept
+      // wins, offers only.
+      if (parts.length === 6 && parts[5] === "accept" && req.method === "GET") {
+        const d = db.documents.find((x) => x.employeeSeq === seq && x.docId === parts[4] && x.category === "generated");
+        if (!d || !ACCEPTABLE_DOCTYPES.has(d.docType)) return send(res, 404, { error: "NOT_FOUND" });
+        return send(res, 200, { docType: d.docType, title: d.title, ref: d.ref, acceptedAt: d.acceptedAt || null });
+      }
+      if (parts.length === 6 && parts[5] === "accept" && req.method === "POST") {
+        const body = await readBody(req);
+        const d = db.documents.find((x) => x.employeeSeq === seq && x.docId === parts[4] && x.category === "generated");
+        if (!d || !ACCEPTABLE_DOCTYPES.has(d.docType)) return send(res, 404, { error: "NOT_FOUND" });
+        if (!d.acceptedAt) {
+          const acceptedName = String(body.acceptedName ?? "").trim().slice(0, 120);
+          d.acceptedAt = new Date().toISOString();
+          d.acceptedIp = body.ip || "";
+          d.acceptedName = acceptedName;
+          audit(db, "self-serve", "doc.accept", `${seq}/${parts[4]}`, { docType: d.docType, ref: d.ref, acceptedName });
+          save(db);
+          console.log(`[hr:dev] accept notify — ${d.docType} ${d.ref} for employeeSeq ${seq}, name "${acceptedName}" (no email in dev)`);
+        }
+        return send(res, 200, { ok: true, acceptedAt: d.acceptedAt });
+      }
+      // Void an acceptance recorded in error (mirrors the prod Lambda).
+      if (parts.length === 6 && parts[5] === "accept" && req.method === "DELETE") {
+        const body = await readBody(req);
+        const d = db.documents.find((x) => x.employeeSeq === seq && x.docId === parts[4] && x.category === "generated");
+        if (!d) return send(res, 404, { error: "NOT_FOUND" });
+        audit(db, body.actor, "doc.accept.void", `${seq}/${parts[4]}`, {
+          ref: d.ref, voidedAcceptedAt: d.acceptedAt ?? null, voidedAcceptedName: d.acceptedName ?? null,
+        });
+        delete d.acceptedAt;
+        delete d.acceptedIp;
+        delete d.acceptedName;
+        save(db);
+        return send(res, 200, { ok: true });
+      }
+
+      // Withdraw an issued document (mirrors the prod Lambda) — audited WITH
+      // the ref so a gap in the series is always traceable to a decision.
+      if (parts.length === 5 && req.method === "DELETE") {
+        const body = await readBody(req);
+        const i = db.documents.findIndex((x) => x.employeeSeq === seq && x.docId === parts[4] && x.category === "generated");
+        if (i < 0) return send(res, 404, { error: "NOT_FOUND" });
+        const d = db.documents[i];
+        db.documents.splice(i, 1);
+        audit(db, body.actor, "doc.delete", `${seq}/${parts[4]}`, { docType: d.docType, ref: d.ref, title: d.title });
+        save(db);
+        return send(res, 200, { ok: true });
       }
     }
 
@@ -337,17 +550,29 @@ const server = http.createServer(async (req, res) => {
       if (bytes.length === 0 || bytes.length > MAX_KYC) return send(res, 400, { error: bytes.length ? "TOO_LARGE" : "EMPTY" });
       if (sniffType(bytes) !== "application/pdf") return send(res, 400, { error: "PDF_ONLY" });
 
+      // Same pre-send validation as prod (hr-handler.mjs): reject a bogus seq
+      // rather than archiving the sent copy under employeeSeq 0, where no docs
+      // listing would ever surface it. Without this, a caller tested only
+      // against this dev engine passes here and 502s in production.
+      const seqCheck = Number(body.employeeSeq);
+      if (!Number.isInteger(seqCheck) || seqCheck <= 0) return send(res, 400, { error: "BAD_SEQ" });
+      if (!db.employees.some((e) => e.seq === seqCheck)) return send(res, 404, { error: "EMPLOYEE_NOT_FOUND" });
+
       const key = process.env.RESEND_API_KEY;
       let delivery = { simulated: true };
       if (key) {
+        const recipientEmp = db.employees.find((e) => e.seq === Number(body.employeeSeq));
+        const recipientName = (recipientEmp?.name || "").split(/\s+/)[0] || "there";
+        const subjectLine = body.subject || "Document from ShieldSync HR";
         const r = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
           body: JSON.stringify({
             from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
             to: [to],
-            subject: body.subject || "Document from ShieldSync HR",
-            text: body.bodyText || "Please find the attached document.\n\n— ShieldSync Security Private Limited (HR)",
+            subject: subjectLine,
+            text: body.bodyText || `Dear ${recipientName},\n\nPlease find your document attached: ${subjectLine}.\n\nRegards,\nShieldSync Security Private Limited`,
+            html: documentEmailHtml({ recipientName, subjectLine, note: body.note, cta: body.cta }),
             attachments: [{ filename: body.fileName || "document.pdf", content: bytes.toString("base64") }],
           }),
         });
@@ -378,10 +603,422 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, ...delivery });
     }
 
+    // ---------------- CANDIDATES (hiring records — NOT employees) ----------------
+    // /hr/candidates
+    if (parts[0] === "hr" && parts[1] === "candidates" && parts.length === 2) {
+      if (req.method === "GET") return send(res, 200, { candidates: db.candidates });
+      if (req.method === "POST") {
+        const body = await readBody(req);
+        const seq = (db.candidateSeq || 0) + 1;
+        const now = new Date().toISOString();
+        const candidate = {
+          ...body.candidate,
+          candidateId: `SSS/CAND/${String(seq).padStart(4, "0")}`,
+          seq,
+          createdAt: now,
+          updatedAt: now,
+        };
+        db.candidates.push(candidate);
+        db.candidateSeq = seq;
+        audit(db, body.actor, "candidate.create", candidate.candidateId, { name: candidate.name, role: candidate.roleAppliedFor });
+        save(db);
+        return send(res, 200, { candidate });
+      }
+    }
+
+    // /hr/candidates/:seq  (+ /token, /submit)
+    if (parts[0] === "hr" && parts[1] === "candidates" && parts.length >= 3) {
+      const seq = Number(parts[2]);
+      if (!Number.isInteger(seq) || seq <= 0) return send(res, 404, { error: "NOT_FOUND" });
+      const idx = db.candidates.findIndex((c) => c.seq === seq);
+      if (idx < 0) return send(res, 404, { error: "NOT_FOUND" });
+      const cur = db.candidates[idx];
+
+      if (parts.length === 3 && req.method === "GET") return send(res, 200, { candidate: cur });
+
+      if (parts.length === 3 && req.method === "PUT") {
+        const body = await readBody(req);
+        // Token/submission state is engine-owned — a form PUT can never forge it.
+        const updated = {
+          ...cur,
+          ...body.candidate,
+          seq,
+          candidateId: cur.candidateId,
+          tokenHash: cur.tokenHash,
+          tokenIssuedAt: cur.tokenIssuedAt,
+          tokenExpiresAt: cur.tokenExpiresAt,
+          questionnaireSentTo: cur.questionnaireSentTo,
+          questionnaireSentAt: cur.questionnaireSentAt,
+          submittedAt: cur.submittedAt,
+          answers: cur.answers,
+          // Open tracking is engine-owned too — editing a candidate's details
+          // must not silently reset the evidence of whether they opened the link.
+          firstViewedAt: cur.firstViewedAt,
+          lastViewedAt: cur.lastViewedAt,
+          viewCount: cur.viewCount,
+          createdAt: cur.createdAt,
+          updatedAt: new Date().toISOString(),
+        };
+        db.candidates[idx] = updated;
+        audit(db, body.actor, "candidate.update", updated.candidateId, { outcome: updated.outcome });
+        save(db);
+        return send(res, 200, { candidate: updated });
+      }
+
+      if (parts.length === 3 && req.method === "DELETE") {
+        const body = await readBody(req);
+        // Erasure must take the uploaded bytes with it — the form promises it.
+        if (cur.salaryProof) {
+          try {
+            unlinkSync(path.join(KYC_DIR, cur.salaryProof.docId));
+          } catch {}
+        }
+        db.candidates.splice(idx, 1);
+        audit(db, body.actor, "candidate.delete", cur.candidateId, { name: cur.name, removedProof: Boolean(cur.salaryProof) });
+        save(db);
+        return send(res, 200, { ok: true });
+      }
+
+      // /hr/candidates/:seq/proof — HR-side download of the salary proof.
+      if (parts[3] === "proof" && parts.length === 4 && req.method === "GET") {
+        if (!cur.salaryProof) return send(res, 404, { error: "NOT_FOUND" });
+        let bytes;
+        try {
+          bytes = readFileSync(path.join(KYC_DIR, cur.salaryProof.docId));
+        } catch {
+          return send(res, 404, { error: "NOT_FOUND" });
+        }
+        audit(db, url.searchParams.get("actor") ?? "unknown", "candidate.proof.download", cur.candidateId, { fileName: cur.salaryProof.fileName });
+        save(db);
+        return send(res, 200, { ...cur.salaryProof, base64: bytes.toString("base64") });
+      }
+
+      // /hr/candidates/:seq/token — issue (or re-issue) the questionnaire link.
+      if (parts[3] === "token" && parts.length === 4 && req.method === "POST") {
+        const body = await readBody(req);
+        const secret = randomToken();
+        const now = new Date();
+        const expires = new Date(now.getTime() + (Number(body.validDays) || 14) * 86400000);
+        cur.tokenHash = sha256hex(secret);
+        cur.tokenIssuedAt = now.toISOString();
+        cur.tokenExpiresAt = expires.toISOString();
+        cur.updatedAt = now.toISOString();
+        db.candidates[idx] = cur;
+        audit(db, body.actor, "candidate.link", cur.candidateId, { expiresAt: cur.tokenExpiresAt });
+        save(db);
+        // The RAW token is returned exactly once — only its hash is stored.
+        return send(res, 200, { token: `${seq}.${secret}`, expiresAt: cur.tokenExpiresAt });
+      }
+
+      // ---- /hr/candidates/:seq/token DELETE — kill a link already sent ----
+      // Deletes the hash rather than back-dating the expiry, so a revoked link
+      // is indistinguishable from an expired one and no token can match it.
+      // Submitted answers are deliberately untouched.
+      if (parts[3] === "token" && parts.length === 4 && req.method === "DELETE") {
+        const body = await readBody(req);
+        delete cur.tokenHash;
+        delete cur.tokenIssuedAt;
+        delete cur.tokenExpiresAt;
+        cur.updatedAt = new Date().toISOString();
+        db.candidates[idx] = cur;
+        audit(db, body.actor, "candidate.link.revoke", cur.candidateId, {
+          hadSubmitted: Boolean(cur.submittedAt),
+          sentTo: cur.questionnaireSentTo ?? null,
+        });
+        save(db);
+        return send(res, 200, { ok: true });
+      }
+
+      // ---- /hr/candidates/:seq/interviews — mirrors the Lambda ----
+      if (parts[3] === "interviews" && parts.length === 4 && req.method === "POST") {
+        const body = await readBody(req);
+        const iv = {
+          id: `iv_${Date.now()}_${Math.floor(Math.random() * 1e6)}`,
+          createdAt: new Date().toISOString(),
+          createdBy: body.actor || "unknown",
+          ...body.interview,
+        };
+        cur.interviews = [...(cur.interviews ?? []), iv].sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1));
+        cur.updatedAt = new Date().toISOString();
+        db.candidates[idx] = cur;
+        audit(db, body.actor, "interview.schedule", cur.candidateId, {
+          startsAt: iv.startsAt,
+          invited: Boolean(iv.invitedAt),
+          hasMeeting: Boolean(iv.meetingUrl),
+        });
+        save(db);
+        return send(res, 200, { interview: iv, interviews: cur.interviews });
+      }
+
+      if (parts[3] === "interviews" && parts.length === 5 && req.method === "DELETE") {
+        const body = await readBody(req);
+        const gone = (cur.interviews ?? []).find((x) => x.id === parts[4]);
+        if (!gone) return send(res, 404, { error: "NOT_FOUND" });
+        cur.interviews = (cur.interviews ?? []).filter((x) => x.id !== parts[4]);
+        cur.updatedAt = new Date().toISOString();
+        db.candidates[idx] = cur;
+        audit(db, body.actor, "interview.cancel", cur.candidateId, { startsAt: gone.startsAt });
+        save(db);
+        return send(res, 200, { interviews: cur.interviews });
+      }
+
+      if (parts[3] === "sent" && parts.length === 4 && req.method === "POST") {
+        const body = await readBody(req);
+        cur.questionnaireSentTo = body.to;
+        cur.questionnaireSentAt = new Date().toISOString();
+        cur.updatedAt = cur.questionnaireSentAt;
+        db.candidates[idx] = cur;
+        save(db);
+        return send(res, 200, { ok: true });
+      }
+    }
+
+    // /hr/questionnaire/:token  — PUBLIC surface (candidate). GET = view, POST = submit.
+    if (parts[0] === "hr" && parts[1] === "questionnaire" && (parts.length === 3 || parts.length === 4)) {
+      const raw = decodeURIComponent(parts[2]);
+      const [seqStr, secret] = raw.split(".");
+      const seq = Number(seqStr);
+      if (!Number.isInteger(seq) || seq <= 0 || !secret) return send(res, 404, { error: "BAD_TOKEN" });
+      const idx = db.candidates.findIndex((c) => c.seq === seq);
+      if (idx < 0) return send(res, 404, { error: "BAD_TOKEN" });
+      const cand = db.candidates[idx];
+      if (!cand.tokenHash || !timingSafeEqualHex(cand.tokenHash, sha256hex(secret))) return send(res, 404, { error: "BAD_TOKEN" });
+      if (cand.tokenExpiresAt && new Date(cand.tokenExpiresAt) < new Date()) return send(res, 410, { error: "EXPIRED" });
+
+      if (req.method === "GET") {
+        // ?preview=1 = an authenticated HR user checking their own link; it must
+        // never look like the candidate arriving. Mirrors the Lambda.
+        if (url.searchParams.get("preview") === "1") {
+          audit(db, "hr-preview", "questionnaire.preview", cand.candidateId, {});
+          save(db);
+          return send(res, 200, { candidate: publicCandidate(cand) });
+        }
+        const now = new Date().toISOString();
+        cand.firstViewedAt = cand.firstViewedAt ?? now;
+        cand.lastViewedAt = now;
+        cand.viewCount = (cand.viewCount ?? 0) + 1;
+        db.candidates[idx] = cand;
+        audit(db, "candidate", "questionnaire.view", cand.candidateId, {});
+        save(db);
+        return send(res, 200, { candidate: publicCandidate(cand) });
+      }
+      // /hr/questionnaire/:token/upload — candidate's salary proof (one file).
+      // Same defences as the KYC vault: magic-byte sniffing (never trust the
+      // declared type), hard size cap, and it stops once they've submitted.
+      if (parts.length === 4 && parts[3] === "upload") {
+        if (cand.submittedAt) return send(res, 409, { error: "ALREADY_SUBMITTED" });
+        if (req.method === "POST") {
+          const body = await readBody(req);
+          const bytes = Buffer.from(body.base64 || "", "base64");
+          if (bytes.length === 0) return send(res, 400, { error: "EMPTY" });
+          if (bytes.length > MAX_KYC) return send(res, 400, { error: "TOO_LARGE" });
+          const sniffed = sniffType(bytes);
+          if (!sniffed) return send(res, 400, { error: "BAD_TYPE" });
+          // One file per candidate: replace any previous upload.
+          if (cand.salaryProof) {
+            try {
+              unlinkSync(path.join(KYC_DIR, cand.salaryProof.docId));
+            } catch {}
+          }
+          const docId = `cand_${seq}_${Date.now()}`;
+          mkdirSync(KYC_DIR, { recursive: true });
+          writeFileSync(path.join(KYC_DIR, docId), bytes);
+          cand.salaryProof = {
+            docId,
+            fileName: String(body.fileName || "document").slice(0, 120),
+            contentType: sniffed,
+            sizeBytes: bytes.length,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+            uploadedAt: new Date().toISOString(),
+          };
+          cand.updatedAt = cand.salaryProof.uploadedAt;
+          db.candidates[idx] = cand;
+          audit(db, "candidate", "questionnaire.upload", cand.candidateId, { fileName: cand.salaryProof.fileName, bytes: bytes.length });
+          save(db);
+          return send(res, 200, { salaryProofName: cand.salaryProof.fileName });
+        }
+        if (req.method === "DELETE") {
+          if (cand.salaryProof) {
+            try {
+              unlinkSync(path.join(KYC_DIR, cand.salaryProof.docId));
+            } catch {}
+            delete cand.salaryProof;
+            cand.updatedAt = new Date().toISOString();
+            db.candidates[idx] = cand;
+            audit(db, "candidate", "questionnaire.upload.remove", cand.candidateId, {});
+            save(db);
+          }
+          return send(res, 200, { ok: true });
+        }
+      }
+
+      if (req.method === "POST") {
+        if (cand.submittedAt) return send(res, 409, { error: "ALREADY_SUBMITTED" });
+        const body = await readBody(req);
+        cand.answers = body.answers ?? {};
+        cand.submittedAt = new Date().toISOString();
+        cand.updatedAt = cand.submittedAt;
+        db.candidates[idx] = cand;
+        audit(db, "candidate", "questionnaire.submit", cand.candidateId, { fields: Object.keys(cand.answers).length });
+        // Prod emails the owner the answers here (notifySubmission in the
+        // Lambda). Dev has no mail transport, so log it instead — the point is
+        // that a dev run behaves observably the same way.
+        console.log(`[hr-dev-engine] would email submission for ${cand.candidateId} to ${process.env.HR_SUBMISSION_TO || process.env.HR_REMINDER_TO || "(HR_SUBMISSION_TO unset)"}`);
+        save(db);
+        return send(res, 200, { candidate: publicCandidate(cand) });
+      }
+    }
+
+    // /hr/notify — plain HTML email (no attachment): questionnaire invites etc.
+    if (parts[0] === "hr" && parts[1] === "notify" && parts.length === 2 && req.method === "POST") {
+      const body = await readBody(req);
+      const to = (body.toEmail || "").trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return send(res, 400, { error: "BAD_EMAIL" });
+      const key = process.env.RESEND_API_KEY;
+      let delivery = { simulated: true };
+      if (key) {
+        const r = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+          body: JSON.stringify({
+            from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
+            to: [to],
+            subject: body.subject || "ShieldSync Security",
+            html: body.html,
+            text: body.text,
+          }),
+        });
+        if (!r.ok) return send(res, 502, { error: "SEND_FAILED", status: r.status });
+        delivery = { simulated: false };
+      } else {
+        // DEV ONLY: write the simulated email to disk so you can open it and
+        // see exactly what the recipient would get. Prod never reaches here.
+        const file = path.join(MAIL_DIR, `${Date.now()}-${to.replace(/[^a-z0-9]/gi, "_")}.html`);
+        mkdirSync(MAIL_DIR, { recursive: true });
+        writeFileSync(
+          file,
+          `<!doctype html><meta charset="utf-8"><title>${body.subject ?? ""}</title>` +
+            `<div style="font:13px system-ui;background:#eef2f8;padding:10px 14px;border-bottom:1px solid #ccd5e4">` +
+            `<b>SIMULATED</b> — To: ${to} · Subject: ${body.subject ?? ""}</div>` +
+            (body.html ?? `<pre>${body.text ?? ""}</pre>`),
+        );
+        console.log(`[hr-dev-engine] SIMULATED email to ${to}: ${body.subject}\n  preview: ${file}`);
+      }
+      audit(db, body.actor, body.action || "candidate.email", body.target || "", { to, subject: body.subject, simulated: delivery.simulated });
+      save(db);
+      return send(res, 200, { ok: true, ...delivery });
+    }
+
+    // ---------------- BANKING (imported bank statement transactions) ----------------
+    if (parts[0] === "hr" && parts[1] === "banking" && parts.length === 2) {
+      if (req.method === "GET") {
+        const month = url.searchParams.get("month");
+        const list = (db.banking || []).filter((t) => !month || t.month === month);
+        list.sort((a, b) => (a.date === b.date ? b.balance - a.balance : a.date < b.date ? 1 : -1));
+        return send(res, 200, { transactions: list });
+      }
+      if (req.method === "POST") {
+        const body = await readBody(req);
+        const txns = Array.isArray(body.transactions) ? body.transactions : [];
+        if (!txns.length) return send(res, 400, { error: "NO_TRANSACTIONS" });
+        db.banking = db.banking || [];
+        const now = new Date().toISOString();
+        let created = 0;
+        let updated = 0;
+        for (const t of txns) {
+          if (!t?.txnId || !t?.date) continue;
+          const i = db.banking.findIndex((x) => x.txnId === t.txnId);
+          if (i >= 0) {
+            const prev = db.banking[i];
+            // Keep a category the user set by hand — a re-import must not undo it.
+            db.banking[i] = {
+              ...t,
+              category: prev.categorySetBy === "user" ? prev.category : t.category,
+              categorySetBy: prev.categorySetBy,
+              note: prev.note ?? t.note,
+              importedAt: prev.importedAt ?? now,
+              importedBy: prev.importedBy ?? body.actor,
+              updatedAt: now,
+            };
+            updated += 1;
+          } else {
+            db.banking.push({ ...t, importedAt: now, importedBy: body.actor, updatedAt: now });
+            created += 1;
+          }
+        }
+        audit(db, body.actor, "banking.import", body.accountNumber ?? "", { created, updated, total: txns.length });
+        save(db);
+        return send(res, 200, { ok: true, created, updated });
+      }
+    }
+
+    // /hr/banking/:txnId
+    if (parts[0] === "hr" && parts[1] === "banking" && parts.length === 3) {
+      const txnId = decodeURIComponent(parts[2]);
+      db.banking = db.banking || [];
+      const i = db.banking.findIndex((x) => x.txnId === txnId);
+      if (i < 0) return send(res, 404, { error: "NOT_FOUND" });
+
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        const cur = db.banking[i];
+        db.banking[i] = {
+          ...cur,
+          category: body.category ?? cur.category,
+          note: body.note !== undefined ? body.note : cur.note,
+          matchedEmployeeSeq: body.matchedEmployeeSeq !== undefined ? body.matchedEmployeeSeq : cur.matchedEmployeeSeq,
+          categorySetBy: body.category ? "user" : cur.categorySetBy,
+          updatedAt: new Date().toISOString(),
+        };
+        audit(db, body.actor, "banking.update", txnId, { category: db.banking[i].category });
+        save(db);
+        return send(res, 200, { transaction: db.banking[i] });
+      }
+      if (req.method === "DELETE") {
+        const body = await readBody(req);
+        db.banking.splice(i, 1);
+        audit(db, body.actor, "banking.delete", txnId, {});
+        save(db);
+        return send(res, 200, { ok: true });
+      }
+    }
+
     // /hr/audit
+    // ---- /hr/access (per-user permissions) — mirrors the Lambda ----
+    // Admins are NOT stored here; admin identity comes from HR_ADMIN_EMAILS in
+    // the app, so nothing written through this route can grant admin rights.
+    if (parts[0] === "hr" && parts[1] === "access" && parts.length === 2) {
+      if (req.method === "GET") return send(res, 200, { grants: db.grants ?? {}, restrictedSeqs: db.restrictedSeqs ?? [] });
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        const email = String(body.email ?? "").trim().toLowerCase();
+        if (!email) return send(res, 400, { error: "EMAIL_REQUIRED" });
+        db.grants = { ...(db.grants ?? {}) };
+        if (body.access === null) delete db.grants[email];
+        else db.grants[email] = body.access;
+        audit(db, body.actor, "access.update", email, { access: body.access ?? null });
+        save(db);
+        return send(res, 200, { grants: db.grants });
+      }
+    }
+
+    // Admin-only record visibility (mirrors the prod Lambda's /hr/restricted).
+    if (parts[0] === "hr" && parts[1] === "restricted" && parts.length === 2 && req.method === "PUT") {
+      const body = await readBody(req);
+      const seqN = Number(body.seq);
+      if (!Number.isInteger(seqN) || seqN <= 0) return send(res, 400, { error: "BAD_SEQ" });
+      const set = new Set(db.restrictedSeqs ?? []);
+      if (body.restricted) set.add(seqN);
+      else set.delete(seqN);
+      db.restrictedSeqs = [...set];
+      audit(db, body.actor, "employee.visibility", String(seqN), { restricted: !!body.restricted });
+      save(db);
+      return send(res, 200, { restrictedSeqs: db.restrictedSeqs });
+    }
+
     if (parts[0] === "hr" && parts[1] === "audit" && parts.length === 2) {
       if (req.method === "GET") {
-        const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 200);
+        const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 500); // parity with the Lambda
         return send(res, 200, { audit: db.audit.slice(0, limit) });
       }
       if (req.method === "POST") {
@@ -398,6 +1035,21 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// A taken port used to be SILENT: node emitted an unhandled 'error', this process
+// died, and anything polling /hr/health got an answer from the STALE server still
+// holding the port — so the E2E suite ran against another run's leftover data and
+// failed a different assertion each time. Fail loudly instead.
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`[hr-dev-engine] FATAL: port ${PORT} is already in use — refusing to start (another dev engine is running).`);
+  } else {
+    console.error(`[hr-dev-engine] FATAL:`, err);
+  }
+  process.exit(1);
+});
+
+// Pass HR_ENGINE_PORT=0 to get an OS-assigned free port; the line below reports the
+// REAL port, which is how the test harness learns where to connect (collision-proof).
 server.listen(PORT, () => {
-  console.log(`[hr-dev-engine] listening on http://localhost:${PORT}  (store: ${DB})`);
+  console.log(`[hr-dev-engine] listening on http://localhost:${server.address().port}  (store: ${DB})`);
 });

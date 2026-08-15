@@ -43,10 +43,25 @@ export type Employee = {
   structure: SalaryStructure; // Basic/HRA/Conveyance/Special (editable)
   /** Compensation history, oldest first. Appended by the revise-salary flow. */
   revisions?: CompRevision[];
+  /** Engagement transitions (e.g. internship -> full-time), oldest first. */
+  transitions?: Array<{
+    from: string; // e.g. "Internship (Security Intern)"
+    to: string; // e.g. "Full-time, permanent (Security Analyst)"
+    effectiveDate: string;
+    convertedBy: string;
+    convertedAt: string; // ISO
+  }>;
 
   // probation / internship terms (drive the confirmation + internship letters)
   probationMonths?: number; // default 3 (full-time roles)
-  internshipMonths?: number; // internship engagements only
+  internshipMonths?: number;
+  /**
+   * Performance-linked pay, stated as a range and NOT part of grossMonthly.
+   * Kept separate so offer letters commit only to the fixed figure — folding
+   * it into gross would make a discretionary incentive contractually owed.
+   */
+  variableMin?: number;
+  variableMax?: number; // internship engagements only
 
   // bank
   bankAccount?: string;
@@ -63,6 +78,16 @@ export type Employee = {
   lastWorkingDay?: string; // display string, set on offboarding (status="exited")
   createdAt: string;
   updatedAt: string;
+
+  // self-serve login (read-only document access, /my/*) — set via
+  // /hr/employees/:seq/self-pin, verified via /hr/self/login. Never a
+  // plaintext PIN: only its salted hash and lockout counters ever reach here.
+  /** Whether a self-serve PIN exists. Derived by the engine — the hash and
+   * salt themselves never leave it (see publicEmployee in hr-handler.mjs). */
+  hasSelfPin?: boolean;
+  selfPinSalt?: string;
+  selfFailedAttempts?: number;
+  selfLockedUntil?: string; // ISO
 };
 
 export const DEFAULT_EMPLOYMENT_TYPE = "Full-time, permanent";
@@ -103,6 +128,16 @@ export const EMPLOYMENT_TYPE_OPTIONS = [
   "Internship",
   "Consultant",
 ];
+
+/**
+ * Roles with no fixed monthly salary, where a gross of 0 is legitimate rather
+ * than a data-entry mistake: unpaid internships, and consultants paid per
+ * engagement / occasionally rather than on a monthly cycle. Everyone else must
+ * have a positive gross.
+ */
+export function allowsZeroGross(employmentType: string): boolean {
+  return /internship|consultant/i.test(employmentType ?? "");
+}
 export const BASE_LOCATION_OPTIONS = [
   "Noida, Uttar Pradesh, India (Remote-first)",
   "Noida, Uttar Pradesh, India",
@@ -152,8 +187,11 @@ export function normalizeEmployee(input: Partial<Employee>): Omit<Employee, "emp
     annualCTC,
     structure,
     revisions: Array.isArray(input.revisions) ? input.revisions : undefined,
+    transitions: Array.isArray(input.transitions) ? input.transitions : undefined,
     probationMonths: Number(input.probationMonths) > 0 ? Math.round(Number(input.probationMonths)) : undefined,
     internshipMonths: Number(input.internshipMonths) > 0 ? Math.round(Number(input.internshipMonths)) : undefined,
+    variableMin: Number(input.variableMin) > 0 ? Math.round(Number(input.variableMin)) : undefined,
+    variableMax: Number(input.variableMax) > 0 ? Math.round(Number(input.variableMax)) : undefined,
     bankAccount: input.bankAccount?.trim() || undefined,
     bankBranch: input.bankBranch?.trim() || undefined,
     ifsc: input.ifsc?.trim() || undefined,
@@ -166,6 +204,26 @@ export function normalizeEmployee(input: Partial<Employee>): Omit<Employee, "emp
     status: input.status === "exited" ? "exited" : "active",
     lastWorkingDay: input.status === "exited" ? input.lastWorkingDay?.trim() || undefined : undefined,
   };
+}
+
+/**
+ * The salary structure in force for a given pay month. Each revisions[] entry
+ * stores the comp that applied BEFORE its effectiveDate — so for a slip month
+ * ending before a revision took effect, that revision's stored (old) structure
+ * is the right one; otherwise the current structure applies. Prevents "apply a
+ * raise, then generate last month's slip" from paying old months at new rates.
+ */
+export function structureForMonth(e: Employee, monthEndIso: string): { structure: SalaryStructure; historical: boolean } {
+  const monthEnd = new Date(monthEndIso);
+  if (!Number.isNaN(monthEnd.getTime())) {
+    for (const r of e.revisions ?? []) {
+      const eff = new Date(r.effectiveDate);
+      if (!Number.isNaN(eff.getTime()) && monthEnd < eff) {
+        return { structure: r.structure, historical: true };
+      }
+    }
+  }
+  return { structure: e.structure, historical: false };
 }
 
 /** Map an employee onto the payslip's employee block. */

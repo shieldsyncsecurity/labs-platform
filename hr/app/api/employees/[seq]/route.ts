@@ -1,17 +1,22 @@
 import { NextResponse } from "next/server";
 import { getHrActor } from "@/lib/server/hr-session";
+import { getViewer } from "@/lib/server/hr-access";
+import { projectEmployee } from "@/lib/server/employee-view";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
-import { normalizeEmployee } from "@/lib/employee";
+import { normalizeEmployee, type Employee } from "@/lib/employee";
 
 export const dynamic = "force-dynamic";
 
+// Projected for the caller — see lib/server/employee-view.ts. (Record-level
+// restriction is enforced upstream by the middleware's per-seq gate.)
 export async function GET(_req: Request, { params }: { params: Promise<{ seq: string }> }) {
   const actor = await getHrActor();
   if (!actor) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   const { seq } = await params;
   try {
-    const data = await hrFetch(`/hr/employees/${encodeURIComponent(seq)}`);
-    return NextResponse.json(data);
+    const viewer = await getViewer();
+    const data = await hrFetch<{ employee: Employee }>(`/hr/employees/${encodeURIComponent(seq)}`);
+    return NextResponse.json({ ...data, employee: projectEmployee(data.employee, viewer) });
   } catch (err) {
     if (err instanceof HrEngineError && err.status === 404) {
       return NextResponse.json({ error: "Employee not found." }, { status: 404 });
@@ -35,6 +40,23 @@ export async function PUT(req: Request, { params }: { params: Promise<{ seq: str
   const employee = normalizeEmployee(body);
   if (!employee.name || !employee.designation || !employee.dateOfJoining) {
     return NextResponse.json({ error: "Name, designation, and date of joining are required." }, { status: 400 });
+  }
+
+  // The edit form projects bank/PAN OUT for a viewer without seeBankDetails, so
+  // their submitted record carries those fields blank. Restore them from the
+  // stored record before the merge, so an editor who was never allowed to SEE
+  // bank/PAN cannot silently WIPE them by saving the form. Fails closed.
+  const viewer = await getViewer();
+  if (!(viewer.isAdmin || viewer.access.seeBankDetails)) {
+    const BANK_FIELDS = ["bankAccount", "bankName", "bankBranch", "ifsc", "pan", "aadhaarLast4", "uanPf"] as const;
+    try {
+      const current = (await hrFetch<{ employee: Employee }>(`/hr/employees/${encodeURIComponent(seq)}`)).employee;
+      for (const f of BANK_FIELDS) {
+        (employee as Record<string, unknown>)[f] = (current as Record<string, unknown>)[f];
+      }
+    } catch {
+      return NextResponse.json({ error: "Could not verify the record before saving. Please try again." }, { status: 502 });
+    }
   }
 
   try {

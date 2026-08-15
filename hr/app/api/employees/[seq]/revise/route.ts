@@ -1,16 +1,13 @@
 import { NextResponse } from "next/server";
 import { getHrActor } from "@/lib/server/hr-session";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
+import { todayDisplay } from "@/lib/dates";
 import { suggestStructure } from "@/lib/payslip";
 import { buildIncrementLetter } from "@/lib/documents/letters";
 import type { CompRevision, Employee } from "@/lib/employee";
 
 export const dynamic = "force-dynamic";
 
-function today(): string {
-  const d = new Date();
-  return `${String(d.getDate()).padStart(2, "0")} ${d.toLocaleString("en-GB", { month: "short" })} ${d.getFullYear()}`;
-}
 
 // Salary revision: one atomic flow — append the current comp to the revision
 // history, apply the new comp, and issue the increment letter (unified HR ref).
@@ -86,7 +83,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
     { ...e, grossMonthly: newGross, annualCTC: newAnnualCTC, structure: newStructure },
     {
       ref: "", // allocated by the engine (refSeries "hr")
-      date: today(),
+      date: todayDisplay(),
       effectiveDate,
       oldStructure: e.structure,
       newStructure,

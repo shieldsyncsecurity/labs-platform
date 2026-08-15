@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "main": ".open-next/worker.js",
+  "name": "shieldsync-billing",
+  "compatibility_date": "2024-12-30",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "routes": [
+    { "pattern": "billing.shieldsyncsecurity.com", "custom_domain": true }
+  ],
+  // NON-SECRET vars only. Secrets are set with `wrangler secret put`:
+  //   HR_ENGINE_SECRET   -> must match the HR Lambda (billing reads invoices from it)
+  //   HR_SESSION_SECRET  -> same key used to sign inv tokens in the HR portal
+  //                         (billing only VERIFIES; it never signs new tokens)
+  "vars": {
+    "HR_ENGINE_URL": "https://gwkfcf0ii3.execute-api.us-east-1.amazonaws.com"
+  }
+}

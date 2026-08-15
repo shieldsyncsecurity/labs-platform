@@ -32,6 +32,8 @@ export function kindLabel(k: string): string {
 export type KycDoc = {
   docId: string;
   employeeSeq: number;
+  /** "kyc" (uploads) or "sent" (archived copies of emailed documents). */
+  category?: string;
   kind: KycKind;
   label: string;
   fileName: string;

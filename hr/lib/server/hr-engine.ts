@@ -38,7 +38,39 @@ function buildQuery(query?: FetchOpts["query"]): string {
   return qs ? `?${qs}` : "";
 }
 
+/**
+ * Reject any engine path that could re-target the request.
+ *
+ * WHY THIS IS A HARD GUARD AND NOT A LINT RULE: callers build paths by
+ * interpolating route params — `/hr/employees/${seq}/generated/${genId}/accept`.
+ * Next decodes those params, so a param of "%3F" becomes "?" and TRUNCATES the
+ * path at the URL parser, while "%2F..%2F" re-roots it. Since this function is
+ * the one place HR_ENGINE_SECRET is attached, a forged path arrives at the
+ * engine fully authenticated: an anonymous request to the public /accept route
+ * could be steered onto employee-create, /status, or /hr/access.
+ *
+ * Validating at every call site would mean never missing one, forever. This
+ * validates once, at the only door the secret goes through.
+ */
+function assertSafeEnginePath(path: string): void {
+  if (
+    !path.startsWith("/hr/") ||
+    path.includes("?") ||
+    path.includes("#") ||
+    path.includes("..") ||
+    path.includes("//") ||
+    /[\s\\]/.test(path) ||
+    // Control characters (incl. encoded newlines that survived a decode) have
+    // no business in a path and can split a request at some proxies.
+    // eslint-disable-next-line no-control-regex
+    /[\u0000-\u001f\u007f]/.test(path)
+  ) {
+    throw new HrEngineError(400, { error: "UNSAFE_ENGINE_PATH" });
+  }
+}
+
 export async function hrFetch<T = unknown>(path: string, opts: FetchOpts = {}): Promise<T> {
+  assertSafeEnginePath(path);
   const secret = process.env.HR_ENGINE_SECRET ?? "";
   const headers: Record<string, string> = {
     "content-type": "application/json",

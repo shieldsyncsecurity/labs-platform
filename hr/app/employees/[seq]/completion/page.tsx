@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
+import { todayDisplay } from "@/lib/dates";
 import { buildCompletionCertificate } from "@/lib/documents/letters";
 import type { Employee } from "@/lib/employee";
 import { SimpleLetterDoc } from "@/components/SimpleLetterDoc";
@@ -9,10 +10,6 @@ import { DocToolbar } from "@/components/DocToolbar";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Certificate of completion", robots: { index: false, follow: false } };
 
-function today(): string {
-  const d = new Date();
-  return `${String(d.getDate()).padStart(2, "0")} ${d.toLocaleString("en-GB", { month: "short" })} ${d.getFullYear()}`;
-}
 
 // Internship completion certificate — needs an internship engagement that has
 // ENDED (status exited + last working day), mirroring the experience letter's gate.
@@ -50,7 +47,7 @@ export default async function GenerateCompletion({
   const ref = sp.ref ?? `SSS/INT/${now.getFullYear()}/•••`;
   const letter = buildCompletionCertificate(e, {
     ref,
-    date: today(),
+    date: todayDisplay(),
     fromDate: e.dateOfJoining,
     toDate: e.lastWorkingDay,
     project: (sp.project ?? "").trim() || undefined,

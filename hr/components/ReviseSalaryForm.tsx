@@ -49,7 +49,17 @@ export function ReviseSalaryForm({ seq, currentGross }: { seq: string; currentGr
         setBusy(false);
         return;
       }
-      router.push(data.genId ? `/employees/${seq}/issued/${data.genId}` : `/employees/${seq}`);
+      if (!data.genId) {
+        // The comp change APPLIED but the letter didn't issue — surface it
+        // loudly instead of navigating away as if everything succeeded.
+        setError(
+          data.warning ??
+            "Revision applied, but the Salary Revision Letter could not be issued — open the employee page and issue it manually. Do not re-apply the revision.",
+        );
+        setBusy(false);
+        return;
+      }
+      router.push(`/employees/${seq}/issued/${data.genId}`);
       router.refresh();
     } catch {
       setError("Could not reach the server — check the connection and try again.");
@@ -62,7 +72,7 @@ export function ReviseSalaryForm({ seq, currentGross }: { seq: string; currentGr
       {error ? (
         <div style={{ background: "#fdecef", border: "1px solid #f6c6ce", color: "#9a2233", fontSize: 12.5, borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>{error}</div>
       ) : null}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
         <div>
           <label style={label} htmlFor="gross">New gross monthly (INR) <span style={{ color: "#c0344c" }}>*</span></label>
           <input id="gross" name="gross" required style={input} placeholder="e.g. 40000" />

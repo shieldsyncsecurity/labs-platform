@@ -21,6 +21,9 @@ export function OfferLetterDoc({ letter, toolbar }: { letter: OfferLetter; toolb
       ) : null}
 
       <div className="ss-sheet">
+        {!letter.noWatermark ? (
+          <div className="ss-watermark"><span>DIGITAL COPY &mdash; COLLECT ORIGINAL IN PERSON</span></div>
+        ) : null}
         <div className="ss-run">
           <span>{COMPANY.legalName}</span>
           <span className="r">Letter of Appointment</span>

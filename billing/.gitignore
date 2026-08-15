@@ -1,0 +1,18 @@
+# deps
+/node_modules
+
+# next / opennext / wrangler build output
+/.next
+/.open-next
+/.wrangler
+/out
+
+# env & secrets — never commit
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+
+# misc
+*.log
+.DS_Store

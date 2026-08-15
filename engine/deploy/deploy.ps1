@@ -10,7 +10,7 @@ $DEPLOY_DIR       = "$SCRIPT_DIR\deploy"
 $ROLE_ARN         = "arn:aws:iam::${PLATFORM_ACCOUNT}:role/${ROLE_NAME}"
 
 # ── Step 1: assume into platform account ─────────────────────────────────────
-Write-Host "`n[1/5] Assuming into platform account $PLATFORM_ACCOUNT ..." -ForegroundColor Cyan
+Write-Host "`n[1/6] Assuming into platform account $PLATFORM_ACCOUNT ..." -ForegroundColor Cyan
 $credsJson = aws sts assume-role `
   --role-arn "arn:aws:iam::${PLATFORM_ACCOUNT}:role/OrganizationAccountAccessRole" `
   --role-session-name "engine-deploy" `
@@ -24,7 +24,7 @@ $env:AWS_SESSION_TOKEN     = $creds.SessionToken
 Write-Host "  OK"
 
 # ── Step 2: create IAM role (idempotent) ─────────────────────────────────────
-Write-Host "`n[2/5] Creating IAM role $ROLE_NAME ..." -ForegroundColor Cyan
+Write-Host "`n[2/6] Creating IAM role $ROLE_NAME ..." -ForegroundColor Cyan
 $out = aws iam create-role `
   --role-name $ROLE_NAME `
   --assume-role-policy-document "file://$DEPLOY_DIR\trust.json" `
@@ -47,12 +47,67 @@ if ($LASTEXITCODE -ne 0) { Write-Error ($out | Out-String); exit 1 }
 Write-Host "  Policy attached."
 
 # ── Step 3: build deployment package ─────────────────────────────────────────
-Write-Host "`n[3/5] Building deployment package ..." -ForegroundColor Cyan
+Write-Host "`n[3/6] Building deployment package ..." -ForegroundColor Cyan
 $ZIP_PATH  = "$DEPLOY_DIR\engine.zip"
 # aws-nuke binary lives in S3 and is fetched by Lambda at init — NOT bundled here.
 if (Test-Path $ZIP_PATH) { Remove-Item $ZIP_PATH -Force }
 
-Compress-Archive -Path "$SCRIPT_DIR\handler.mjs","$SCRIPT_DIR\labinfra.mjs","$SCRIPT_DIR\graders.mjs","$SCRIPT_DIR\metrics.mjs" -DestinationPath $ZIP_PATH
+# The modules bundled into the Lambda. handler.mjs is the entry; it imports
+# labinfra.mjs (which needs graders.mjs + metrics.mjs).
+$ENGINE_MODULES = @(
+  "handler.mjs",
+  "labinfra.mjs",
+  "graders.mjs",
+  "metrics.mjs"
+)
+
+# IMPORT-CLOSURE GUARD (backported from deploy-ent.ps1). A NEW local module
+# imported by a bundled module but MISSING from the list above would not fail the
+# build here — it ships a Lambda that throws MODULE_NOT_FOUND at load, so EVERY
+# route (incl. /health) 500s. Walk each bundled module's `from "./x.mjs"` imports
+# and refuse to deploy if any target is not itself bundled.
+$missing = @()
+foreach ($m in $ENGINE_MODULES) {
+    $p = Join-Path $SCRIPT_DIR $m
+    if (-not (Test-Path $p)) { $missing += "$m (file not found)"; continue }
+    foreach ($line in (Get-Content $p)) {
+        if ($line -match 'from\s+"\./([A-Za-z0-9._-]+\.mjs)"') {
+            $dep = $Matches[1]
+            if ($ENGINE_MODULES -notcontains $dep) { $missing += "$dep (imported by $m)" }
+        }
+    }
+}
+if ($missing.Count -gt 0) {
+    Write-Error ("Deploy refused: these local modules are imported but NOT bundled -- add them to `$ENGINE_MODULES:`n  " + (($missing | Select-Object -Unique) -join "`n  "))
+    exit 1
+}
+Write-Host "  import-closure OK ($($ENGINE_MODULES.Count) modules)"
+
+# SDK-DEPENDENCY GUARD (backported from deploy-ent.ps1). A bundled module importing
+# a NON-client @aws-sdk package (e.g. @aws-sdk/s3-request-presigner) is NOT provided
+# by the nodejs22.x runtime (only client-* / lib-* are), so it must be a declared
+# dependency or it won't be packed and the Lambda 500s at runtime. Refuse if any
+# static non-client @aws-sdk import is absent from package.json.
+$pkgJsonRaw = Get-Content (Join-Path $SCRIPT_DIR "package.json") -Raw
+$sdkMissing = @()
+foreach ($m in $ENGINE_MODULES) {
+    $p = Join-Path $SCRIPT_DIR $m
+    if (-not (Test-Path $p)) { continue }
+    foreach ($line in (Get-Content $p)) {
+        if ($line -match 'from\s+"(@aws-sdk/[A-Za-z0-9._-]+)"') {
+            $pkg = $Matches[1]
+            if ($pkg -like "@aws-sdk/client-*" -or $pkg -like "@aws-sdk/lib-*") { continue }
+            if ($pkgJsonRaw -notmatch [regex]::Escape('"' + $pkg + '"')) { $sdkMissing += "$pkg (imported by $m)" }
+        }
+    }
+}
+if ($sdkMissing.Count -gt 0) {
+    Write-Error ("Deploy refused: non-client @aws-sdk packages imported but NOT in package.json (add to dependencies so they get bundled):`n  " + (($sdkMissing | Select-Object -Unique) -join "`n  "))
+    exit 1
+}
+Write-Host "  sdk-dependency OK"
+
+Compress-Archive -Path ($ENGINE_MODULES | ForEach-Object { Join-Path $SCRIPT_DIR $_ }) -DestinationPath $ZIP_PATH
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open($ZIP_PATH, "Update")
@@ -74,7 +129,7 @@ Write-Host "  $([Math]::Round((Get-Item $ZIP_PATH).Length/1MB,1)) MB"
 
 # ── Step 4: upload to S3, then create/update Lambda ─────────────────────────
 # Direct upload limit is 50 MB; our binary pushes us over — use S3.
-Write-Host "`n[4/5] Uploading to S3 and deploying Lambda $FUNCTION_NAME ..." -ForegroundColor Cyan
+Write-Host "`n[4/6] Uploading to S3 and deploying Lambda $FUNCTION_NAME ..." -ForegroundColor Cyan
 
 $BUCKET = "shieldsync-engine-deploy-$PLATFORM_ACCOUNT"
 $S3_KEY = "engine.zip"
@@ -113,6 +168,7 @@ if ($LASTEXITCODE -ne 0) {
       --region $REGION 2>&1
     if ($LASTEXITCODE -ne 0) { Write-Error ($out2 | Out-String); exit 1 }
     Write-Host "  Lambda created."
+    aws lambda wait function-active --function-name $FUNCTION_NAME --region $REGION | Out-Null
 } else {
     $out2 = aws lambda update-function-code `
       --function-name $FUNCTION_NAME `
@@ -125,10 +181,51 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "  Lambda updated."
 }
 
+# ── Step 5: environment (MERGE, never replace) ───────────────────────────────
+# handler.mjs FAILS CLOSED: on a real Lambda it refuses to START if
+# ENGINE_SHARED_SECRET is unset ("refusing to start with engine auth disabled"),
+# so a fresh create with no secret crash-loops every invoke, incl. /health. This
+# step MERGES local overrides (ENGINE_SHARED_SECRET / CREDENTIAL_HMAC_SECRET /
+# LAB_VARIANCE, when set in the shell) into the Lambda's CURRENT variables and
+# refuses to ship if no secret ends up set. It must NEVER write a replacement map
+# (that would wipe every other var). A code-only deploy is fine as long as the
+# Lambda already holds the secret. Backported from deploy-hr.ps1 / deploy-ent.ps1.
+Write-Host "`n[5/6] Merging Lambda environment ..." -ForegroundColor Cyan
+$currentJson = aws lambda get-function-configuration `
+  --function-name $FUNCTION_NAME `
+  --query "Environment.Variables" --output json --region $REGION
+if ($LASTEXITCODE -ne 0) { Write-Error "Failed to read current environment"; exit 1 }
+$vars = @{}
+$current = $currentJson | ConvertFrom-Json
+if ($null -ne $current) {
+    $current.PSObject.Properties | ForEach-Object { $vars[$_.Name] = $_.Value }
+}
+foreach ($k in @("ENGINE_SHARED_SECRET", "CREDENTIAL_HMAC_SECRET", "LAB_VARIANCE")) {
+    $v = [Environment]::GetEnvironmentVariable($k)
+    if (-not [string]::IsNullOrWhiteSpace($v)) { $vars[$k] = $v }
+}
+if ([string]::IsNullOrWhiteSpace($vars["ENGINE_SHARED_SECRET"])) {
+    Write-Error "ENGINE_SHARED_SECRET is neither set on the Lambda nor in this shell. Refusing to deploy an engine that crash-loops on every invoke. Set it and re-run:  `$env:ENGINE_SHARED_SECRET=`"<value>`"; .\deploy\deploy.ps1"
+    exit 1
+}
+$envFile = Join-Path $PSScriptRoot "engine-env.tmp.json"
+@{ Variables = $vars } | ConvertTo-Json -Compress | Set-Content -Path $envFile -NoNewline
+try {
+    aws lambda update-function-configuration `
+      --function-name $FUNCTION_NAME `
+      --environment "file://$envFile" `
+      --region $REGION | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Error "Failed to set environment"; exit 1 }
+    aws lambda wait function-updated --function-name $FUNCTION_NAME --region $REGION | Out-Null
+    Write-Host ("  Environment merged (" + ($vars.Keys -join ", ") + ").")
+} finally {
+    Remove-Item -Path $envFile -Force -ErrorAction SilentlyContinue
+}
+
 # ── Step 5: API Gateway HTTP API ─────────────────────────────────────────────
 # Lambda Function URLs with Principal:* are blocked by Lambda Block Public Access
 # (enabled by default on new accounts since Sep 2024). API Gateway sidesteps this.
-Write-Host "`n[5/5] API Gateway HTTP API ..." -ForegroundColor Cyan
+Write-Host "`n[6/6] API Gateway HTTP API ..." -ForegroundColor Cyan
 $API_NAME = "ShieldSyncEngineAPI"
 
 $existingApi = aws apigatewayv2 get-apis --region $REGION --query "Items[?Name=='$API_NAME'].ApiId" --output text 2>&1
@@ -199,4 +296,6 @@ Remove-Item Env:AWS_SESSION_TOKEN   -ErrorAction SilentlyContinue
 
 Write-Host "`n✅  Deployment complete!" -ForegroundColor Green
 Write-Host "`nENGINE_URL = $ENGINE_URL" -ForegroundColor Yellow
-Write-Host "`nNext: add ENGINE_URL to Vercel + update app\.env.local"
+Write-Host "`nNext: set ENGINE_URL as a var in app/wrangler.jsonc, and set the shared secret" -ForegroundColor Yellow
+Write-Host "on the labs Worker to match the Lambda's value:" -ForegroundColor Yellow
+Write-Host "  cd ../app; npx wrangler secret put ENGINE_SHARED_SECRET" -ForegroundColor Yellow

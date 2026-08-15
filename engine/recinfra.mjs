@@ -28,7 +28,9 @@
 //    (per-key errors surface, so a silent partial erasure of biometric media
 //    cannot pass as complete).
 //
-// The @aws-sdk clients + the presigner are provided by the Lambda nodejs runtime.
+// The @aws-sdk service clients (client-s3, client-dynamodb) are provided by the
+// Lambda nodejs runtime; @aws-sdk/s3-request-presigner is NOT reliably in the
+// runtime, so deploy-ent.ps1 bundles it (and its closure) into the function zip.
 import {
   S3Client,
   PutObjectCommand,

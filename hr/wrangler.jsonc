@@ -17,7 +17,15 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
+  // Cloudflare Browser Rendering — server-side PDF of issued documents
+  // (Download PDF + auto-attached email). Included with Workers Paid.
+  "browser": {
+    "binding": "BROWSER"
+  },
   "routes": [
+    // billing.shieldsyncsecurity.com is owned by the SEPARATE shieldsync-billing
+    // Worker — it must NOT be listed here, or an HR deploy steals the custom
+    // domain and client invoice links redirect to the HR staff login.
     { "pattern": "employee.shieldsyncsecurity.com", "custom_domain": true }
   ],
   // NON-SECRET vars only. Secrets are set with `wrangler secret put`:
@@ -26,17 +34,40 @@
   //                            from the enterprise SESSION_SECRET on purpose)
   //   COGNITO_CLIENT_SECRET -> Cognito app-client secret
   //
-  // Reuses the SAME Cognito pool/app-client as the enterprise app. GO-LIVE: add
-  //   https://employee.shieldsyncsecurity.com/api/auth/callback  (callback URL)
-  //   https://employee.shieldsyncsecurity.com                    (sign-out URL)
-  // to that app-client, and create the two allowlisted users in the pool.
+  // Reuses the enterprise Cognito POOL but a DEDICATED app client (GO-LIVE
+  // step 3 creates it: authorization-code grant, scopes openid email profile,
+  // client secret, HR callback/sign-out URLs). The placeholder below MUST be
+  // replaced with the NEW client's id — never the enterprise client's
+  // (separate secret + callback list = no cross-app blast radius).
   "vars": {
-    "HR_ENGINE_URL": "https://HR-ENGINE-API-ID.execute-api.us-east-1.amazonaws.com",
+    "HR_ENGINE_URL": "https://gwkfcf0ii3.execute-api.us-east-1.amazonaws.com",
     "APP_URL": "https://employee.shieldsyncsecurity.com",
     "COGNITO_REGION": "us-east-1",
     "COGNITO_POOL_ID": "us-east-1_54vIGJe4R",
-    "COGNITO_CLIENT_ID": "4lri28sn4mn2u8bqpfjll1i8gc",
+    "COGNITO_CLIENT_ID": "7pei9flt4qnoercbb4lqb00bqf",
     "COGNITO_DOMAIN": "shieldsync-enterprise.auth.us-east-1.amazoncognito.com",
-    "HR_ALLOWLIST": "admin@shieldsyncsecurity.com,hr@shieldsyncsecurity.com"
+    "HR_ALLOWLIST": "admin@shieldsyncsecurity.com,hr@shieldsyncsecurity.com",
+    // Staff deliberately outside the monthly payslip run — they are skipped by
+    // BOTH the dashboard payroll banner and the reminder email. Comma-separated
+    // names or employee IDs. MUST match HR_REMINDER_EXCLUDE on the HR Lambda,
+    // or the banner and the email will disagree about who is unpaid.
+    "HR_REMINDER_EXCLUDE": "Preeti Jain",
+    // WHO IS THE OWNER. Administrators have everything, always, and their
+    // status can NOT be changed from inside the portal — that is what makes
+    // self-lockout impossible and stops anyone granting themselves admin.
+    // Everyone else on HR_ALLOWLIST starts with NOTHING until granted at
+    // /access. Changing this list requires a deploy, on purpose.
+    "HR_ADMIN_EMAILS": "admin@shieldsyncsecurity.com",
+    // Microsoft Graph — creates the Teams meeting and sends the candidate a
+    // real Outlook invite. Client ID and tenant ID are NOT secrets (they're
+    // visible in any OAuth request); MS_CLIENT_SECRET is, and is set with
+    // `wrangler secret put` so it never lands in this file or in git.
+    //
+    // MS_ORGANISER_UPN is the mailbox meetings are created ON. It must be a
+    // real licensed mailbox in the tenant — the app has app-only permission,
+    // so it acts on that user's calendar rather than "its own".
+    "MS_CLIENT_ID": "bc9861ae-295d-4009-b1d2-20671704405e",
+    "MS_TENANT_ID": "6ea399a4-14cd-4b02-a780-6d77f51fd00f",
+    "MS_ORGANISER_UPN": "himanshu@shieldsyncsecurity.com"
   }
 }

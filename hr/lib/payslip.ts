@@ -210,6 +210,10 @@ export type Payslip = {
   period: PayPeriod;
   earnings: SalaryStructure;
   deductions: Deductions;
+  /** The exact toggles used — archived in the snapshot so next month's prefill
+   * restores settings (incl. the PF wage-ceiling cap) rather than inferring
+   * them from amounts. */
+  config?: DeductionConfig;
   netPay: number;
   netPayWords: string;
   remarks?: string;
@@ -235,6 +239,7 @@ export function buildPayslip(input: {
     period: input.period,
     earnings: input.earnings,
     deductions,
+    config: input.deductionConfig,
     netPay,
     netPayWords: amountInWords(netPay),
     remarks: input.remarks,

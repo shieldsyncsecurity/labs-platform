@@ -13,6 +13,7 @@ import CopyButton from "../../../portal/_components/copy-button";
 import AdjustCreditsForm from "./adjust-credits-form";
 import DeleteOrgButton from "./delete-org-button";
 import OrdersSection, { type OrderRow } from "./orders-section";
+import SeatsSection from "./seats-section";
 import ActivityPanel from "./_components/activity-panel";
 import { Bar, formatDate } from "../../../r/_components/report-bits";
 
@@ -179,6 +180,11 @@ export default async function AdminOrgDetailPage({
           </div>
         </div>
 
+        {/* Portal seats — the record auth/callback verifies the orgId claim against */}
+        <div className="mt-6">
+          <SeatsSection orgId={org.orgId ?? orgId} />
+        </div>
+
         {/* Org details */}
         <div className="mt-6 rounded-xl border border-line bg-surface p-5">
           <h2 className="text-sm font-semibold text-ink-soft">Details</h2>
@@ -274,7 +280,7 @@ export default async function AdminOrgDetailPage({
               No agreements for this org yet.
             </p>
           ) : (
-            <div className="mt-4 overflow-x-auto rounded-lg border border-line">
+            <div className="mt-4 overflow-x-auto [mask-image:linear-gradient(to_right,black_calc(100%-40px),transparent)] sm:[mask-image:none] rounded-lg border border-line">
               <table className="w-full min-w-[640px] border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-line bg-canvas text-xs uppercase tracking-wide text-muted">

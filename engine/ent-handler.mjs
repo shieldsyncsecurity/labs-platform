@@ -98,6 +98,12 @@ import { gradeLab } from "./graders.mjs";
 // uploads during a live session, presigned playback for the candidate report,
 // and prefix deletion for the PII-erase cascade.
 import {
+  getMember,
+  putMember,
+  listMembers,
+  deleteMember,
+} from "./entinfra.mjs";
+import {
   startRecEpoch,
   presignRecUploads,
   recordRecEvent,
@@ -105,6 +111,7 @@ import {
   deleteRecordings,
 } from "./recinfra.mjs";
 import { fetchWorkTimeline } from "./timeline.mjs";
+import { countParameters } from "./taxonomy.mjs";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 // Transactional email no longer uses SES (prod-access request was denied for
 // this account). Sends go out via the Resend HTTP API through a drop-in
@@ -1026,6 +1033,10 @@ async function submitAzureSession({ invite, inviteToken, labSlug, reflection, au
       criteria: crit,
       passedCount: passed,
       totalCriteria: total,
+      // Cloud-agnostic frame coverage, COMPUTED from what was actually verified
+      // (see taxonomy.mjs). Lets the report and any marketing claim quote a real
+      // number per assessment instead of a hand-maintained one that drifts.
+      frame: countParameters(crit),
       reflectionText,
       reflectionScore: null,
       integrity: "pending",
@@ -1630,6 +1641,109 @@ export async function handler(event) {
     // Allocate a capture EPOCH for a fresh recorder session (each page load).
     // Keys are namespaced by epoch, so a reload starts a new key space and can
     // never overwrite the earlier half of the recording (or the identity shot).
+    // ── tenant membership (sub -> orgId) ─────────────────────────────────
+    // The app calls this on every portal login and refuses to mint a session
+    // unless the Cognito claim matches. Read path is deliberately tiny + fast.
+    if (method === "GET" && path === "/ent/member") {
+      const sub = url.searchParams.get("sub") || "";
+      if (!sub) return resp(400, { error: "sub required" });
+      const m = await getMember(sub);
+      if (!m) return resp(404, { error: "not a member" });
+      return resp(200, { sub: m.sub, orgId: m.orgId, email: m.email ?? null });
+    }
+    if (method === "GET" && path === "/ent/members") {
+      const orgId = url.searchParams.get("orgId") || "";
+      if (!orgId) return resp(400, { error: "orgId required" });
+      return resp(200, { members: await listMembers(orgId) });
+    }
+    if (method === "POST" && path === "/ent/members") {
+      const { sub, orgId, email } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (!sub || !orgId) return resp(400, { error: "sub and orgId required" });
+      const org = await getOrg(orgId);
+      if (!org) return resp(404, { error: "no such org" });
+      const m = await putMember({ sub, orgId, email, actor });
+      await audit({ orgId, actor, action: "member.bind", target: sub, detail: { email: m.email } });
+      return resp(200, { ok: true, member: m });
+    }
+    if (method === "POST" && path === "/ent/members/delete") {
+      const { sub } = parsed;
+      const actor = cleanActor(parsed.actor);
+      if (!sub) return resp(400, { error: "sub required" });
+      const existing = await getMember(sub);
+      await deleteMember(sub);
+      await audit({ orgId: existing?.orgId, actor, action: "member.revoke", target: sub, detail: {} });
+      return resp(200, { ok: true });
+    }
+
+    if (method === "POST" && path === "/ent/members/provision") {
+      // Staff-only: create the Cognito user AND bind the seat in ONE step, so
+      // onboarding an employer never needs the AWS console. The Worker holds the pool
+      // id and passes it; IAM (policy-ent.json) is what actually scopes which pool
+      // this may write to. Email invite only - NEVER SMS - so it stays $0.
+      const email = String(parsed.email ?? "").trim().toLowerCase();
+      const orgId = String(parsed.orgId ?? "").trim();
+      const poolId = String(parsed.poolId ?? "").trim();
+      const actor = cleanActor(parsed.actor);
+      if (!email || !orgId || !poolId) return resp(400, { error: "email, orgId and poolId required" });
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return resp(400, { error: "invalid email" });
+      const org = await getOrg(orgId);
+      if (!org) return resp(404, { error: "no such org" });
+
+      // cognito-idp is a client-* package the nodejs runtime normally provides;
+      // import it LAZILY so a runtime that lacks it fails cleanly HERE (feature
+      // unavailable) instead of 500-ing the whole engine at load.
+      let CognitoIdentityProviderClient, AdminCreateUserCommand, AdminGetUserCommand;
+      try {
+        ({ CognitoIdentityProviderClient, AdminCreateUserCommand, AdminGetUserCommand } =
+          await import("@aws-sdk/client-cognito-identity-provider"));
+      } catch (e) {
+        console.error("[ent/members/provision] cognito-idp client unavailable:", e?.message);
+        return resp(501, { error: "PROVISION_UNAVAILABLE" });
+      }
+      const cog = new CognitoIdentityProviderClient({ region: "us-east-1" });
+
+      let sub;
+      try {
+        // Cognito-generated temp password, delivered by EMAIL only (no SNS/SMS cost).
+        // email_verified=true so they can sign in and reset immediately; custom:orgId
+        // mirrors the binding, but the membership record written below is what
+        // actually authorizes (auth/callback re-checks it, fail-closed).
+        const created = await cog.send(new AdminCreateUserCommand({
+          UserPoolId: poolId,
+          Username: email,
+          UserAttributes: [
+            { Name: "email", Value: email },
+            { Name: "email_verified", Value: "true" },
+            { Name: "custom:orgId", Value: orgId },
+          ],
+          DesiredDeliveryMediums: ["EMAIL"],
+        }));
+        sub = created?.User?.Attributes?.find((a) => a.Name === "sub")?.Value;
+      } catch (e) {
+        if (e?.name === "UsernameExistsException") {
+          // Already provisioned (or self-registered): look up the existing sub and just
+          // (re)bind the seat, so this is idempotent instead of a dead end.
+          try {
+            const got = await cog.send(new AdminGetUserCommand({ UserPoolId: poolId, Username: email }));
+            sub = got?.UserAttributes?.find((a) => a.Name === "sub")?.Value;
+          } catch (e2) {
+            console.error("[ent/members/provision] AdminGetUser failed:", e2?.name, e2?.message);
+            return resp(502, { error: "PROVISION_FAILED" });
+          }
+        } else {
+          // Full detail to CloudWatch ONLY; a fixed, safe string to the caller.
+          console.error("[ent/members/provision] AdminCreateUser failed:", e?.name, e?.message);
+          return resp(502, { error: "PROVISION_FAILED" });
+        }
+      }
+      if (!sub) return resp(502, { error: "PROVISION_FAILED" });
+
+      const m = await putMember({ sub, orgId, email, actor });
+      await audit({ orgId, actor, action: "member.provision", target: sub, detail: { email } });
+      return resp(200, { ok: true, member: m });
+    }
+
     if (method === "POST" && path === "/ent/rec/start") {
       const { inviteToken } = parsed;
       const invite = await getInvite(inviteToken);
@@ -2575,12 +2689,23 @@ export async function handler(event) {
       const invite = await getInvite(inviteToken);
       if (!invite) return resp(404, { error: "not found" });
 
-      // Idempotent: a double-submit (e.g. timer auto-submit racing a manual
-      // click) returns the already-computed result instead of re-grading a
-      // torn-down account.
+      // Idempotent + data-loss-safe. The STORED RESULT - not the invite status -
+      // is the source of truth for "already graded". Grading runs against a live
+      // account that teardown wipes seconds after the first submit, so re-grading
+      // yields a zero; overwriting a real result with that zero would silently
+      // destroy the candidate's grade. Checking the result first also closes the
+      // window where putResult succeeded but the following setInviteStatus (or the
+      // HTTP 200) was lost and the client retried - a timer auto-submit racing a
+      // manual click, a dropped response, a Lambda timeout right after the write.
+      const existingResult = await getResult(invite.assessmentId, inviteToken);
+      if (existingResult) {
+        return resp(200, { ok: true, submitted: true, result: existingResult });
+      }
       if (invite.status === "submitted") {
-        const existing = await getResult(invite.assessmentId, inviteToken);
-        return resp(200, { ok: true, submitted: true, result: existing });
+        // Marked submitted but no result persisted (rare). The account is already
+        // gone, so grading is impossible - report submitted with no result rather
+        // than grading a torn-down environment into a false zero.
+        return resp(200, { ok: true, submitted: true, result: null });
       }
       if (invite.status !== "started") {
         return resp(409, { error: "NOT_SUBMITTABLE" });
@@ -2645,6 +2770,9 @@ export async function handler(event) {
           criteria: crit,
           passedCount: passed,
           totalCriteria: total,
+          // Same computed frame coverage as the AWS submit path - both paths must
+          // stamp it or the report would show a parameter count for one cloud only.
+          frame: countParameters(crit),
           reflectionText,
           reflectionScore: null,
           integrity: "pending",

@@ -82,7 +82,8 @@ $ENGINE_MODULES = @(
   "azure-infra.mjs",
   "graders.azure.mjs",
   "recinfra.mjs",
-  "timeline.mjs"
+  "timeline.mjs",
+  "taxonomy.mjs"
 )
 
 # IMPORT-CLOSURE GUARD. This list is hand-maintained, and a NEW module imported by
@@ -107,6 +108,33 @@ if ($missing.Count -gt 0) {
 }
 Write-Host "  import-closure OK ($($ENGINE_MODULES.Count) modules)"
 
+# SDK-DEPENDENCY GUARD (sibling to the import-closure guard above). A bundled module
+# importing a NON-client @aws-sdk package -- e.g. @aws-sdk/s3-request-presigner -- is
+# NOT provided by the nodejs22.x runtime (only the client-* / lib-* service SDKs are),
+# so it MUST be a declared dependency or the bundler won't pack it and the Lambda 500s
+# at runtime the first time that path runs. This bit us once (the recording presigner).
+# Refuse to deploy if any STATIC non-client @aws-sdk import is absent from package.json.
+# (Lazy `await import(...)` of a client-* is intentionally exempt -- those degrade
+# gracefully by design, e.g. timeline.mjs's CloudTrail client / the bedrock grader.)
+$pkgJsonRaw = Get-Content (Join-Path $SCRIPT_DIR "package.json") -Raw
+$sdkMissing = @()
+foreach ($m in $ENGINE_MODULES) {
+    $p = Join-Path $SCRIPT_DIR $m
+    if (-not (Test-Path $p)) { continue }
+    foreach ($line in (Get-Content $p)) {
+        if ($line -match 'from\s+"(@aws-sdk/[A-Za-z0-9._-]+)"') {
+            $pkg = $Matches[1]
+            if ($pkg -like "@aws-sdk/client-*" -or $pkg -like "@aws-sdk/lib-*") { continue }
+            if ($pkgJsonRaw -notmatch [regex]::Escape('"' + $pkg + '"')) { $sdkMissing += "$pkg (imported by $m)" }
+        }
+    }
+}
+if ($sdkMissing.Count -gt 0) {
+    Write-Error ("Deploy refused: non-client @aws-sdk packages imported but NOT in package.json (the runtime will not provide them -- add to dependencies so they get bundled):`n  " + (($sdkMissing | Select-Object -Unique) -join "`n  "))
+    exit 1
+}
+Write-Host "  sdk-dependency OK (non-client @aws-sdk imports are declared)"
+
 Compress-Archive -Path ($ENGINE_MODULES | ForEach-Object { Join-Path $SCRIPT_DIR $_ }) -DestinationPath $ZIP_PATH
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -124,23 +152,33 @@ Get-ChildItem $LABS_ROOT -Recurse -File | ForEach-Object {
 }
 
 # node_modules/<...> entries -> unzip to /var/task/node_modules so Node resolves the
-# @azure/* SDKs the Azure driver dynamically imports. Pack EVERYTHING under
-# node_modules EXCEPT @aws-sdk (the runtime provides it) and .bin (shell shims, not
-# needed). If node_modules is absent (deps not installed), skip with a warning -- the
-# AWS path still deploys fine; only the Azure path would then be broken at runtime.
+# @azure/* SDKs the Azure driver dynamically imports, plus @aws-sdk/s3-request-presigner
+# (below). Pack EVERYTHING under node_modules EXCEPT the @aws-sdk SERVICE CLIENTS
+# (client-* / lib-*, which the nodejs22.x runtime provides) and .bin (shell shims). We
+# deliberately DO bundle the rest of @aws-sdk - the s3-request-presigner used by
+# recinfra.mjs for recording uploads is NOT reliably in the runtime, and a missing
+# presigner 500s every recording PUT. client-* stay runtime-provided, so grading /
+# leasing / submit module resolution is unchanged. If node_modules is absent (deps not
+# installed), skip with a warning -- the AWS grading path still deploys fine; only the
+# Azure labs + recording-upload presign would then be broken at runtime.
 $NM_ROOT = "$SCRIPT_DIR\node_modules"
 if (Test-Path $NM_ROOT) {
     $NM_ROOT = (Resolve-Path $NM_ROOT).Path
     $nmCount = 0
     Get-ChildItem $NM_ROOT -Recurse -File | ForEach-Object {
         $relRaw = $_.FullName.Substring($NM_ROOT.Length + 1).Replace("\","/")
-        if ($relRaw -like "@aws-sdk/*" -or $relRaw -like ".bin/*") { return }
+        # Shell shims never needed.
+        if ($relRaw -like ".bin/*") { return }
+        # Runtime provides the @aws-sdk service clients + lib wrappers -> exclude to
+        # keep the zip small. Everything else under @aws-sdk (s3-request-presigner +
+        # its util/signature closure) IS bundled.
+        if ($relRaw -like "@aws-sdk/client-*" -or $relRaw -like "@aws-sdk/lib-*") { return }
         $rel = "node_modules/" + $relRaw
         $e = $zip.CreateEntry($rel); $s = $e.Open()
         $b = [System.IO.File]::ReadAllBytes($_.FullName); $s.Write($b,0,$b.Length); $s.Close()
         $nmCount++
     }
-    Write-Host "  bundled $nmCount node_modules files (@azure closure; @aws-sdk excluded)"
+    Write-Host "  bundled $nmCount node_modules files (@azure + @aws-sdk presigner closure; @aws-sdk client-*/lib-* excluded)"
 } else {
     Write-Warning "  node_modules not found at $NM_ROOT - Azure labs will fail at runtime (run 'npm ci' in engine/ first). AWS path unaffected."
 }

@@ -43,6 +43,10 @@ export type OfferLetterInput = {
   acceptBy?: string; // e.g. "10 March 2026"
   retentionMonths?: number; // e.g. 36 -> adds retention line to Data Protection
   seal?: boolean; // view applies the company seal near the signatory block
+  /** The "collect original in person" watermark assumes the employee is
+   * coming into the office — false for a fully remote engagement, or a
+   * backdated/retrospective letter for someone who already left. */
+  noWatermark?: boolean;
 };
 
 export type OfferSection = {
@@ -71,9 +75,31 @@ export type OfferLetter = {
   signatory: { name: string; designation: string };
   seal: boolean;
   acceptBy?: string;
+  noWatermark?: boolean;
 };
 
 const fmt = (n: number) => (Number(n) || 0).toLocaleString("en-IN");
+
+/**
+ * Duties default for a full-time appointment when the employee record carries
+ * none — same reasoning as internship.ts's defaultScopeFor: matching on
+ * designation where we can beats a generic filler that reads as finished but
+ * says nothing role-specific. Returns null (caller falls back to
+ * DEFAULT_DUTIES) for anything that doesn't match, rather than guessing.
+ */
+export function defaultDutiesFor(designation: string): string[] | null {
+  const d = (designation ?? "").toLowerCase();
+  if (/security|cloud|soc|analyst|engineer|grc|compliance/.test(d)) {
+    return [
+      "Auditing and hardening AWS environments — IAM policies and roles, S3 bucket policies, KMS key usage, VPC security groups and network ACLs — against industry security baselines.",
+      "Configuring and monitoring AWS-native security tooling, including GuardDuty, Security Hub, CloudTrail, and Config, to detect and respond to misconfigurations and threats.",
+      "Supporting cloud security assessments, vulnerability management, and remediation tracking across client and internal AWS accounts.",
+      "Documenting findings, fixes, and verification steps, and presenting results to stakeholders.",
+      "Supporting client engagements and contributing to the Company's AWS cloud security service delivery.",
+    ];
+  }
+  return null;
+}
 
 /** "INR 3,60,000 (Rupees Three Lakh Sixty Thousand only) per <unit>" — signed-letter style. */
 function moneyLong(amount: number, unit: string): string {
@@ -136,7 +162,7 @@ export function buildOfferLetter(input: OfferLetterInput): OfferLetter {
       blocks: [
         {
           type: "p",
-          text: `Your gross remuneration is ${moneyLong(e.grossMonthly, "month")} (Annual CTC INR ${fmt(e.annualCTC)}), payable monthly in arrears by the agreed pay date, subject to applicable statutory deductions including, where applicable, Provident Fund, Professional Tax, and Tax Deducted at Source (TDS). The detailed salary structure is set out in Annexure A.`,
+          text: `Your gross remuneration is ${moneyLong(e.grossMonthly, "month")} (Annual CTC INR ${fmt(e.annualCTC)}), paid monthly for the preceding month, by the agreed pay date, subject to applicable statutory deductions including, where applicable, Provident Fund, Professional Tax, and Tax Deducted at Source (TDS). The detailed salary structure is set out in Annexure A.`,
         },
         {
           type: "p",

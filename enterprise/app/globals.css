@@ -536,6 +536,27 @@ a {
   .hv-token {
     font-size: 10px;
   }
+
+  /* PHONE PERF: freeze the hero as a composed still.
+     The scene is a preserve-3d stack whose panels each carry
+     backdrop-filter: blur(2px), sitting under two filter: blur(60px) glows on
+     9s/11s loops. Animated backdrop-filter over a 3D layer is one of the most
+     expensive things a mobile GPU can be asked to do - it stutters the first
+     scroll off the hero on mid-range Android and keeps draining battery for
+     the whole visit, for a purely decorative visual. Frozen it still reads
+     exactly the same in a screenshot. Desktop is untouched. */
+  .hv-scene,
+  .hv-glow-brand,
+  .hv-glow-blue,
+  .hv-dot,
+  .hv-token,
+  .hv-report {
+    animation: none;
+  }
+  .hv-panel {
+    backdrop-filter: none;
+    background: rgba(255, 255, 255, 0.85);
+  }
 }
 
 /* Reduced motion: freeze everything still and composed
@@ -906,5 +927,86 @@ a {
   .pt-root:not(.pt-playing) .pt-score,
   .pt-root:not(.pt-playing) .pt-bar {
     animation: none;
+  }
+}
+
+/* -------------------------------------------------------------------------
+   Cross-app baselines (2026-07-25)
+
+   These rules existed on the B2C labs app and the marketing site but NOT here,
+   so the enterprise app was the odd one out: a keyboard user moving between our
+   properties lost the focus ring, and touch targets in the header and product
+   tour sat below the comfortable-tap threshold. Fixed at the stylesheet level
+   rather than per-component so new markup inherits it for free - same reason
+   labs does it this way.
+
+   ASCII-ONLY on purpose: Lightning CSS (Next dev) silently DROPS every rule
+   after a non-ASCII character in this file. Do not paste em-dashes here.
+   ------------------------------------------------------------------------- */
+
+/* 1. Focus ring for EVERY interactive element. Previously each component had to
+   remember its own focus-visible: classes and an audit found several that did
+   not (the browser default is close to invisible on our amber buttons and
+   tinted panels). This is the safety net; per-component rings still win. */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-brand) 70%, transparent);
+  outline-offset: 2px;
+}
+
+/* 2. Comfortable touch targets on TOUCH DEVICES ONLY. Guarded by
+   (pointer: coarse) so the dense desktop layout is untouched - this only pads
+   controls out for fingers. Anything that opts out can set .allow-tight. */
+@media (pointer: coarse), (any-pointer: coarse) {
+  a:not(.allow-tight),
+  button:not(.allow-tight),
+  [role="button"]:not(.allow-tight),
+  summary:not(.allow-tight) {
+    min-height: 44px;
+    /* min-height does nothing on a non-replaced INLINE box, so an anchor styled
+       `inline` silently ignored the rule above. inline-flex makes the height
+       real while still sitting in the text flow. Prose links are excluded
+       below - there, inline-flex would stop the link wrapping across lines. */
+    display: inline-flex;
+    align-items: center;
+  }
+  /* Inline links inside running text must NOT get 44px of height - that would
+     wreck paragraph rhythm. They get vertical padding for the finger instead. */
+  p a:not(.allow-tight),
+  li a:not(.allow-tight) {
+    min-height: 0;
+    display: inline;
+    padding-block: 2px;
+  }
+  /* Footer/legal rows: stay visually small but finger-friendly. */
+  footer a:not(.allow-tight) {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
+  input,
+  select,
+  textarea {
+    min-height: 44px;
+    /* iOS Safari zooms the page when a focused input is under 16px. */
+    font-size: max(16px, 1em);
+  }
+}
+
+/* 3. Honest motion defaults. Interactive affordances get one short consistent
+   transition so state changes read as intentional rather than as a repaint.
+   150ms: long enough to perceive, short enough to never feel like waiting. */
+@media (prefers-reduced-motion: no-preference) {
+  a,
+  button,
+  [role="button"],
+  input,
+  select,
+  textarea {
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease,
+      box-shadow 150ms ease,
+      opacity 150ms ease;
   }
 }

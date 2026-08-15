@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
+import { todayDisplay } from "@/lib/dates";
 import { buildConfirmationLetter } from "@/lib/documents/letters";
 import type { Employee } from "@/lib/employee";
 import { SimpleLetterDoc } from "@/components/SimpleLetterDoc";
@@ -8,10 +9,6 @@ import { DocToolbar } from "@/components/DocToolbar";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Confirmation letter", robots: { index: false, follow: false } };
 
-function today(): string {
-  const d = new Date();
-  return `${String(d.getDate()).padStart(2, "0")} ${d.toLocaleString("en-GB", { month: "short" })} ${d.getFullYear()}`;
-}
 function disp(iso: string): string {
   const [y, m, dd] = iso.split("-").map(Number);
   if (!y || !m || !dd) return "";
@@ -44,8 +41,8 @@ export default async function GenerateConfirmation({
 
   const now = new Date();
   const ref = sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`;
-  const confirmationDate = sp.cd ? disp(sp.cd) : defaultConfirmation(e) || today();
-  const letter = buildConfirmationLetter(e, { ref, date: today(), confirmationDate });
+  const confirmationDate = sp.cd ? disp(sp.cd) : defaultConfirmation(e) || todayDisplay();
+  const letter = buildConfirmationLetter(e, { ref, date: todayDisplay(), confirmationDate });
 
   const configBar = (
     <form method="get" style={{ marginTop: 8, border: "1px solid #e2e8f2", borderRadius: 10, padding: "10px 12px", background: "#fff", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 12.5 }}>

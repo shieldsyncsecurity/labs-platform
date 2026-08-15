@@ -59,7 +59,7 @@ Goal: **same-day go-live**. Everything below is pre-staged; the day Paytm approv
 
 Real money, smallest amount — the cheapest purchasable lab is the IAM lab at ₹249
 (current price authority: `app/lib/payments/pricing.ts`); refund from the dashboard if desired.
-- [ ] **Happy path**: sign in with the test account (`himanshujain0901@gmail.com`) → locked paid lab → "Get this lab" → Paytm popup → pay ₹249 (UPI) → sheet shows "Payment confirmed" → "Start the lab" launches. Verify entitlement row (type PAY_PER_LAB, maxLaunches 30, launchCount 1 after launch).
+- [x] **Happy path — DONE 2026-07-14 (UPI):** real ₹249 UPI payment via the QR completed & confirmed (owner-verified) after the CSP `wss://` fix. Path: sign in with the test account (`himanshujain0901@gmail.com`) → locked paid lab → "Get this lab" → Paytm popup → pay ₹249 (UPI) → sheet shows "Payment confirmed" → "Start the lab" launches. (Card happy-path was verified at go-live 2026-07-10.)
 - [ ] **Replay safety**: re-POST `/api/payments/paytm/confirm` with the same orderId → `paid:true` but NO double grant (idempotent CAS; check entitlement version).
 - [ ] **Forged success**: POST confirm with a never-paid orderId → `paid:false`.
 - [ ] **Cross-user guard**: confirm another user's orderId from the test session → 403.

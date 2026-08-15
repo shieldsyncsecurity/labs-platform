@@ -6,18 +6,24 @@ resources. Local dev needs none of it (see the bottom).
 
 ## 0. Prereqs
 - The two mailboxes must exist and be reachable: `admin@shieldsyncsecurity.com`, `hr@shieldsyncsecurity.com`.
+- **Resend:** the sending domain `shieldsyncsecurity.com` must be VERIFIED in the Resend dashboard
+  for `HR_MAIL_FROM` (default `hr@shieldsyncsecurity.com`) — unverified domains 403 and every send
+  fails as `SEND_FAILED`. (Already verified if the enterprise e-sign portal sends from this domain.)
 - AWS CLI logged in with access to assume `OrganizationAccountAccessRole` in platform account `750294427884`.
-- **Dev-data hygiene:** local dev stores data unencrypted in `%TEMP%`. Before go-live, purge it —
+- **Dev-data hygiene:** local dev stores data unencrypted under `engine/.dev-data/`
+  (project-local, git-ignored — NOT `%TEMP%`, which Windows periodically wipes and
+  once silently destroyed a real candidate's record). Before go-live, purge it —
   ```powershell
-  Remove-Item -Recurse -Force "$env:TEMP\shieldsync-hr-kyc","$env:TEMP\shieldsync-hr-dev-store.json" -ErrorAction SilentlyContinue
+  Remove-Item -Recurse -Force "engine\.dev-data" -ErrorAction SilentlyContinue
   ```
   and keep only **synthetic** data in dev from now on (never real Aadhaar/PAN scans).
 
 ## 1. Provision the isolated AWS data plane (billable) — run from `engine/`
 ```powershell
-node create-hr-tables.mjs          # 3 HR tables + id counter + SSS/HR/2026 ref counter (seeded at 014), PITR on
+node create-hr-tables.mjs          # 4 HR tables (employees/documents/audit/CANDIDATES) + id counters
+                                   # + SSS/HR/2026 ref counter (seeded at 014), PITR on
 node create-hr-kyc-infra.mjs       # dedicated KMS CMK + KYC bucket (SSE-KMS, block-public, versioning,
-                                   # 30-day noncurrent-version expiry) + SSE-KMS on all 3 tables; patches policy-hr.json
+                                   # 30-day noncurrent-version expiry) + SSE-KMS on all 4 tables; patches policy-hr.json
 $env:HR_ENGINE_SECRET = "<long random, 32+ chars — the script offers a generated one>"
 $env:RESEND_API_KEY   = "<Resend key>"          # for emailing documents (optional but recommended)
 $env:HR_MAIL_FROM     = "ShieldSync HR <hr@shieldsyncsecurity.com>"
@@ -35,10 +41,14 @@ npx wrangler secret put COGNITO_CLIENT_SECRET   # the HR app-client secret (step
 
 ## 3. Cognito (pool `us-east-1_54vIGJe4R`)
 - **Create a DEDICATED app client for HR** (don't reuse the enterprise client — separate secret,
-  separate callback list, no cross-app blast radius). Allowed URLs:
+  separate callback list, no cross-app blast radius). The code requires ALL of:
+  - **Generate a client secret** (the token exchange uses HTTP Basic client auth)
+  - **OAuth grant:** Authorization code; **scopes:** `openid`, `email`, `profile`
+  - **Identity provider:** Cognito user pool enabled on the client
   - Callback: `https://employee.shieldsyncsecurity.com/api/auth/callback`
   - Sign-out: `https://employee.shieldsyncsecurity.com`
-  Then put its id in `hr/wrangler.jsonc` → `COGNITO_CLIENT_ID` and its secret in the Worker secret above.
+  Then put its id in `hr/wrangler.jsonc` → `COGNITO_CLIENT_ID` (replacing the placeholder) and its
+  secret in the Worker secret above.
 - Create the two users with `email_verified = true`: `admin@shieldsyncsecurity.com`, `hr@shieldsyncsecurity.com`.
 - **Enable MFA for both** (pool MFA = OPTIONAL so the enterprise app is untouched; enroll software
   TOTP for just these two users — `admin-set-user-mfa-preference`). One phished password must not
@@ -61,6 +71,17 @@ npm run cf:deploy      # opennextjs-cloudflare build (webpack) + wrangler deploy
 5. **Erasure is real:** upload + delete a KYC doc, then in the S3 console list VERSIONS for its key — no versions may remain.
 6. **Restore drill (once):** PITR-restore `ShieldSyncHrEmployees` to a temp table, confirm rows, delete the temp table.
 7. **Email:** send a test document to yourself via the Email button; confirm receipt + the `doc.email` audit entry + the archived copy.
+8. **Server PDF:** on an issued document, click **Download PDF** — the A4 must match the printed sheet (signature, seal, navy bands). Then send an Email WITHOUT attaching a file (server renders + attaches). Requires the Workers Paid plan's Browser Rendering; the `browser` binding is already in wrangler.jsonc.
+9. **Candidate questionnaire (the one PUBLIC surface):** add a test candidate → email yourself the link →
+   open it **in a logged-out browser / private window** and confirm all of:
+   - the form loads and you can submit it, and after submitting you can still see your own answers;
+   - the page shows **only** that candidate's name + role — no other candidate, no employee data, no portal nav;
+   - `https://employee.shieldsyncsecurity.com/candidates` in that same logged-out window redirects to `/login`
+     (the token opens the questionnaire, never the portal);
+   - changing one character of the token gives "This link is not valid";
+   - re-sending the link invalidates the previous one;
+   - the audit log shows `questionnaire.view` and `questionnaire.submit`.
+   Then delete the test candidate and confirm the row and its responses are gone.
 
 ## Rollback
 - Worker: `npx wrangler rollback` (or redeploy the previous build).
@@ -71,6 +92,21 @@ npm run cf:deploy      # opennextjs-cloudflare build (webpack) + wrangler deploy
 ## Data-protection posture (stated policy)
 - **Purpose:** employment records — offer/appointment, payroll, statutory compliance, and KYC of
   ShieldSync Security Private Limited employees. Access limited to the owner + EA (2 accounts, MFA).
+- **Candidate (hiring) data — a SEPARATE purpose and a shorter life.** Interview records live in
+  their own table (`ShieldSyncHrCandidates`, SSE-KMS, PITR) and are collected for THIS recruitment
+  only, with the candidate's explicit consent captured in the form itself. Retention: **12 months**
+  for anyone not hired — the Candidates page flags records past that window, and Delete removes the
+  row and all questionnaire responses (audited). When a candidate is hired, the hiring record is
+  retained as the evidence of how they were recruited and the employee record takes over.
+  The form deliberately does **not** ask for marital status, religion, caste, gender, age/DOB or
+  health: not job-relevant, and collecting them creates both discrimination exposure and needless
+  sensitive-data duty. Keep it that way when adding questions.
+- **The one unauthenticated surface:** `/q/<token>` (candidate questionnaire). It is reachable
+  without an HR session by design — candidates cannot log in. It is safe because the token is
+  192-bit random, expires (default 14 days), is bound to ONE candidate, is invalidated when
+  re-sent, and the route can do exactly two things: read that candidate's name + role, and write
+  their answers once. Never widen this route. If you add a public page, add it to the proxy
+  allowlist deliberately and re-run verify step 9.
 - **Retention:** records are retained for the life of the company **until manually erased by the
   owner** (owner's decision, 2026-07-22). Deletion is a deliberate, audited HR action and is REAL:
   all S3 object versions are purged, and DynamoDB rows removed. Note: Indian payroll law expects
@@ -89,7 +125,7 @@ npm run cf:deploy      # opennextjs-cloudflare build (webpack) + wrangler deploy
 
 ## Local development (no AWS, no cost)
 ```powershell
-# terminal 1 — the dev data plane (file store in %TEMP%; SYNTHETIC data only)
+# terminal 1 — the dev data plane (file store in engine/.dev-data/, project-local; SYNTHETIC data only)
 node engine/hr-server.mjs
 # terminal 2 — the app
 cd hr; npm run dev        # http://localhost:3003  (dev sign-in enabled via HR_DEV_LOGIN)

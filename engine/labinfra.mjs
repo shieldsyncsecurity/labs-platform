@@ -1031,8 +1031,44 @@ function friendlyResource(type, logicalId) {
   return seg ? seg.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase() : logicalId ?? null;
 }
 
+// ── Per-session misconfig variance ───────────────────────────────────────────
+// Labs whose template accepts a `Variant` parameter, and the values it allows.
+// Each variant plants a DIFFERENT subset of flaws, so a candidate handed "the
+// answer" cannot apply it blindly — one item is already correct in their
+// environment and a different one is broken. The GRADER reads the variant back
+// off the deployed stack and scores only the planted flaws (see graders.mjs).
+//
+// Passing a Variant to a template that does not declare the parameter is a hard
+// CloudFormation error, so this map is the whitelist — never pass for other labs.
+//
+// ⚠️ ENABLE `LAB_VARIANCE=1` ON THE ENTERPRISE ENGINE ONLY.
+// Variance makes the grader DROP criteria that a variant pre-fixed. The
+// ENTERPRISE report renders whatever criteria come back, so a shorter list is
+// fine. The B2C labs UI does NOT: its scorecard is the lab.json objective list
+// and it matches objective.id === criterion.id (app/components/lab-panel.tsx),
+// so a dropped criterion leaves that objective stuck "idle" forever — the
+// learner can never tick it. B2C also *wants* one stable, documented scenario
+// (it is a learning product; answer-sharing there is not a threat). Hiring is
+// where answer-sharing actually costs something, hence enterprise-only.
+const VARIANT_LABS = {
+  "s3-misconfiguration-audit": ["base", "A", "B", "C", "D"],
+};
+/**
+ * pickVariant(): choose a variant for a fresh deploy, or null to let the
+ * template's own default ("base" = every flaw, the original live-tested
+ * scenario) apply. FAIL-SAFE BY DEFAULT: returns null unless LAB_VARIANCE=1, so
+ * enabling variance is an explicit, reversible env flip — not a silent change to
+ * a live lab.
+ */
+export function pickVariant(labSlug) {
+  if (process.env.LAB_VARIANCE !== "1") return null;
+  const allowed = VARIANT_LABS[labSlug];
+  if (!allowed || allowed.length === 0) return null;
+  return allowed[Math.floor(Math.random() * allowed.length)];
+}
+
 /** deployStack(): assume ShieldSyncLabExec and create a lab's CloudFormation. */
-async function deployStack(execRoleArn, labSlug, stackName, tags = [], onProgress = null) {
+async function deployStack(execRoleArn, labSlug, stackName, tags = [], onProgress = null, variant = null) {
   // Hard sanity check: labSlug controls a filesystem path, so it must match the
   // whitelist. Any caller that already validated (labMeta/rulesFor) is fine; this
   // is the last-line defence against path traversal making it into a deploy.
@@ -1054,6 +1090,9 @@ async function deployStack(execRoleArn, labSlug, stackName, tags = [], onProgres
       StackName: stackName,
       TemplateBody: templateBody,
       Capabilities: ["CAPABILITY_NAMED_IAM"],
+      // Omitted entirely when variant is null -> the template's own default
+      // ("base") applies, i.e. byte-identical behaviour to before variance existed.
+      ...(variant ? { Parameters: [{ ParameterKey: "Variant", ParameterValue: variant }] } : {}),
       // DELETE (not DO_NOTHING): a CREATE_FAILED stack auto-rolls-back + deletes, so
       // it leaves no debris, the account recycles cleanly, and the stack name is
       // free if the learner retries. (Was DO_NOTHING — a dev-only setting.)
@@ -1123,12 +1162,15 @@ export async function deployLab({ sessionId, accountId, labSlug, execRoleArn }) 
   // Stream real CloudFormation progress onto the session (best-effort; never fails
   // the deploy) so the learner's build bar tracks the actual stack.
   const onProgress = (p) => markSessionProgress(sessionId, p).catch(() => {});
+  const variant = pickVariant(labSlug);
+  if (variant) console.log(`  variant=${variant}`);
   const { outputs } = await deployStack(
     execRoleArn,
     labSlug,
     stackName,
     [{ Key: "ShieldSyncSession", Value: sessionId }],
-    onProgress
+    onProgress,
+    variant
   );
   const db = await ddb();
   try {
@@ -1180,9 +1222,15 @@ export async function warmAccount(accountId, execRoleArn, labSlug) {
     throw e;
   }
   const stackName = ("sslab-" + labSlug + "-warm-" + accountId.slice(-6)).slice(0, 120);
+  let warmVariant = null;
   try {
     console.log(`  warming ${accountId} with ${labSlug} ...`);
-    await deployStack(execRoleArn, labSlug, stackName, [{ Key: "ShieldSyncWarm", Value: labSlug }]);
+    // A warm account is pre-deployed BEFORE anyone leases it, so its variant is
+    // fixed at warm time. Each teardown re-warms with a freshly picked variant,
+    // so consecutive candidates on the same account get different scenarios.
+    warmVariant = pickVariant(labSlug);
+    if (warmVariant) console.log(`  variant=${warmVariant}`);
+    await deployStack(execRoleArn, labSlug, stackName, [{ Key: "ShieldSyncWarm", Value: labSlug }], null, warmVariant);
   } catch (e) {
     await db
       .send(
@@ -1201,9 +1249,11 @@ export async function warmAccount(accountId, execRoleArn, labSlug) {
     new UpdateItemCommand({
       TableName: ACCOUNTS_TABLE,
       Key: { accountId: { S: accountId } },
-      UpdateExpression: "SET #s = :avail, warmLab = :l, warmStackName = :sn, warmReady = :t",
+      // warmVariant is observability only — the GRADER always reads the variant
+      // back off the deployed stack (authoritative, in-account), never from here.
+      UpdateExpression: "SET #s = :avail, warmLab = :l, warmStackName = :sn, warmReady = :t, warmVariant = :v",
       ExpressionAttributeNames: { "#s": "status" },
-      ExpressionAttributeValues: { ":avail": { S: "available" }, ":l": { S: labSlug }, ":sn": { S: stackName }, ":t": { BOOL: true } },
+      ExpressionAttributeValues: { ":avail": { S: "available" }, ":l": { S: labSlug }, ":sn": { S: stackName }, ":t": { BOOL: true }, ":v": { S: warmVariant ?? "base" } },
     })
   );
   console.log(`  warmed ${accountId}`);

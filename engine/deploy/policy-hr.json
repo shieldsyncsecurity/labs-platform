@@ -4,7 +4,11 @@
     {
       "Sid": "Logs",
       "Effect": "Allow",
-      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
       "Resource": "arn:aws:logs:us-east-1:750294427884:log-group:/aws/lambda/ShieldSyncHrEngine:*"
     },
     {
@@ -20,32 +24,51 @@
       ],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrEmployees",
-        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrDocuments"
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrDocuments",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrCandidates",
+        "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrBanking"
       ]
     },
     {
       "Sid": "DynamoDBHrAuditAppendOnly",
       "Effect": "Allow",
-      "Action": ["dynamodb:PutItem", "dynamodb:Scan"],
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:Scan"
+      ],
       "Resource": "arn:aws:dynamodb:us-east-1:750294427884:table/ShieldSyncHrAudit"
     },
     {
       "Sid": "S3KycObjects",
       "Effect": "Allow",
-      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:GetObjectVersion"],
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+        "s3:GetObjectVersion"
+      ],
       "Resource": "arn:aws:s3:::shieldsync-hr-kyc-750294427884/*"
     },
     {
       "Sid": "S3KycListVersions",
       "Effect": "Allow",
-      "Action": ["s3:ListBucket", "s3:ListBucketVersions"],
+      "Action": [
+        "s3:ListBucket",
+        "s3:ListBucketVersions"
+      ],
       "Resource": "arn:aws:s3:::shieldsync-hr-kyc-750294427884"
     },
     {
       "Sid": "KmsKycKey",
       "Effect": "Allow",
-      "Action": ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"],
-      "Resource": "arn:aws:kms:us-east-1:750294427884:key/REPLACE_WITH_HR_KMS_KEY_ID"
+      "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:GenerateDataKey",
+        "kms:DescribeKey"
+      ],
+      "Resource": "arn:aws:kms:us-east-1:750294427884:key/4da25b0f-747a-4eb1-b305-64677ee965e7"
     }
   ]
 }

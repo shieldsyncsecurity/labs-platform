@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { exchangeCode, verifyIdToken, STATE_COOKIE } from "@/lib/server/cognito";
 import { setOrgIdCookie } from "@/lib/server/portal-session";
 import { setAdminCookie } from "@/lib/server/admin-session";
+import { entFetch, EntEngineError } from "@/lib/server/ent-engine";
 
 // Cognito Hosted-UI redirect target. Validates the CSRF `state`, exchanges the
 // auth code for tokens, verifies the id_token signature (jose/JWKS), then routes
@@ -88,7 +89,32 @@ export async function GET(req: Request) {
     return NextResponse.redirect(`${base}/admin`);
   }
   if (orgId) {
-    await setOrgIdCookie(orgId, { sub, email });
+    // The custom:orgId CLAIM is not sufficient on its own. It lives on a Cognito
+    // user attribute, so any future app-client misconfiguration (attribute made
+    // client-writable, USER_PASSWORD_AUTH re-enabled, an admin slip) would let a
+    // real employer repoint it at ANOTHER tenant and mint a valid session for it.
+    // Verify it against the server-side membership record, which only staff can
+    // write. FAIL CLOSED: no record, a mismatch, or an unreachable engine all deny
+    // — an auth decision must never degrade open on a transient error.
+    let memberOrgId: string | null = null;
+    try {
+      const m = await entFetch<{ orgId?: string }>("/ent/member", { query: { sub: sub ?? "" } });
+      memberOrgId = typeof m?.orgId === "string" ? m.orgId : null;
+    } catch (e) {
+      if (e instanceof EntEngineError && e.status === 404) {
+        console.warn("[auth/callback] no membership record for sub; denying portal session");
+        return loginErr("no_access");
+      }
+      console.error("[auth/callback] membership lookup failed:", e instanceof Error ? e.message : String(e));
+      return loginErr("verify");
+    }
+    if (!memberOrgId || memberOrgId !== orgId) {
+      // Claim disagrees with the authoritative record -> treat as an escalation
+      // attempt, log it for the audit trail, and deny.
+      console.error("[auth/callback] orgId claim does not match membership record; denying");
+      return loginErr("no_access");
+    }
+    await setOrgIdCookie(memberOrgId, { sub, email });
     return NextResponse.redirect(`${base}/portal`);
   }
   // Authenticated but has no org and is not staff -- nothing to show them.

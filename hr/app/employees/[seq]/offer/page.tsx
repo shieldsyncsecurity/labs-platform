@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
-import { buildOfferLetter } from "@/lib/documents/offer-letter";
+import { todayDisplay } from "@/lib/dates";
+import { buildOfferLetter, defaultDutiesFor } from "@/lib/documents/offer-letter";
 import { DEFAULT_DUTIES, type Employee } from "@/lib/employee";
 import { OfferLetterDoc } from "@/components/OfferLetterDoc";
 import { DocToolbar } from "@/components/DocToolbar";
@@ -8,10 +9,6 @@ import { DocToolbar } from "@/components/DocToolbar";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Appointment letter", robots: { index: false, follow: false } };
 
-function today(): string {
-  const d = new Date();
-  return `${String(d.getDate()).padStart(2, "0")} ${d.toLocaleString("en-GB", { month: "short" })} ${d.getFullYear()}`;
-}
 
 export default async function GenerateOffer({
   params,
@@ -37,7 +34,7 @@ export default async function GenerateOffer({
   const ref = sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`;
   const letter = buildOfferLetter({
     ref,
-    date: today(),
+    date: todayDisplay(),
     employee: {
       name: e.name,
       address: e.address,
@@ -50,7 +47,7 @@ export default async function GenerateOffer({
       baseLocation: e.baseLocation,
       reportingTo: e.reportingTo,
     },
-    duties: e.duties.length ? e.duties : DEFAULT_DUTIES,
+    duties: e.duties.length ? e.duties : (defaultDutiesFor(e.designation) ?? DEFAULT_DUTIES),
     structure: e.structure,
     probationMonths: e.probationMonths,
   });
@@ -59,12 +56,18 @@ export default async function GenerateOffer({
     <OfferLetterDoc
       letter={letter}
       toolbar={
-        <DocToolbar
-          backHref={`/employees/${seq}`}
-          backLabel={e.name}
-          save={{ seq, docType: "offer", title: letter.title, refSeries: "hr", refYear: now.getFullYear(), snapshot: letter }}
-          email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Your Letter of Appointment — ShieldSync Security` }}
-        />
+        <>
+          <div style={{ background: "#fdf4e3", border: "1px solid #f0dfb8", color: "#7a5714", fontSize: 12.5, borderRadius: 8, padding: "9px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+            <b>Policy:</b> offers are collected in person at the office, not emailed. Print or save this letter for the candidate to
+            sign and collect physically — use Email only if they genuinely cannot come in.
+          </div>
+          <DocToolbar
+            backHref={`/employees/${seq}`}
+            backLabel={e.name}
+            save={{ seq, docType: "offer", title: letter.title, refSeries: "hr", refYear: now.getFullYear(), snapshot: letter }}
+            email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Your Letter of Appointment — ShieldSync Security` }}
+          />
+        </>
       }
     />
   );

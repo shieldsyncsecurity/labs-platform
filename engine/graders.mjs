@@ -34,6 +34,7 @@ import {
 // runtime bundle. The bedrock lab isn't `ready` yet, so this grader never runs in
 // prod — the dynamic import can't fail-at-load. Make it a top-level import again
 // once the client is confirmed bundled and the lab is live-tested.
+import { CloudFormationClient, DescribeStacksCommand } from "@aws-sdk/client-cloudformation";
 import { assumeInSandbox } from "./labinfra.mjs";
 
 const REGION = "us-east-1";
@@ -87,10 +88,71 @@ function isMissingBucket(e) {
 // Spread into a criterion to flag "couldn't verify" when a non-absence error hit.
 const unk = (err) => (err ? { unknown: true } : {});
 
+// ── Per-session variance ─────────────────────────────────────────────────────
+// Which flaws each variant PLANTS. A variant that ships a control already
+// correct must NOT credit the candidate for it, so the grader drops that
+// criterion entirely rather than auto-passing it (which would inflate the score
+// and make variants non-comparable). See labs/<slug>/template.yaml Conditions.
+const S3_VARIANT_PLANTS = {
+  base: { assetsPublic: true, enc: true, tls: true, iam: true },
+  A: { assetsPublic: true, enc: true, tls: false, iam: true }, // TLS pre-enforced
+  B: { assetsPublic: false, enc: true, tls: true, iam: true }, // assets pre-secured
+  C: { assetsPublic: true, enc: false, tls: true, iam: true }, // encryption pre-enforced
+  D: { assetsPublic: true, enc: true, tls: true, iam: false }, // IAM pre-scoped
+};
+
+/**
+ * readLabVariant(): read the variant back off the DEPLOYED stack — authoritative,
+ * lives in the candidate's own account, and cannot drift from what was actually
+ * built.
+ *
+ * Returns the variant name, or NULL when it genuinely could not be determined.
+ * The null case must NOT be collapsed into "base": "base" means "every flaw was
+ * planted, grade all of them", so defaulting an unreadable variant to base hands
+ * the candidate a free pass on whichever control their variant shipped
+ * already-correct (A->tls-only, C->encryption-required, D->least-privilege-iam).
+ * That is fail-OPEN scoring, the exact thing the `unknown` convention in this
+ * file exists to prevent. The caller marks the affected criteria `unknown`.
+ *
+ * A lab stack that exists but declares no Variant parameter is a pre-variance
+ * deploy — that IS confidently "base", not an unknown.
+ */
+async function readLabVariant(creds) {
+  try {
+    const cfn = new CloudFormationClient({ region: REGION, credentials: creds });
+    const r = await cfn.send(new DescribeStacksCommand({}));
+    // A sandbox holds exactly one lab stack (warm or cold). Prefer a stack that
+    // actually declares Variant; ignore any unrelated/rolled-back stacks.
+    let sawLabStack = false;
+    for (const st of r.Stacks ?? []) {
+      if (!/^sslab-/.test(st.StackName ?? "")) continue;
+      if (!["CREATE_COMPLETE", "UPDATE_COMPLETE"].includes(st.StackStatus ?? "")) continue;
+      sawLabStack = true;
+      const p = (st.Parameters ?? []).find((x) => x.ParameterKey === "Variant");
+      if (p?.ParameterValue && S3_VARIANT_PLANTS[p.ParameterValue]) return p.ParameterValue;
+    }
+    if (sawLabStack) return "base"; // pre-variance template — confidently all-flaws
+  } catch {
+    /* unverifiable — fall through */
+  }
+  return null;
+}
+
 // ── S3 misconfiguration & data exposure ──────────────────────────────────────
 async function gradeS3(creds, accountId) {
   const s3 = new S3Client({ region: REGION, credentials: creds });
   const buckets = [`sslab-data-${accountId}`, `sslab-assets-${accountId}`];
+  // Which flaws this session actually had planted. null = could not determine.
+  const variantRead = await readLabVariant(creds);
+  const plants = S3_VARIANT_PLANTS[variantRead ?? "base"] ?? S3_VARIANT_PLANTS.base;
+  // An undeterminable variant only threatens SCORING where variants can actually
+  // exist. With LAB_VARIANCE off nothing ever deploys a non-base variant, so
+  // falling back to "grade everything" is exactly the pre-variance behaviour and
+  // must NOT start marking criteria unknown (that would newly deny B2C learners
+  // their certificate on a transient DescribeStacks blip). With variance ON, an
+  // unreadable variant is a real "could not verify" and is flagged as such.
+  const variantUnknown = variantRead === null && process.env.LAB_VARIANCE === "1";
+  const vunk = variantUnknown ? { unknown: true } : {};
 
   const info = {};
   let probeErr = null; // any non-absence error makes the bucket criteria "unknown"
@@ -184,18 +246,50 @@ async function gradeS3(creds, accountId) {
   // Only claim intact/deleted if existence was actually confirmed for every bucket; if any
   // probe was ambiguous (403/throttle, never a definitive 200 or missing), report "unknown".
   const existUnverified = buckets.some((b) => !info[b].existKnown) ? (existErr || true) : null;
-  return [
+
+  // Criteria for a control this variant shipped ALREADY CORRECT are dropped, not
+  // auto-passed: the candidate did no work for them, so counting them would
+  // inflate the score and make variants incomparable. The always-present ones
+  // still demand real work in every variant (the data bucket is public in all of
+  // them), or are "don't break it" checks that apply regardless.
+  // PER-RESOURCE SUB-CHECKS. A criterion stays PASS only when every bucket
+  // satisfies it (semantics unchanged, so scoring and ranking are untouched),
+  // but it now carries the per-bucket detail. Without this a candidate who
+  // secured the data bucket and missed the assets bucket scored EXACTLY the
+  // same as one who did nothing at all - five of the six criteria here are
+  // buckets.every(), so partial progress was being discarded wholesale.
+  // Reliability/statistics are still computed at the CRITERION level (sub-checks
+  // within a criterion are correlated, so treating them as independent items
+  // would be fake precision) - these exist to make the report legible and to
+  // aim the interviewer at the exact resource that was missed.
+  const shortName = (b) => (b.startsWith("sslab-data-") ? "data bucket" : b.startsWith("sslab-assets-") ? "assets bucket" : b);
+  const subs = (fn) => buckets.map((b) => ({ id: b, label: shortName(b), passed: !!fn(b) }));
+
+  const criteria = [
     // Correctness — did they achieve the required secure end-state (the core objective)?
-    { id: "no-public-buckets", dimension: "correctness", description: "No lab bucket allows anonymous public read.", passed: buckets.every(notPublic), ...unk(probeErr) },
-    // Security rigor — did they harden properly (least-privilege + defence-in-depth), not just do the minimum?
-    { id: "least-privilege-iam", dimension: "rigor", description: "The 'auditor' user no longer has s3:* on Resource '*'.", passed: !auditorBroad, ...unk(auditorErr) },
-    { id: "encryption-required", dimension: "rigor", description: "Each bucket denies unencrypted PutObject.", passed: buckets.every(encDeny), ...unk(probeErr) },
-    { id: "tls-only", dimension: "rigor", description: "Each bucket denies non-TLS (HTTP) requests.", passed: buckets.every(tlsDeny), ...unk(probeErr) },
-    // No new exposure — did the fix avoid leaving/opening an anonymous door?
-    { id: "no-anonymous-grant", dimension: "no_new_exposure", description: "No bucket policy grants a wildcard (anonymous) principal.", passed: buckets.every(noAnonGrant), ...unk(probeErr) },
-    // Operational safety — did they secure the workload without destroying it?
-    { id: "resources-intact", dimension: "operational_safety", description: "Both lab buckets still exist (secured, not deleted).", passed: bothIntact, ...unk(existUnverified) },
+    { id: "no-public-buckets", domain: "data_protection", dimension: "correctness", description: "No lab bucket allows anonymous public read.", passed: buckets.every(notPublic), subChecks: subs(notPublic), ...unk(probeErr) },
   ];
+  // Security rigor — did they harden properly (least-privilege + defence-in-depth), not just the minimum?
+  // These three are the variant-dependent ones. When the variant is unreadable we
+  // keep all three (we cannot know which were dropped) but mark them `unknown`, so
+  // a control the environment may have shipped already-correct can never be scored
+  // as the candidate's own work.
+  if (plants.iam) {
+    criteria.push({ id: "least-privilege-iam", domain: "identity", dimension: "rigor", description: "The 'auditor' user no longer has s3:* on Resource '*'.", passed: !auditorBroad, ...unk(auditorErr), ...vunk });
+  }
+  if (plants.enc) {
+    criteria.push({ id: "encryption-required", domain: "data_protection", dimension: "rigor", description: "Each bucket denies unencrypted PutObject.", passed: buckets.every(encDeny), subChecks: subs(encDeny), ...unk(probeErr), ...vunk });
+  }
+  if (plants.tls) {
+    criteria.push({ id: "tls-only", domain: "data_protection", dimension: "rigor", description: "Each bucket denies non-TLS (HTTP) requests.", passed: buckets.every(tlsDeny), subChecks: subs(tlsDeny), ...unk(probeErr), ...vunk });
+  }
+  criteria.push(
+    // No new exposure — did the fix avoid leaving/opening an anonymous door?
+    { id: "no-anonymous-grant", domain: "data_protection", dimension: "no_new_exposure", description: "No bucket policy grants a wildcard (anonymous) principal.", passed: buckets.every(noAnonGrant), subChecks: subs(noAnonGrant), ...unk(probeErr) },
+    // Operational safety — did they secure the workload without destroying it?
+    { id: "resources-intact", domain: "data_protection", dimension: "operational_safety", description: "Both lab buckets still exist (secured, not deleted).", passed: bothIntact, subChecks: subs((b) => info[b].exists), ...unk(existUnverified) }
+  );
+  return criteria;
 }
 
 // ── IAM privilege escalation ─────────────────────────────────────────────────
@@ -260,9 +354,9 @@ async function gradeIam(creds) {
   } catch (e) { if (!isAbsenceError(e)) simErr = e; }
 
   return [
-    { id: "admin-detached", description: "AdministratorAccess is no longer attached to pipeline-deployer.", passed: !adminAttached, ...unk(primErr) },
-    { id: "escalation-primitive-removed", description: "LabDeployerPolicy no longer grants iam:AttachUserPolicy (or other IAM-write) on '*'.", passed: !escalation, ...unk(primErr || escErr) },
-    { id: "deployer-still-works", description: "The user keeps its legitimate read permissions (s3:GetObject still allowed).", passed: stillWorks, ...unk(simErr) },
+    { id: "admin-detached", domain: "identity", dimension: "correctness", description: "AdministratorAccess is no longer attached to pipeline-deployer.", passed: !adminAttached, ...unk(primErr) },
+    { id: "escalation-primitive-removed", domain: "identity", dimension: "no_new_exposure", description: "LabDeployerPolicy no longer grants iam:AttachUserPolicy (or other IAM-write) on '*'.", passed: !escalation, ...unk(primErr || escErr) },
+    { id: "deployer-still-works", domain: "identity", dimension: "operational_safety", description: "The user keeps its legitimate read permissions (s3:GetObject still allowed).", passed: stillWorks, ...unk(simErr) },
   ];
 }
 
@@ -405,9 +499,9 @@ async function gradeBedrockPromptInjection(creds, accountId) {
   }
 
   return [
-    { id: "guardrail-attached", description: "A Bedrock Guardrail exists with a denied-topic/content policy configured.", passed: guardrailOk, ...unk(guardrailErr) },
-    { id: "invoke-least-privilege", description: "The assistant's invoke role allows bedrock:InvokeModel scoped to the Nova Lite model ARN only — no bedrock:* and no Resource '*'.", passed: invokeOk, ...unk(invokeErr) },
-    { id: "model-logging-enabled", description: "Bedrock model-invocation logging is configured with a destination.", passed: loggingOk, ...unk(loggingErr) },
+    { id: "guardrail-attached", domain: "ai_guardrails", dimension: "correctness", description: "A Bedrock Guardrail exists with a denied-topic/content policy configured.", passed: guardrailOk, ...unk(guardrailErr) },
+    { id: "invoke-least-privilege", domain: "ai_access", dimension: "rigor", description: "The assistant's invoke role allows bedrock:InvokeModel scoped to the Nova Lite model ARN only — no bedrock:* and no Resource '*'.", passed: invokeOk, ...unk(invokeErr) },
+    { id: "model-logging-enabled", domain: "ai_data", dimension: "rigor", description: "Bedrock model-invocation logging is configured with a destination.", passed: loggingOk, ...unk(loggingErr) },
   ];
 }
 

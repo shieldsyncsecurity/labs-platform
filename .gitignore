@@ -11,6 +11,8 @@ out/
 app/.env.local
 .env
 .env.production
+# Cloudflare Workers local secrets — never commit (repo-wide; per-app rules also exist)
+**/.dev.vars
 # Keys / certs / logs — never commit (matches any directory, incl. engine/)
 *.pem
 *.key
@@ -20,8 +22,22 @@ app/.env.local
 AUDIT_*.md
 MONETIZATION_ROADMAP.md
 
+# Dev-only local data stores — persisted IN the project (not OS temp, which
+# Windows periodically wipes and once destroyed real candidate data). Never
+# committed: candidate PII, uploaded KYC bytes, simulated outbound email.
+engine/.dev-data/
+
+# HR dev-data backup dir: never let a future dump of the real-PII dev store land
+# here. Ignore everything, then re-allow ONLY the intentionally-tracked docs.
+hr-dev-data-backup/*
+!hr-dev-data-backup/GO-LIVE-snapshot.md
+!hr-dev-data-backup/README.md
+!hr-dev-data-backup/questionnaire-template-snapshot.ts
+
 # Build artifacts
-engine/deploy/engine.zip
+*.tsbuildinfo
+engine/deploy/*.zip
+engine/deploy/*-env.tmp.json
 engine/bin/aws-nuke-linux
 engine/bin/aws-nuke.exe
 engine/bin/aws-nuke-v3.65.0-windows-amd64.zip
@@ -41,5 +57,4 @@ app/.wrangler/
 app/.claude/
 .open-next/
 app/.open-next/
-engine/deploy/ent-engine.zip
 infra/backup/backup-exporter.zip
