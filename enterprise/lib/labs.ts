@@ -15,8 +15,14 @@
 
 // slug -> employer-facing label. This map is the ONE place a lab is declared;
 // the allowlist and the form options below are both derived from it.
+// NOTE: s3-misconfiguration-audit is deliberately NOT offered here. It is also
+// a live B2C practice lab (app/lib/lab-catalog.ts) whose full walkthrough --
+// exact bucket-naming pattern, exact IAM policy JSON, exact fix commands -- is
+// published at app/lib/lab-content.ts. Any candidate could read that before a
+// hiring assessment, which defeats the entire "real work sample, not a
+// memorizable quiz" premise. B2B labs must be exclusive: never a slug also
+// live in the B2C catalog. See docs/ASSESSMENT-EXPANSION-AND-UNIFIED-LAB-PLAN.md.
 export const LAB_LABEL: Record<string, string> = {
-  "s3-misconfiguration-audit": "S3 misconfiguration & data exposure",
   "storage-public-exposure-audit": "Azure Storage public exposure & data leak",
 };
 
@@ -69,19 +75,13 @@ export type Module = {
 };
 
 // The ONE live module today. Grows as labs are authored (spec Phase 5, the long pole).
+// aws-s3-exposure-l2 (labSlug: s3-misconfiguration-audit) was removed -- that
+// slug is also a B2C practice lab with a published walkthrough, see the note
+// on LAB_LABEL above. A future AWS data-protection module needs a genuinely
+// distinct scenario/slug, not this one.
 export const MODULE_CATALOG: Module[] = [
   {
-    moduleId: "aws-s3-exposure-l2",
-    labSlug: "s3-misconfiguration-audit",
-    track: "aws",
-    domain: "data-protection",
-    level: 2,
-    title: "Lock the exposed S3 store — app preserved",
-    graderType: "state",
-    minutes: 20,
-  },
-  {
-    // Azure peer of the S3 data-exposure module. Engine target
+    // Azure peer of the (removed) S3 data-exposure module. Engine target
     // storage-public-exposure-audit carries track:"azure" in its lab.json, so the
     // enterprise engine routes its lease/deploy/grade/teardown to azure-infra.mjs.
     moduleId: "azure-storage-exposure-l1",
