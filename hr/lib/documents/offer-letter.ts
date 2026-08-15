@@ -350,5 +350,6 @@ export function buildOfferLetter(input: OfferLetterInput): OfferLetter {
     signatory,
     seal: input.seal ?? true, // pre-signed (signature + seal) by default
     acceptBy: input.acceptBy,
+    noWatermark: input.noWatermark,
   };
 }

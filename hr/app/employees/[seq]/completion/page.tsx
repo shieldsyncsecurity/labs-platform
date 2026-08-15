@@ -47,7 +47,7 @@ export default async function GenerateCompletion({
   const ref = sp.ref ?? `SSS/INT/${now.getFullYear()}/•••`;
   const letter = buildCompletionCertificate(e, {
     ref,
-    date: todayDisplay(),
+    date: sp.date?.trim() || todayDisplay(),
     fromDate: e.dateOfJoining,
     toDate: e.lastWorkingDay,
     project: (sp.project ?? "").trim() || undefined,

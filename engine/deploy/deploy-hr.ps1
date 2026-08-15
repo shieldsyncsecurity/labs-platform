@@ -123,7 +123,7 @@ if ([string]::IsNullOrWhiteSpace($vars["HR_ENGINE_SECRET"])) {
     exit 1
 }
 if ($vars["HR_ENGINE_SECRET"].Length -lt 32) {
-    Write-Error "HR_ENGINE_SECRET is under 32 characters — the engine will refuse all requests (fail closed). Use a longer secret."
+    Write-Error "HR_ENGINE_SECRET is under 32 characters - the engine will refuse all requests (fail closed). Use a longer secret."
     exit 1
 }
 # Optional email transport (Resend). Merged only when set in this shell.

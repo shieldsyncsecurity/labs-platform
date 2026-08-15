@@ -16,6 +16,7 @@ import {
   DEFAULT_PAYMENT_MODE,
 } from "@/lib/employee";
 import { DateField } from "./DateField";
+import { ResumeImport, type ParsedFields } from "./ResumeImport";
 
 import {
   Field,
@@ -32,6 +33,15 @@ export function EmployeeForm({ seq, initial }: { seq?: string; initial?: Partial
   const isEdit = Boolean(seq);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Resume import (Add only): prefills name / personal email / phone. Each of the
+  // three inputs remounts (via `key`) with the parsed value; PAN, address and
+  // everything else the user may have already typed are left untouched.
+  const [imported, setImported] = useState<{ name?: string; personalEmail?: string; phone?: string }>({});
+  const [importKey, setImportKey] = useState(0);
+  function handleParsed(f: ParsedFields) {
+    setImported({ name: f.name, personalEmail: f.email, phone: f.phone });
+    setImportKey((k) => k + 1);
+  }
 
   const d = initial ?? {};
   const dv = {
@@ -115,14 +125,16 @@ export function EmployeeForm({ seq, initial }: { seq?: string; initial?: Partial
         <div style={{ background: "#fdecef", border: "1px solid #f6c6ce", color: "#9a2233", fontSize: 12.5, borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>{error}</div>
       ) : null}
 
+      {!isEdit ? <ResumeImport onParsed={handleParsed} /> : null}
+
       <div style={group}>
         <div style={groupTitle}>Personal</div>
         <div style={grid}>
-          <Field name="name" label="Full name" required placeholder="e.g. Aarav Sample" defaultValue={dv.name} />
+          <Field key={`name-${importKey}`} name="name" label="Full name" required placeholder="e.g. Aarav Sample" defaultValue={imported.name ?? dv.name} />
           <Field name="pan" label="PAN" placeholder="e.g. ABCDE1234F" defaultValue={dv.pan} />
           <Field name="address" label="Address" full placeholder="e.g. 12, Sample Residency, Sector 62, Noida, Uttar Pradesh 201309" defaultValue={dv.address} />
-          <Field name="personalEmail" label="Personal email" placeholder="e.g. aarav.sample@gmail.com" defaultValue={dv.personalEmail} />
-          <Field name="phone" label="Phone" placeholder="e.g. +91 98765 43210" defaultValue={dv.phone} />
+          <Field key={`email-${importKey}`} name="personalEmail" label="Personal email" placeholder="e.g. aarav.sample@gmail.com" defaultValue={imported.personalEmail ?? dv.personalEmail} />
+          <Field key={`phone-${importKey}`} name="phone" label="Phone" placeholder="e.g. +91 98765 43210" defaultValue={imported.phone ?? dv.phone} />
         </div>
       </div>
 

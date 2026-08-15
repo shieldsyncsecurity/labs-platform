@@ -32,9 +32,15 @@ export default async function GenerateOffer({
   // saved/printed (the toolbar reloads with ?ref=). Until then show a
   // provisional placeholder — page views never consume a number.
   const ref = sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`;
+  // Retrospective issue: `?date=` stamps a historical letter date (e.g. the real
+  // joining date when formalising a prior verbal engagement) instead of today.
+  // In that mode the "collect original in person" watermark and policy note don't
+  // apply — the person has already been working — so both are dropped.
+  const retro = !!sp.date?.trim();
   const letter = buildOfferLetter({
     ref,
-    date: todayDisplay(),
+    date: sp.date?.trim() || todayDisplay(),
+    noWatermark: retro,
     employee: {
       name: e.name,
       address: e.address,
@@ -57,10 +63,16 @@ export default async function GenerateOffer({
       letter={letter}
       toolbar={
         <>
-          <div style={{ background: "#fdf4e3", border: "1px solid #f0dfb8", color: "#7a5714", fontSize: 12.5, borderRadius: 8, padding: "9px 12px", marginBottom: 10, lineHeight: 1.5 }}>
-            <b>Policy:</b> offers are collected in person at the office, not emailed. Print or save this letter for the candidate to
-            sign and collect physically — use Email only if they genuinely cannot come in.
-          </div>
+          {retro ? (
+            <div style={{ background: "#fdf4e3", border: "1px solid #f0dfb8", color: "#7a5714", fontSize: 12.5, borderRadius: 8, padding: "9px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+              <b>Retrospective letter:</b> dated {sp.date?.trim()} (not today). Issued to formalise a prior engagement — the in-person collection watermark is omitted.
+            </div>
+          ) : (
+            <div style={{ background: "#fdf4e3", border: "1px solid #f0dfb8", color: "#7a5714", fontSize: 12.5, borderRadius: 8, padding: "9px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+              <b>Policy:</b> offers are collected in person at the office, not emailed. Print or save this letter for the candidate to
+              sign and collect physically — use Email only if they genuinely cannot come in.
+            </div>
+          )}
           <DocToolbar
             backHref={`/employees/${seq}`}
             backLabel={e.name}

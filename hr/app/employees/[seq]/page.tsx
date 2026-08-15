@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
 import { getViewer } from "@/lib/server/hr-access";
 import { can, MASKED } from "@/lib/access";
-import { formatINR } from "@/lib/payslip";
+import { formatINR, suggestStructure } from "@/lib/payslip";
 import type { Employee } from "@/lib/employee";
 import { KycSection } from "@/components/KycSection";
 import { OnboardingChecklist } from "@/components/OnboardingChecklist";
@@ -11,26 +11,12 @@ import { DeleteEmployeeButton } from "@/components/DeleteEmployeeButton";
 import { OffboardControl } from "@/components/OffboardControl";
 import { SelfPinControl } from "@/components/SelfPinControl";
 import { VisibilityControl } from "@/components/VisibilityControl";
-import { AcceptedBadge } from "@/components/AcceptedBadge";
+import { DocumentsPanel, type DocRow } from "@/components/DocumentsPanel";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Employee — ShieldSync HR", robots: { index: false, follow: false } };
 
 type Gen = { docId: string; docType: string; title: string; ref: string; generatedBy: string; generatedAt: string; acceptedAt?: string | null };
-
-const DOCTYPE_LABEL: Record<string, string> = {
-  offer: "Appointment letter",
-  payslip: "Salary slip",
-  verification: "Verification letter",
-  experience: "Experience / relieving letter",
-  leave: "Leave approval letter",
-  increment: "Salary revision letter",
-  confirmation: "Confirmation letter",
-  "internship-offer": "Letter of Intent — Internship",
-  completion: "Certificate of completion",
-  "employment-history": "Employment history certificate",
-  "resignation-acceptance": "Resignation acceptance letter",
-};
 
 const row = (k: string, v?: string | number) => (
   <div style={{ display: "flex", gap: 10, padding: "5px 0", fontSize: 12.5 }}>
@@ -42,13 +28,7 @@ const row = (k: string, v?: string | number) => (
 const card: React.CSSProperties = { border: "1px solid #e2e8f2", borderRadius: 10, padding: 16 };
 const cardTitle: React.CSSProperties = { fontWeight: 700, color: "#1f3a5f", fontSize: 14 };
 const groupTitle: React.CSSProperties = { fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", color: "#8a94a3", fontWeight: 800, marginBottom: 8 };
-const btn: React.CSSProperties = { background: "#1f3a5f", color: "#fff", textDecoration: "none", fontSize: 12.5, fontWeight: 700, borderRadius: 8, padding: "8px 12px", display: "inline-block" };
 const linkBtn: React.CSSProperties = { color: "#2f4fb0", fontSize: 12.5, fontWeight: 600, textDecoration: "none" };
-
-function fmtWhen(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-}
 
 export default async function EmployeeDetail({ params }: { params: Promise<{ seq: string }> }) {
   const { seq } = await params;
@@ -89,7 +69,9 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
     }),
   );
 
-  const s = e.structure;
+  // Older/imported records can lack a stored structure — fall back to the
+  // standard split rather than crashing the whole page on s.basic.
+  const s = e.structure ?? suggestStructure(e.grossMonthly);
   const exited = e.status === "exited";
   const isIntern = /internship/i.test(e.employmentType);
 
@@ -212,88 +194,47 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
         </div>
       ) : null}
 
-      {/* Generate documents */}
-      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
-        {/* Letters — hidden entirely when the viewer can neither issue letters
-            (documents:write) nor edit the record, so the card never renders empty. */}
-        {canWriteDocs || canEditRecord ? (
-          <div style={card}>
-            <div style={cardTitle}>Letters</div>
-            <p style={{ fontSize: 12, color: "#5b6676", margin: "6px 0 10px" }}>Branded, pre-signed letters from this record.</p>
-            {canWriteDocs ? (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {isIntern ? (
-                  <Link href={`/employees/${seq}/internship-offer`} style={btn}>Internship offer</Link>
-                ) : (
-                  <Link href={`/employees/${seq}/offer`} style={btn}>Appointment letter</Link>
-                )}
-                <Link href={`/employees/${seq}/verification`} style={{ ...btn, background: "#2f4fb0" }}>Verification</Link>
-                <Link href={`/employees/${seq}/leave`} style={{ ...btn, background: "#2f4fb0" }}>Leave approval</Link>
-                {!isIntern ? (
-                  <Link href={`/employees/${seq}/confirmation`} style={{ ...btn, background: "#2f4fb0" }}>Probation confirmation</Link>
-                ) : null}
-                {isIntern ? (
-                  <Link
-                    href={`/employees/${seq}/completion`}
-                    style={exited ? { ...btn, background: "#2f4fb0" } : { ...btn, background: "#c3cee0" }}
-                    title={exited ? "" : "Mark the intern exited (internship end) first"}
-                  >
-                    Completion certificate{exited ? "" : " (needs end)"}
-                  </Link>
-                ) : (
-                  <Link
-                    href={`/employees/${seq}/experience`}
-                    style={exited ? { ...btn, background: "#2f4fb0" } : { ...btn, background: "#c3cee0" }}
-                    title={exited ? "" : "Mark the employee exited first"}
-                  >
-                    Experience / relieving{exited ? "" : " (needs exit)"}
-                  </Link>
-                )}
-                {/* Resignation acceptance — a regular-employee exit letter, issued
-                    when notice is tendered (may still be active), so no exit gate;
-                    interns use the completion certificate instead. */}
-                {!isIntern ? (
-                  <Link href={`/employees/${seq}/resignation-acceptance`} style={{ ...btn, background: "#2f4fb0" }}>
-                    Resignation acceptance
-                  </Link>
-                ) : null}
-                {exited && (e.transitions?.length ?? 0) > 0 ? (
-                  <Link href={`/employees/${seq}/employment-history`} style={{ ...btn, background: "#2f4fb0" }}>
-                    Employment history
-                  </Link>
-                ) : null}
-              </div>
-            ) : null}
-            {canEditRecord ? (
-              <div style={{ marginTop: 12, borderTop: "1px solid #eef2f7", paddingTop: 10, display: "flex", gap: 14, flexWrap: "wrap" }}>
-                <Link href={`/employees/${seq}/revise`} style={linkBtn}>Revise salary &rarr;</Link>
-                {isIntern && !exited ? (
-                  <Link href={`/employees/${seq}/convert`} style={linkBtn}>Convert to full-time &rarr;</Link>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {/* Salary slip — hidden unless the viewer can generate a slip or open the
-            org payroll view; both need the salary permission, so a payroll-read
-            user without it never sees a dead card. */}
-        {canRunPayroll || canReadPayroll ? (
-          <div style={card}>
-            <div style={cardTitle}>Salary slip</div>
-            <p style={{ fontSize: 12, color: "#5b6676", margin: "6px 0 12px" }}>
-              Generate this employee’s monthly slip — month and deductions (PF / ESI / PT / TDS / LOP) are set on the
-              generate screen.
-            </p>
-            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              {canRunPayroll ? <Link href={`/employees/${seq}/payslip`} style={btn}>Generate payslip</Link> : null}
-              {canReadPayroll ? (
-                <Link href={`/payslips?month=${new Date().toISOString().slice(0, 7)}`} style={linkBtn}>Org payroll view &rarr;</Link>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-      </div>
+      {/* Documents — one unified panel: lifecycle-ordered rows with issued
+          status, a single letter-date override (backdating), and the full
+          issued history. Which rows exist is decided HERE (permissions,
+          intern vs full-time, exited) so the client panel stays dumb. */}
+      {(() => {
+        const rows: DocRow[] = [];
+        if (canWriteDocs) {
+          if (isIntern) {
+            rows.push({ key: "internship-offer", label: "Internship offer", href: `/employees/${seq}/internship-offer`, docTypes: ["internship-offer"], dateable: true });
+          } else {
+            rows.push({ key: "offer", label: "Appointment letter", href: `/employees/${seq}/offer`, docTypes: ["offer"], dateable: true });
+            rows.push({ key: "confirmation", label: "Probation confirmation", href: `/employees/${seq}/confirmation`, docTypes: ["confirmation"], dateable: true });
+          }
+          rows.push({ key: "verification", label: "Verification letter", href: `/employees/${seq}/verification`, docTypes: ["verification"], dateable: true });
+          rows.push({ key: "leave", label: "Leave approval", href: `/employees/${seq}/leave`, docTypes: ["leave"], dateable: true });
+          // Resignation acceptance — issued when notice is tendered (may still be
+          // active), so no exit gate; interns use the completion certificate.
+          if (!isIntern) {
+            rows.push({ key: "resignation-acceptance", label: "Resignation acceptance", href: `/employees/${seq}/resignation-acceptance`, docTypes: ["resignation-acceptance"], dateable: true });
+          }
+          if (isIntern) {
+            rows.push({ key: "completion", label: "Completion certificate", href: `/employees/${seq}/completion`, docTypes: ["completion"], dateable: true, locked: !exited, lockHint: "Mark the intern exited first (Employment status above)" });
+          } else {
+            rows.push({ key: "experience", label: "Experience / relieving", href: `/employees/${seq}/experience`, docTypes: ["experience"], dateable: true, locked: !exited, lockHint: "Mark exited first (Employment status above)" });
+          }
+          if (exited && (e.transitions?.length ?? 0) > 0) {
+            rows.push({ key: "employment-history", label: "Employment history", href: `/employees/${seq}/employment-history`, docTypes: ["employment-history"], dateable: true });
+          }
+        }
+        if (canRunPayroll) {
+          // Month, deductions and pay date are set on the payslip screen itself.
+          rows.push({ key: "payslip", label: "Salary slip", href: `/employees/${seq}/payslip`, docTypes: ["payslip"], dateable: false });
+        }
+        const footerLinks: Array<{ href: string; label: string }> = [];
+        if (canEditRecord) footerLinks.push({ href: `/employees/${seq}/revise`, label: "Revise salary" });
+        if (canEditRecord && isIntern && !exited) footerLinks.push({ href: `/employees/${seq}/convert`, label: "Convert to full-time" });
+        if (canReadPayroll) footerLinks.push({ href: `/payslips?month=${new Date().toISOString().slice(0, 7)}`, label: "Org payroll view" });
+        return rows.length > 0 || generated.length > 0 ? (
+          <DocumentsPanel seq={seq} rows={rows} generated={generated} isAdmin={isAdmin} footerLinks={footerLinks} />
+        ) : null;
+      })()}
 
       <div style={{ ...card, marginTop: 16 }}>
         <div style={cardTitle}>Self-serve access</div>
@@ -307,39 +248,6 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
           <SelfPinControl seq={seq} employeeId={e.employeeId} hasPin={Boolean(e.hasSelfPin)} />
         ) : (
           <p style={{ fontSize: 12, color: "#8a94a3" }}>Only the administrator can issue or reset a self-serve PIN.</p>
-        )}
-      </div>
-
-      {/* Issued document history */}
-      <div style={{ ...card, marginTop: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <div style={cardTitle}>Issued documents</div>
-          <div style={{ fontSize: 10.5, color: "#8a94a3" }}>Re-open re-renders exactly as issued</div>
-        </div>
-        {generated.length === 0 ? (
-          <p style={{ fontSize: 12.5, color: "#8a94a3", marginTop: 8 }}>Nothing issued yet. Generate a document above and click “Save to history”.</p>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, marginTop: 8 }}>
-            <tbody>
-              {generated.map((g) => (
-                <tr key={g.docId} style={{ borderTop: "1px solid #eef2f7" }}>
-                  <td style={{ padding: "8px 6px", color: "#1f3a5f", fontWeight: 600, width: 190 }}>{DOCTYPE_LABEL[g.docType] ?? g.docType}</td>
-                  <td style={{ padding: "8px 6px", color: "#5b6676", fontFamily: "monospace", fontSize: 11.5 }}>{g.ref}</td>
-                  <td style={{ padding: "8px 6px", color: "#8a94a3", whiteSpace: "nowrap" }}>
-                    {fmtWhen(g.generatedAt)}
-                    {g.acceptedAt ? (
-                      <div style={{ marginTop: 4 }}>
-                        <AcceptedBadge seq={seq} genId={g.docId} acceptedAt={g.acceptedAt} isAdmin={isAdmin} />
-                      </div>
-                    ) : null}
-                  </td>
-                  <td style={{ padding: "8px 6px", textAlign: "right" }}>
-                    <Link href={`/employees/${seq}/issued/${g.docId}`} style={linkBtn}>Re-open</Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         )}
       </div>
 

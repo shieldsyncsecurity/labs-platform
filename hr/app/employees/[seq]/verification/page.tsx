@@ -33,7 +33,7 @@ export default async function GenerateVerification({
   const ref = sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`;
   const letter = buildVerificationLetter(e, {
     ref,
-    date: todayDisplay(),
+    date: sp.date?.trim() || todayDisplay(),
     purpose: sp.purpose,
     to: sp.to ? { name: sp.to } : undefined,
     includeSalary: sp.salary !== "0",

@@ -78,7 +78,7 @@ export default async function GenerateInternshipOffer({
   const hours = sp.hoursGlance && sp.hoursBody
     ? { glance: sp.hoursGlance, body: sp.hoursBody, stretchEnd: sp.hoursStretchEnd }
     : undefined;
-  const offer = buildInternshipOffer(e, { ref, date: todayDisplay(), mentor: sp.mentor, tieredNotice, reportingTime: sp.reportingTime, hours });
+  const offer = buildInternshipOffer(e, { ref, date: sp.date?.trim() || todayDisplay(), mentor: sp.mentor, tieredNotice, reportingTime: sp.reportingTime, hours });
 
   return (
     <InternshipOfferDoc

@@ -34,7 +34,7 @@ export default async function GenerateResignationAcceptance({
   const now = new Date();
   const letter = buildResignationAcceptanceLetter(e, {
     ref: sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`,
-    date: todayDisplay(),
+    date: sp.date?.trim() || todayDisplay(),
     noticeDays: sp.notice ? Number(sp.notice) || undefined : undefined,
   });
 

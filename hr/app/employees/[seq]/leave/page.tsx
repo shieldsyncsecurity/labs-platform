@@ -77,7 +77,7 @@ export default async function GenerateLeave({
   const ref = sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`;
   const letter = buildLeaveLetter(e, {
     ref,
-    date: todayDisplay(),
+    date: sp.date?.trim() || todayDisplay(),
     leaveFrom: disp(from),
     leaveTo: disp(to),
     totalDays: daysInclusive(from, to),

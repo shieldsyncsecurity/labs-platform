@@ -42,7 +42,7 @@ export default async function GenerateConfirmation({
   const now = new Date();
   const ref = sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`;
   const confirmationDate = sp.cd ? disp(sp.cd) : defaultConfirmation(e) || todayDisplay();
-  const letter = buildConfirmationLetter(e, { ref, date: todayDisplay(), confirmationDate });
+  const letter = buildConfirmationLetter(e, { ref, date: sp.date?.trim() || todayDisplay(), confirmationDate });
 
   const configBar = (
     <form method="get" style={{ marginTop: 8, border: "1px solid #e2e8f2", borderRadius: 10, padding: "10px 12px", background: "#fff", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 12.5 }}>

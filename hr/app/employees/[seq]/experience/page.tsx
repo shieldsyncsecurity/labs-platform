@@ -44,7 +44,7 @@ export default async function GenerateExperience({
   const now = new Date();
   const letter = buildExperienceLetter(e, {
     ref: sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`,
-    date: todayDisplay(),
+    date: sp.date?.trim() || todayDisplay(),
   });
 
   return (
