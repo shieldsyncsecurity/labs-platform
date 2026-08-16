@@ -16,7 +16,7 @@ function fmt(iso: string) {
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-export function OnboardingChecklist({ seq }: { seq: string }) {
+export function OnboardingChecklist({ seq, paymentMode }: { seq: string; paymentMode?: string }) {
   const [docs, setDocs] = useState<KycDoc[] | null>(null);
 
   useEffect(() => {
@@ -28,10 +28,16 @@ export function OnboardingChecklist({ seq }: { seq: string }) {
 
   if (docs === null) return null;
 
+  // A cash-paid employee has no bank account for HR to hold proof of — asking
+  // for one would leave the checklist permanently stuck at "pending" for a
+  // document that will never legitimately exist (the same bug class as the
+  // payslip remark that assumed every payment was a bank credit).
+  const required = paymentMode?.trim().toLowerCase() === "cash" ? REQUIRED.filter((r) => r.kind !== "bank_proof") : REQUIRED;
+
   const kycDocs = docs.filter((d) => d.category !== "sent");
   const have = new Map(kycDocs.map((d) => [d.kind as string, d]));
-  const total = REQUIRED.length;
-  const done = REQUIRED.filter((r) => have.has(r.kind)).length;
+  const total = required.length;
+  const done = required.filter((r) => have.has(r.kind)).length;
   const allDone = done === total;
 
   return (
@@ -55,7 +61,7 @@ export function OnboardingChecklist({ seq }: { seq: string }) {
       </div>
 
       <div style={{ marginTop: 12, display: "grid", gap: 4 }}>
-        {REQUIRED.map((item) => {
+        {required.map((item) => {
           const doc = have.get(item.kind);
           return (
             <div

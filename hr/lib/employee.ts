@@ -219,11 +219,18 @@ export function structureForMonth(e: Employee, monthEndIso: string): { structure
     for (const r of e.revisions ?? []) {
       const eff = new Date(r.effectiveDate);
       if (!Number.isNaN(eff.getTime()) && monthEnd < eff) {
-        return { structure: r.structure, historical: true };
+        // A revision recorded before the ??-fallback existed can itself carry
+        // structure: undefined (it was copied straight from e.structure at the
+        // time) — fall back the same way as the current-structure branch below.
+        return { structure: r.structure ?? suggestStructure(e.grossMonthly), historical: true };
       }
     }
   }
-  return { structure: e.structure, historical: false };
+  // Older/imported records can lack a stored structure entirely — every reader
+  // of this function (payslips, letters) needs a real Basic/HRA/Conveyance/
+  // Special breakdown, so fall back to the standard split rather than handing
+  // back undefined and letting the crash happen downstream.
+  return { structure: e.structure ?? suggestStructure(e.grossMonthly), historical: false };
 }
 
 /** Map an employee onto the payslip's employee block. */

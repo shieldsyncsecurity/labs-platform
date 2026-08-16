@@ -256,7 +256,7 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
           reason to gate it separately from the vault that backs it. */}
       {canKyc ? (
         <>
-          <OnboardingChecklist seq={seq} />
+          <OnboardingChecklist seq={seq} paymentMode={e.paymentMode} />
           <KycSection seq={seq} canWrite={isAdmin || can(access, "kyc", "write")} />
         </>
       ) : null}

@@ -30,7 +30,7 @@ export default async function EditQuestions({ params }: { params: Promise<{ seq:
           <h1 style={{ fontSize: 20, fontWeight: 800, color: "#1f3a5f" }}>Edit questions for {c.name}</h1>
           <p style={{ fontSize: 12.5, color: "#5b6676" }}>
             {c.customQuestionnaire
-              ? "This is a tailored copy for this candidate — edits below only affect what she sees."
+              ? "This is a tailored copy for this candidate — edits below only affect what they see."
               : "You're starting from the standard questionnaire. Any edit here becomes a tailored copy for this candidate only."}
           </p>
         </div>

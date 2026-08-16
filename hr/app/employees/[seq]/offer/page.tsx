@@ -1,8 +1,10 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
 import { todayDisplay } from "@/lib/dates";
 import { buildOfferLetter, defaultDutiesFor } from "@/lib/documents/offer-letter";
 import { DEFAULT_DUTIES, type Employee } from "@/lib/employee";
+import { suggestStructure } from "@/lib/payslip";
 import { OfferLetterDoc } from "@/components/OfferLetterDoc";
 import { DocToolbar } from "@/components/DocToolbar";
 
@@ -25,6 +27,25 @@ export default async function GenerateOffer({
   } catch (err) {
     if (err instanceof HrEngineError && err.status === 404) notFound();
     throw err;
+  }
+
+  // The internship offer (Letter of Intent) is the correct document for an
+  // intern — this generator's probation/PF/ESI/non-solicit/30-day-notice
+  // clauses don't apply to an internship and would contradict that letter if
+  // both exist on the same record. Reciprocal to internship-offer/page.tsx's
+  // own opposite check.
+  if (/internship/i.test(e.employmentType)) {
+    return (
+      <main style={{ maxWidth: 560, margin: "0 auto", padding: "48px 24px", fontFamily: "Arial, sans-serif" }}>
+        <h1 style={{ fontSize: 18, fontWeight: 800, color: "#1f3a5f" }}>Appointment letter</h1>
+        <p style={{ fontSize: 13, color: "#5b6676", marginTop: 8 }}>
+          {e.name}&rsquo;s employment type is <b>{e.employmentType}</b>. The appointment letter applies to
+          full-time roles — for an internship use the internship offer (Letter of Intent),
+          or edit the record&rsquo;s employment type first.
+        </p>
+        <Link href={`/employees/${seq}`} style={{ color: "#2f4fb0", fontSize: 13 }}>&larr; Back to {e.name}</Link>
+      </main>
+    );
   }
 
   const now = new Date();
@@ -54,7 +75,10 @@ export default async function GenerateOffer({
       reportingTo: e.reportingTo,
     },
     duties: e.duties.length ? e.duties : (defaultDutiesFor(e.designation) ?? DEFAULT_DUTIES),
-    structure: e.structure,
+    // Older/imported records can lack a stored structure — fall back rather
+    // than crashing on e.structure.basic (the same class of bug fixed on the
+    // employee record page and in structureForMonth()).
+    structure: e.structure ?? suggestStructure(e.grossMonthly),
     probationMonths: e.probationMonths,
   });
 

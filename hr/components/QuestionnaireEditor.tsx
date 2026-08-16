@@ -137,7 +137,7 @@ export function QuestionnaireEditor({ candidate, initial }: { candidate: Candida
       // Only now is the on-screen version the stored version.
       setSavedJson(JSON.stringify(cleaned));
       setQ(cleaned);
-      setMsg({ kind: "ok", text: "Saved — this is what she will see." });
+      setMsg({ kind: "ok", text: "Saved — this is what the candidate will see." });
       router.refresh();
     } catch {
       setMsg({ kind: "err", text: "Could not reach the server." });
@@ -159,7 +159,7 @@ export function QuestionnaireEditor({ candidate, initial }: { candidate: Candida
         setBusy(false);
         return;
       }
-      setMsg({ kind: "ok", text: "Reset — she will see the standard questionnaire." });
+      setMsg({ kind: "ok", text: "Reset — the candidate will see the standard questionnaire." });
       router.refresh();
     } catch {
       setMsg({ kind: "err", text: "Could not reach the server." });
@@ -187,7 +187,7 @@ export function QuestionnaireEditor({ candidate, initial }: { candidate: Candida
               whiteSpace: "nowrap",
             }}
           >
-            Unsaved changes — she still sees the old questions
+            Unsaved changes — the candidate still sees the old questions
           </span>
         ) : null}
         <div style={{ flex: 1 }} />

@@ -28,7 +28,7 @@ function OpenStatus({ candidate }: { candidate: Candidate }) {
 
   if (candidate.submittedAt) return null; // the submitted banner already says it
   if (opens === 0) {
-    return box("#fafbfd", "#e2e8f2", "#5b6676", <>Not opened yet — she hasn&rsquo;t clicked the link. Your own previews aren&rsquo;t counted.</>);
+    return box("#fafbfd", "#e2e8f2", "#5b6676", <>Not opened yet — the candidate hasn&rsquo;t clicked the link. Your own previews aren&rsquo;t counted.</>);
   }
   return box(
     "#eef6ff",

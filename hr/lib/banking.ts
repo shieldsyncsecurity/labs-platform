@@ -345,13 +345,26 @@ export function categorise(txn: BankTxn, roster: RosterEntry[]): { category: Ban
   if (/^Charge:/i.test(p) || /_Charges?\b/i.test(p)) return { category: "bank-charge" };
   if (/\b(TDS|GST|INCOME\s*TAX|ADVANCE\s*TAX)\b/i.test(p)) return { category: "tax" };
 
-  // Someone on the roster? Account number is the strongest signal; fall back to name.
+  // Someone on the roster? Account number is the strongest signal (exact, so
+  // never ambiguous) and always wins outright. Name is a fallback — but plain
+  // substring containment can match MORE THAN ONE person (e.g. "Rahul Kumar"
+  // vs "Rahul Kumar Singh" both on the roster) with no way to tell them apart
+  // from the counterparty text alone. Silently picking the first candidate
+  // would risk crediting one person's pay to another's ledger, which is worse
+  // than leaving the row uncategorised — so an ambiguous name match resolves
+  // ONLY if exactly one candidate is an exact name match; otherwise it's left
+  // for manual review, per this function's own conservative mandate.
+  const byAccount = roster.find((r) => r.bankAccount && p.includes(r.bankAccount));
   const cp = normaliseName(txn.counterparty ?? "");
-  const match = roster.find((r) => {
-    if (r.bankAccount && p.includes(r.bankAccount)) return true;
-    const rn = normaliseName(r.name);
-    return rn.length >= 5 && cp.length >= 5 && (rn === cp || cp.includes(rn) || rn.includes(cp));
-  });
+  const nameCandidates = byAccount
+    ? []
+    : roster.filter((r) => {
+        const rn = normaliseName(r.name);
+        return rn.length >= 5 && cp.length >= 5 && (rn === cp || cp.includes(rn) || rn.includes(cp));
+      });
+  const exactNameMatches = nameCandidates.filter((r) => normaliseName(r.name) === cp);
+  const match =
+    byAccount ?? (nameCandidates.length <= 1 ? nameCandidates[0] : exactNameMatches.length === 1 ? exactNameMatches[0] : undefined);
 
   if (match && txn.debit > 0) {
     const consultant = /consultant|contractor/i.test(match.employmentType ?? "");

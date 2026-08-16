@@ -58,7 +58,10 @@ export function inferStatus(inv: Pick<Invoice, "status" | "dueDate" | "paidDate"
 }
 
 export function formatAmount(n: number): string {
-  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
+  // Guards a missing/undefined totalAmount the same way lib/payslip.ts's
+  // formatINR does — without this, Intl.NumberFormat.format(undefined) prints
+  // the literal string "₹NaN" on an invoice.
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Number(n) || 0);
 }
 
 /** Payment details to show on the invoice (your IDFC account). */

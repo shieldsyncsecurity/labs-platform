@@ -84,7 +84,12 @@ export default async function GeneratePayslip({
   }
 
   const month = /^\d{4}-\d{2}$/.test(sp.month ?? "") ? (sp.month as string) : lastMonth();
-  const lop = Math.max(0, Number(sp.lop) || 0);
+  // Rounded here so the printed "LOP Days" / "Days Paid" always match what
+  // prorateStructure() actually pays on — it internally rounds LOP before
+  // computing the factor, so an un-rounded value (e.g. a hand-edited ?lop=2.5
+  // in the URL) would otherwise print a fractional day inconsistent with the
+  // whole-day figure the money was really calculated from.
+  const lop = Math.max(0, Math.round(Number(sp.lop) || 0));
   const payDateIso = /^\d{4}-\d{2}-\d{2}$/.test(sp.payDate ?? "") ? (sp.payDate as string) : defaultPayIso(month);
   const period = buildPeriod(month, lop, payDateIso);
 
@@ -155,6 +160,9 @@ export default async function GeneratePayslip({
     earnings,
     deductionConfig: cfg,
     remarks: paymentRemark(period.monthLabel, period.payDate, paymentMode),
+    // ESI eligibility is about the CONTRACTED wage rate, not this month's
+    // LOP-reduced pay — monthStructure.gross (pre-proration) is that rate.
+    contractedGross: monthStructure.gross,
   });
 
   // No-print config bar — set month + deductions on the generate step and Update.

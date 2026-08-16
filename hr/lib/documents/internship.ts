@@ -133,6 +133,14 @@ export function buildInternshipOffer(
 
   const location = e.baseLocation || "Noida, Uttar Pradesh, India";
   const hours = opts.hours ?? { glance: "12:00 noon – 8:00 PM", body: "12:00 noon to 8:00 PM" };
+  // Cash has no bank leg — "paid by bank transfer" is wrong for a cash-paid
+  // intern (same bug class fixed on the payslip remark). PAYMENT_MODE_OPTIONS
+  // is ["Bank Transfer", "UPI", "Cheque", "Cash"] — only Cash needs the
+  // different wording; the others genuinely do land in a bank account.
+  const isCash = (e.paymentMode || "").trim().toLowerCase() === "cash";
+  const stipendPayoutNote = isCash
+    ? "in cash for the preceding month, ordinarily within the first ten working days of the following month"
+    : "by bank transfer for the preceding month, ordinarily within the first ten working days of the following month";
 
   return {
     ref: opts.ref,
@@ -150,7 +158,7 @@ export function buildInternshipOffer(
     ],
     stipend:
       e.grossMonthly > 0
-        ? { amount: `₹${fmt(e.grossMonthly)}`, note: "per month · paid by bank transfer for the preceding month" }
+        ? { amount: `₹${fmt(e.grossMonthly)}`, note: `per month · paid ${stipendPayoutNote}` }
         : { amount: "Unpaid", note: "no stipend payable for this internship" },
     sections: [
       {
@@ -185,9 +193,7 @@ export function buildInternshipOffer(
             ? `Your stipend is INR ${fmt(e.grossMonthly)} per month.`
             : "This is an unpaid internship; no stipend is payable.",
           ...(incentiveBullet ? [incentiveBullet] : []),
-          ...(e.grossMonthly > 0
-            ? ["The stipend is paid by bank transfer for the preceding month, ordinarily within the first ten working days of the following month."]
-            : []),
+          ...(e.grossMonthly > 0 ? [`The stipend is paid ${stipendPayoutNote}.`] : []),
           "Saturdays and Sundays are off. No other leave is granted; any additional day taken will be deducted from that month's stipend on a per-day basis.",
         ],
       },

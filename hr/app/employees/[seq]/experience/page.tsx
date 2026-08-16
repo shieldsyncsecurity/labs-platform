@@ -28,6 +28,28 @@ export default async function GenerateExperience({
     throw err;
   }
 
+  // Intern gate: buildExperienceLetter always states "was employed with...",
+  // which directly contradicts the internship offer's own clause ("This is an
+  // internship and not an offer of employment. It does not create an
+  // employer-employee relationship..."). An exited intern's document is the
+  // completion certificate instead — mirrors completion/page.tsx's own
+  // opposite check.
+  if (/internship/i.test(e.employmentType)) {
+    return (
+      <main style={{ maxWidth: 560, margin: "0 auto", padding: "48px 24px", fontFamily: "Arial, sans-serif" }}>
+        <h1 style={{ fontSize: 18, fontWeight: 800, color: "#1f3a5f" }}>Experience / relieving letter</h1>
+        <p style={{ fontSize: 13, color: "#5b6676", marginTop: 8 }}>
+          {e.name}&rsquo;s employment type is <b>{e.employmentType}</b>. This letter states &ldquo;was employed&rdquo;,
+          which applies to full-time roles — for an internship use the completion certificate instead,
+          which correctly describes the engagement.
+        </p>
+        <Link href={`/employees/${seq}/completion`} style={{ color: "#2f4fb0", fontSize: 13 }}>Go to completion certificate &rarr;</Link>
+        <br />
+        <Link href={`/employees/${seq}`} style={{ color: "#2f4fb0", fontSize: 13 }}>&larr; Back to {e.name}</Link>
+      </main>
+    );
+  }
+
   if (e.status !== "exited" || !e.lastWorkingDay) {
     return (
       <main style={{ maxWidth: 560, margin: "0 auto", padding: "48px 24px", fontFamily: "Arial, sans-serif" }}>

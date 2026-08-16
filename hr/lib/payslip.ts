@@ -57,10 +57,20 @@ export function prorateStructure(s: SalaryStructure, lopDays: number, standardDa
   if (lop === 0 || standardDays <= 0) return s;
   const factor = (standardDays - lop) / standardDays;
   const gross = Math.round(s.gross * factor);
-  const basic = Math.round(s.basic * factor);
+  let basic = Math.round(s.basic * factor);
   const hra = Math.round(s.hra * factor);
   const conveyance = Math.round(s.conveyance * factor);
-  const special = gross - basic - hra - conveyance; // absorbs rounding
+  let special = gross - basic - hra - conveyance; // absorbs rounding
+  // A small/zero Special component (an owner-edited structure, not the
+  // suggestStructure() default) can push this below zero once Basic/HRA/
+  // Conveyance round UP past the prorated gross — printing "Special: -1.00" on
+  // a real payslip. Absorb the shortfall into Basic instead (the largest
+  // component, so the least likely to go negative itself) so every line stays
+  // non-negative while the four components still sum EXACTLY to gross.
+  if (special < 0) {
+    basic += special;
+    special = 0;
+  }
   return { basic, hra, conveyance, special, gross };
 }
 
@@ -94,7 +104,17 @@ export type Deductions = {
 const EPF_WAGE_CEILING = 15000; // statutory PF wage ceiling
 const ESI_GROSS_LIMIT = 21000; // ESI applies only at/below this monthly gross
 
-export function computeDeductions(s: SalaryStructure, cfg: DeductionConfig = {}): Deductions {
+/**
+ * @param eligibilityGross The employee's CONTRACTED monthly gross, for the ESI
+ * ceiling test specifically. ESI coverage is a function of the statutory wage
+ * RATE, not what a partial (LOP-reduced) month happens to pay out — someone on
+ * ₹22,000/month is never ESI-eligible, even in a month where LOP proration
+ * drops their prorated `s.gross` under the ₹21,000 ceiling. Defaults to
+ * `s.gross` (the pre-fix behaviour) when the caller doesn't have a separate
+ * contracted figure to hand (e.g. a full month with no LOP, where they're the
+ * same number anyway).
+ */
+export function computeDeductions(s: SalaryStructure, cfg: DeductionConfig = {}, eligibilityGross?: number): Deductions {
   const round2 = (n: number) => Math.round(n * 100) / 100;
 
   let pf = 0;
@@ -104,7 +124,7 @@ export function computeDeductions(s: SalaryStructure, cfg: DeductionConfig = {})
   }
 
   let esi = 0;
-  if (cfg.esi?.enabled && s.gross <= ESI_GROSS_LIMIT) {
+  if (cfg.esi?.enabled && (eligibilityGross ?? s.gross) <= ESI_GROSS_LIMIT) {
     esi = round2(s.gross * 0.0075);
   }
 
@@ -227,8 +247,12 @@ export function buildPayslip(input: {
   earnings: SalaryStructure;
   deductionConfig?: DeductionConfig;
   remarks?: string;
+  /** Contracted (unprorated) monthly gross, for the ESI eligibility ceiling —
+   * see computeDeductions(). Omit for a full month with no LOP, where it's
+   * the same figure as earnings.gross anyway. */
+  contractedGross?: number;
 }): Payslip {
-  const deductions = computeDeductions(input.earnings, input.deductionConfig);
+  const deductions = computeDeductions(input.earnings, input.deductionConfig, input.contractedGross);
   const netPay = Math.round((input.earnings.gross - deductions.total) * 100) / 100;
   return {
     employee: {

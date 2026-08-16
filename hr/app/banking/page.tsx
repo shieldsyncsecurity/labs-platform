@@ -54,6 +54,28 @@ export default async function BankingPage({ searchParams }: { searchParams: Prom
   }
   const active = employees.filter((e) => e.status !== "exited");
 
+  // What SHOULD have left the bank for each active person this month — where a
+  // payslip has actually been issued, its stated NET pay (after PF/ESI/PT/TDS)
+  // is the true figure; comparing bank debits against the record's CONTRACTED
+  // GROSS instead flags every payroll with a deduction as "different" even when
+  // it went out exactly right. Same lookup pattern as /payslips.
+  const issuedNetPay = new Map<number, number>();
+  if (month) {
+    await Promise.all(
+      active.map(async (e) => {
+        try {
+          const gens = (await hrFetch<{ generated: Array<{ docId: string; docType: string; ref: string }> }>(`/hr/employees/${e.seq}/generated`)).generated ?? [];
+          const hit = gens.find((g) => g.docType === "payslip" && g.ref.endsWith(` ${month}`));
+          if (!hit) return;
+          const g = await hrFetch<{ gen: { snapshot?: { netPay?: number } } }>(`/hr/employees/${e.seq}/generated/${hit.docId}`);
+          if (typeof g.gen.snapshot?.netPay === "number") issuedNetPay.set(e.seq, g.gen.snapshot.netPay);
+        } catch {
+          /* best-effort — falls back to the gross estimate below */
+        }
+      }),
+    );
+  }
+
   // Everyone taggable, including exited staff — you still need to answer
   // "how much did we ever pay Yachna?" after she's left.
   const people = employees.map((e) => ({ seq: e.seq, name: e.name }));
@@ -180,23 +202,41 @@ export default async function BankingPage({ searchParams }: { searchParams: Prom
                   <tbody>
                     {active.map((e) => {
                       const paid = paidBySeq.get(e.seq) ?? 0;
-                      const expected = e.grossMonthly ?? 0;
+                      // Cash never appears in a bank statement — that's correct,
+                      // not a missed payment, so it gets its own neutral status
+                      // instead of being compared against the bank at all.
+                      const isCash = (e.paymentMode || "").trim().toLowerCase() === "cash";
+                      const netFromSlip = issuedNetPay.get(e.seq);
+                      const expected = netFromSlip ?? e.grossMonthly ?? 0;
                       // A consultant has no fixed monthly figure, so "no payment"
                       // is normal rather than a discrepancy.
-                      const variable = expected === 0;
+                      const variable = !isCash && expected === 0;
                       const ok = variable ? paid > 0 : Math.abs(paid - expected) < 1;
                       return (
                         <tr key={e.seq} style={{ borderTop: "1px solid #eef2f7" }}>
                           <td style={{ padding: "8px", fontWeight: 600, color: "#1b2331" }}>{e.name}</td>
                           <td style={{ padding: "8px", color: "#5b6676" }}>{e.employmentType}</td>
                           <td style={{ padding: "8px", textAlign: "right", color: "#5b6676", fontVariantNumeric: "tabular-nums" }}>
-                            {variable ? "per engagement" : formatINR(expected)}
+                            {isCash ? "paid in cash" : variable ? "per engagement" : (
+                              <>
+                                {formatINR(expected)}
+                                {!netFromSlip ? (
+                                  <span title="No payslip issued yet for this month — this is the contracted gross, before PF/ESI/PT/TDS. Issue the payslip for an exact comparison.">
+                                    {" "}*
+                                  </span>
+                                ) : null}
+                              </>
+                            )}
                           </td>
                           <td style={{ padding: "8px", textAlign: "right", fontWeight: 700, color: paid ? "#1b2331" : "#c3cee0", fontVariantNumeric: "tabular-nums" }}>
-                            {paid ? formatINR(paid) : "—"}
+                            {isCash ? "—" : paid ? formatINR(paid) : "—"}
                           </td>
                           <td style={{ padding: "8px" }}>
-                            {paid === 0 ? (
+                            {isCash ? (
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#8a94a3", background: "#f3f5f9", borderRadius: 999, padding: "3px 10px" }}>
+                                Paid in cash — not expected here
+                              </span>
+                            ) : paid === 0 ? (
                               <span style={{ fontSize: 11, fontWeight: 700, color: variable ? "#8a94a3" : "#8a6320", background: variable ? "#f3f5f9" : "#fdf4e3", borderRadius: 999, padding: "3px 10px" }}>
                                 {variable ? "Nothing this month" : "Not paid yet"}
                               </span>
@@ -215,7 +255,8 @@ export default async function BankingPage({ searchParams }: { searchParams: Prom
                 </table>
                 <p style={{ fontSize: 11, color: "#8a94a3", marginTop: 10, lineHeight: 1.5 }}>
                   Matched by the counterparty name on the statement, or by the bank account number on their employee record — add the
-                  account number to a record to make matching exact.
+                  account number to a record to make matching exact. &ldquo;Record says&rdquo; uses the issued payslip&rsquo;s net pay when
+                  one exists for the month; * marks a contracted-gross estimate for a month with no payslip issued yet.
                 </p>
               </div>
             </section>

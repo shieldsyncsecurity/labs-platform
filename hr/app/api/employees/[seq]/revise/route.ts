@@ -45,11 +45,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
 
   const newAnnualCTC = Math.max(0, Math.round(Number(body.annualCTC) || newGross * 12));
   const newStructure = suggestStructure(newGross);
+  // Older/imported records can lack a stored structure — fall back rather than
+  // baking structure: undefined into permanent salary history (a later payslip
+  // for a month before this revision would then crash reading it back out via
+  // structureForMonth()).
+  const oldStructure = e.structure ?? suggestStructure(e.grossMonthly);
   const revision: CompRevision = {
     effectiveDate,
     grossMonthly: e.grossMonthly,
     annualCTC: e.annualCTC,
-    structure: e.structure,
+    structure: oldStructure,
     reason: (body.reason ?? "").trim() || "Salary revision",
     revisedBy: actor,
     revisedAt: new Date().toISOString(),
@@ -85,7 +90,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ seq: st
       ref: "", // allocated by the engine (refSeries "hr")
       date: todayDisplay(),
       effectiveDate,
-      oldStructure: e.structure,
+      oldStructure,
       newStructure,
       newAnnualCTC,
       reason: (body.reason ?? "").trim() || undefined,

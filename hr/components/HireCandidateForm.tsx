@@ -96,7 +96,7 @@ export function HireCandidateForm({ seq, prefill }: { seq: string; prefill: Hire
         <DateField name="dateOfJoining" label="Date of joining" required />
         <div>
           <label style={labelStyle} htmlFor="gross">Gross monthly (INR) <span style={{ color: "#c0344c" }}>*</span></label>
-          <input id="gross" value={gross} onChange={(e) => setGross(e.target.value)} style={inputStyle} placeholder="e.g. 30000" />
+          <input id="gross" required value={gross} onChange={(e) => setGross(e.target.value)} style={inputStyle} placeholder="e.g. 30000" />
           {prefill.expectedCtc ? (
             <div style={{ fontSize: 10.5, color: "#8a94a3", marginTop: 3 }}>They asked for: {prefill.expectedCtc}</div>
           ) : null}
