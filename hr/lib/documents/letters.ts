@@ -242,10 +242,20 @@ export function buildConfirmationLetter(
  */
 export function buildResignationAcceptanceLetter(
   e: Employee,
-  opts: { ref: string; date: string; noticeDays?: number },
+  opts: {
+    ref: string;
+    date: string;
+    noticeDays?: number;
+    /** When the resignation was tendered (e.g. "11 August 2026") — named in the opening line. */
+    tenderedOn?: string;
+    /** Overrides the record's lastWorkingDay — the employee is usually still
+     * ACTIVE (serving notice) when this letter goes out, so the record often
+     * has no LWD yet. */
+    lastWorkingDay?: string;
+  },
 ): SimpleLetter {
   const first = firstName(e.name);
-  const lwd = e.lastWorkingDay || "the last working day on record";
+  const lwd = opts.lastWorkingDay?.trim() || e.lastWorkingDay || "the last working day on record";
   return {
     runLabel: "Resignation Acceptance Letter",
     title: "ACCEPTANCE OF RESIGNATION",
@@ -254,7 +264,9 @@ export function buildResignationAcceptanceLetter(
     to: { name: e.name },
     salutation: `Dear ${first},`,
     paragraphs: [
-      `We refer to your resignation from the position of ${e.designation} at ${COMPANY.legalName}, and write to confirm that the Company has accepted it.`,
+      opts.tenderedOn?.trim()
+        ? `We refer to your resignation tendered on ${opts.tenderedOn.trim()} from the position of ${e.designation} at ${COMPANY.legalName}, and write to confirm that the Company has accepted it.`
+        : `We refer to your resignation from the position of ${e.designation} at ${COMPANY.legalName}, and write to confirm that the Company has accepted it.`,
       opts.noticeDays
         ? `As per the terms of your engagement, you are required to serve a notice period of ${opts.noticeDays} days. Accordingly, your last working day with the Company will be ${lwd}.`
         : `Your last working day with the Company will be ${lwd}.`,
