@@ -64,21 +64,38 @@ export default async function GenerateExperience({
   }
 
   const now = new Date();
+  // Defaults to the LAST WORKING DAY, not today — a relieving letter is
+  // conventionally dated to when the person was actually relieved, which is
+  // usually days (or weeks) before whoever prints it sits down to do so.
+  // Still overridable via the field below for the rare case it should differ.
+  const letterDate = sp.date?.trim() || e.lastWorkingDay || todayDisplay();
   const letter = buildExperienceLetter(e, {
     ref: sp.ref ?? `SSS/HR/${now.getFullYear()}/•••`,
-    date: sp.date?.trim() || todayDisplay(),
+    date: letterDate,
   });
+
+  const cfgInput: React.CSSProperties = { padding: "6px 8px", fontSize: 12.5, border: "1px solid #d4dbe8", borderRadius: 7, marginLeft: 6 };
+  const configBar = (
+    <form method="get" style={{ border: "1px solid #e2e8f2", borderRadius: 10, padding: "10px 12px", background: "#fff", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: 12.5, marginBottom: 10 }}>
+      <label>Letter date <input name="date" defaultValue={letterDate} placeholder={e.lastWorkingDay || todayDisplay()} style={{ ...cfgInput, width: 150 }} /></label>
+      <input type="hidden" name="ref" value={sp.ref ?? ""} />
+      <button type="submit" style={{ background: "#1f3a5f", color: "#fff", border: "none", borderRadius: 7, padding: "7px 13px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Update</button>
+    </form>
+  );
 
   return (
     <SimpleLetterDoc
       letter={letter}
       toolbar={
-        <DocToolbar
-          backHref={`/employees/${seq}`}
-          backLabel={e.name}
-          save={{ seq, docType: "experience", title: letter.title, refSeries: "hr", refYear: now.getFullYear(), snapshot: letter }}
-          email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Experience / Relieving Letter — ${e.name}` }}
-        />
+        <>
+          {configBar}
+          <DocToolbar
+            backHref={`/employees/${seq}`}
+            backLabel={e.name}
+            save={{ seq, docType: "experience", title: letter.title, refSeries: "hr", refYear: now.getFullYear(), snapshot: letter }}
+            email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Experience / Relieving Letter — ${e.name}` }}
+          />
+        </>
       }
     />
   );
