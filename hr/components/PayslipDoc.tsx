@@ -1,7 +1,7 @@
 import type React from "react";
 import { COMPANY } from "@/lib/company";
 import { formatINR, type Payslip } from "@/lib/payslip";
-import { LETTERHEAD_CSS } from "./letterhead-css";
+import { LETTERHEAD_CSS, SINGLE_PAGE_PRINT_CSS } from "./letterhead-css";
 import { Masthead } from "./Masthead";
 import { qrSvg, hrMailto } from "@/lib/qr";
 
@@ -44,7 +44,7 @@ export function PayslipDoc({ payslip, toolbar }: { payslip: Payslip; toolbar?: R
 
   return (
     <div className="ss-stage">
-      <style dangerouslySetInnerHTML={{ __html: LETTERHEAD_CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: LETTERHEAD_CSS + SINGLE_PAGE_PRINT_CSS }} />
       {toolbar ? (
         <div className="ss-noprint" style={{ maxWidth: 840, margin: "0 auto 12px" }}>
           {toolbar}

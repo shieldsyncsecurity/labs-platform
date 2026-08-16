@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const printBtn: React.CSSProperties = { background: "#1f3a5f", color: "#fff", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" };
 const ghostBtn: React.CSSProperties = { background: "#fff", color: "#1f3a5f", border: "1px solid #c3cee0", borderRadius: 6, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" };
@@ -13,6 +13,17 @@ export function SelfDocActions({ genId, defaultTo, defaultSubject }: { genId: st
   const [downloading, setDownloading] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailState, setEmailState] = useState<string | null>(null);
+
+  // The browser names a printed/saved PDF after document.title — use the doc's
+  // own name (the email subject already carries "Title — Ref") instead of the
+  // page's generic one. Slashes are illegal in filenames.
+  useEffect(() => {
+    const prev = document.title;
+    document.title = defaultSubject.replace(/\//g, "-");
+    return () => {
+      document.title = prev;
+    };
+  }, [defaultSubject]);
 
   async function onDownload() {
     setDownloading(true);

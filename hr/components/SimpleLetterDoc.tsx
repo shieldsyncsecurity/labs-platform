@@ -1,7 +1,7 @@
 import type React from "react";
 import { COMPANY } from "@/lib/company";
 import type { SimpleLetter } from "@/lib/documents/letters";
-import { LETTERHEAD_CSS } from "./letterhead-css";
+import { LETTERHEAD_CSS, SINGLE_PAGE_PRINT_CSS } from "./letterhead-css";
 import { Masthead } from "./Masthead";
 import { SignatureBlock } from "./SignatureBlock";
 
@@ -10,7 +10,7 @@ import { SignatureBlock } from "./SignatureBlock";
 export function SimpleLetterDoc({ letter, toolbar }: { letter: SimpleLetter; toolbar?: React.ReactNode }) {
   return (
     <div className="ss-stage">
-      <style dangerouslySetInnerHTML={{ __html: LETTERHEAD_CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: LETTERHEAD_CSS + SINGLE_PAGE_PRINT_CSS }} />
       {toolbar ? (
         <div className="ss-noprint" style={{ maxWidth: 840, margin: "0 auto 12px" }}>
           {toolbar}

@@ -59,6 +59,20 @@ function DownloadPdfButton({ href }: { href: string }) {
   );
 }
 
+/** "ACCEPTANCE OF RESIGNATION" -> "Acceptance of Resignation" (filename style). */
+function titleCase(s: string): string {
+  const small = new Set(["of", "and", "the", "for", "in", "on", "a", "an", "to"]);
+  return s
+    .trim()
+    .split(/\s+/)
+    .map((w, i) => {
+      const lower = w.toLowerCase();
+      if (i > 0 && small.has(lower)) return lower;
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(" ");
+}
+
 /** Print only after every image (signature, seal, logo, QR) has decoded — a
  * fixed timer can print an unsigned letter on a cold cache. */
 async function printWhenReady() {
@@ -117,6 +131,23 @@ export function DocToolbar({
   // genId to drive the one-click (server-rendered) email: an explicit issued-page
   // genId, or the one just saved on this generate page.
   const effectiveGenId = email?.genId ?? savedGenId;
+
+  // The browser names a printed/saved PDF after document.title, so make it say
+  // what the document IS: "Acceptance of Resignation — Anurag Sharma —
+  // SSS-HR-2026-014" instead of the page's generic title. Slashes are swapped
+  // out because they are illegal in filenames.
+  const docTitle = save?.title ?? withdraw?.label;
+  const docRef = withdraw?.ref;
+  useEffect(() => {
+    if (!docTitle) return;
+    const person = backLabel && !/^back to/i.test(backLabel) ? ` — ${backLabel}` : "";
+    const ref = docRef && !docRef.includes("•") ? ` — ${docRef}` : "";
+    const prev = document.title;
+    document.title = `${titleCase(docTitle)}${person}${ref}`.replace(/\//g, "-");
+    return () => {
+      document.title = prev;
+    };
+  }, [docTitle, docRef, backLabel]);
 
   // On the issued page after an issue+print flow: print the archived render once.
   useEffect(() => {

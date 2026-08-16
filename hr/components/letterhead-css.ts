@@ -121,6 +121,12 @@ export const LETTERHEAD_CSS = `
   background:#1f3a5f; border-radius:1px; }
 
 @media print {
+  /* The app chrome must never reach paper: the body's bg-canvas grey otherwise
+     prints as a grey slab in the empty space below the letter whenever the
+     user has "Background graphics" on (which the payslip's navy bands need),
+     and the admin nav would print above page 1. */
+  html, body{ background:#fff !important; }
+  header, nav{ display:none !important; }
   .ss-stage{ background:#fff !important; padding:0 !important; }
   /* Margin is set on @page below, NOT as .ss-sheet padding — a padding value
      here only shows up at the very top/bottom of the whole flowed block, so a
@@ -132,5 +138,20 @@ export const LETTERHEAD_CSS = `
   .ss-noprint{ display:none !important; }
   .ss-watermark{ display:none !important; }
   @page{ size:A4; margin:22mm 18mm; }
+}
+`;
+
+/* Single-page documents ONLY (simple letters, payslips): zero the @page margin
+   — Chrome draws its date/title header and URL/page-number footer inside the
+   page margin area, so margin:0 is the one reliable way to suppress them — and
+   move the margins into the sheet's print padding instead. This must NOT be
+   applied to multi-page letters (offer, internship offer): with @page margin 0
+   their interior page breaks would run flush to the paper edge, which physical
+   printers clip. Multi-page letters keep the @page margins above; their clean
+   copy is the server-rendered "Download PDF" (no browser headers ever). */
+export const SINGLE_PAGE_PRINT_CSS = `
+@media print {
+  @page{ size:A4; margin:0; }
+  .ss-sheet{ padding:22mm 18mm !important; }
 }
 `;

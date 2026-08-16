@@ -6,6 +6,17 @@ import { buildPayslip, prorateStructure, type DeductionConfig, type PayPeriod } 
 import { structureForMonth, toPayslipEmployee, type Employee } from "@/lib/employee";
 import { PayslipDoc } from "@/components/PayslipDoc";
 import { DocToolbar } from "@/components/DocToolbar";
+import { PAYMENT_MODE_OPTIONS } from "@/lib/employee";
+
+/** Cash has no bank leg — "credited to the employee's bank account ... via
+ * cash" is nonsensical and was printing on every cash-paid slip. Every other
+ * mode (Bank Transfer, UPI, Cheque) genuinely does land in a bank account. */
+function paymentRemark(monthLabel: string, payDate: string, mode: string): string {
+  if (mode.trim().toLowerCase() === "cash") {
+    return `Salary for ${monthLabel} paid in cash to the employee on ${payDate}.`;
+  }
+  return `Salary for ${monthLabel} credited to the employee's bank account on ${payDate} via ${mode.toLowerCase()}.`;
+}
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Salary slip", robots: { index: false, follow: false } };
@@ -120,12 +131,20 @@ export default async function GeneratePayslip({
   // slip must never state LOP days while paying the full month.
   const earnings = prorateStructure(monthStructure, lop, period.standardDays);
 
+  // Payment mode for THIS slip — defaults to the employee's record, but
+  // overridable per month (e.g. one cash-in-hand month for an otherwise
+  // bank-paid employee, or vice versa) via the config bar below.
+  const paymentMode = PAYMENT_MODE_OPTIONS.includes(sp.mode ?? "") ? (sp.mode as string) : (e.paymentMode || "Bank Transfer");
+
   const payslip = buildPayslip({
-    employee: toPayslipEmployee(e),
+    // The mode override (above) must also win on the slip's own "Payment Mode"
+    // field — otherwise a for-this-month override would read "paid in cash"
+    // in the remark while the field above it still said "Bank Transfer".
+    employee: { ...toPayslipEmployee(e), paymentMode },
     period,
     earnings,
     deductionConfig: cfg,
-    remarks: `Salary for ${period.monthLabel} credited to the employee's bank account on ${period.payDate} via ${(e.paymentMode ?? "Bank Transfer").toLowerCase()}.`,
+    remarks: paymentRemark(period.monthLabel, period.payDate, paymentMode),
   });
 
   // No-print config bar — set month + deductions on the generate step and Update.
@@ -137,6 +156,14 @@ export default async function GeneratePayslip({
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "center" }}>
         <label>Month <input type="month" name="month" defaultValue={month} style={cfgInput} /></label>
         <label>Pay date <input type="date" name="payDate" defaultValue={payDateIso} style={cfgInput} /></label>
+        <label>
+          Paid via{" "}
+          <select name="mode" defaultValue={paymentMode} style={cfgInput}>
+            {PAYMENT_MODE_OPTIONS.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </label>
         <label><input type="checkbox" name="pf" defaultChecked={cfg.pf?.enabled} /> PF <span style={{ color: "#8a94a3" }}>(<input type="checkbox" name="pfCap" defaultChecked={sp.pfCap === "on"} /> cap ₹15k)</span></label>
         <label><input type="checkbox" name="esi" defaultChecked={cfg.esi?.enabled} /> ESI</label>
         <label><input type="checkbox" name="pt" defaultChecked={cfg.pt?.enabled} /> PT ₹<input name="ptAmt" type="number" min={0} defaultValue={String(cfg.pt?.amount ?? 0)} style={{ ...cfgInput, width: 70 }} /></label>
