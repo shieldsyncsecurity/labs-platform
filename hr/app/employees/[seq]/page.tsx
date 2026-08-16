@@ -104,6 +104,30 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
     } catch { /* toggle hidden this load */ }
   }
 
+  // Surfaces the onboard/offboard wizard as a resumable banner rather than
+  // something you have to remember exists — derived from the same real data
+  // (issued docs, status) the wizards themselves read, so it can never say
+  // "in progress" for something already finished.
+  const onboardingDone = generated.some((g) => g.docType === (isIntern ? "internship-offer" : "offer"));
+  const offboardingStarted = exited || generated.some((g) => g.docType === "resignation-acceptance");
+  const offboardingDone = exited && generated.some((g) => g.docType === (isIntern ? "completion" : "experience"));
+  let lifecycleBanner: { tone: "amber" | "blue"; text: string; href: string; cta: string } | null = null;
+  if (!onboardingDone && canWriteDocs) {
+    lifecycleBanner = {
+      tone: "blue",
+      text: `Onboarding isn't finished for ${e.name.split(" ")[0]} yet — the offer letter and portal login are still pending.`,
+      href: `/employees/${seq}/onboard`,
+      cta: "Continue onboarding",
+    };
+  } else if (offboardingStarted && !offboardingDone && (canWriteDocs || canWriteEmp)) {
+    lifecycleBanner = {
+      tone: "amber",
+      text: `Offboarding is in progress for ${e.name.split(" ")[0]}.`,
+      href: `/employees/${seq}/offboard`,
+      cta: "Continue offboarding",
+    };
+  }
+
   return (
     <main style={{ maxWidth: 820, margin: "0 auto", padding: "36px 24px", fontFamily: "Arial, Helvetica, 'Segoe UI', sans-serif" }}>
       <Link href="/employees" style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; Employees</Link>
@@ -125,6 +149,15 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
           {canWriteEmp ? <DeleteEmployeeButton seq={seq} name={e.name} employeeId={e.employeeId} /> : null}
         </div>
       </div>
+
+      {lifecycleBanner ? (
+        <div style={{ marginTop: 16, background: lifecycleBanner.tone === "amber" ? "#fdf4e3" : "#eef2fb", border: `1px solid ${lifecycleBanner.tone === "amber" ? "#f0dfb8" : "#c3cee0"}`, borderRadius: 10, padding: "11px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, color: lifecycleBanner.tone === "amber" ? "#7a5714" : "#2f4fb0" }}>{lifecycleBanner.text}</span>
+          <Link href={lifecycleBanner.href} style={{ background: "#1f3a5f", color: "#fff", textDecoration: "none", fontSize: 12, fontWeight: 700, borderRadius: 7, padding: "6px 12px" }}>
+            {lifecycleBanner.cta}
+          </Link>
+        </div>
+      ) : null}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16, marginTop: 20 }}>
         <div style={card}>
@@ -189,7 +222,15 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
           for someone who can actually change it (its POST needs employees:write). */}
       {canWriteEmp ? (
         <div style={{ ...card, marginTop: 16 }}>
-          <div style={groupTitle}>Employment status</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+            <div style={groupTitle}>Employment status</div>
+            {/* Steady-state discovery for the offboard wizard — only shown when
+                nothing has started yet (the banner above takes over once it has),
+                so an ongoing employee's page stays quiet. */}
+            {onboardingDone && !exited && !offboardingStarted && canWriteDocs ? (
+              <Link href={`/employees/${seq}/offboard`} style={linkBtn}>Start offboarding &rarr;</Link>
+            ) : null}
+          </div>
           <OffboardControl seq={seq} status={e.status} lastWorkingDay={e.lastWorkingDay} />
         </div>
       ) : null}

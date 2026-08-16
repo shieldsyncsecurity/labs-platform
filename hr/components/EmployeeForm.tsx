@@ -111,7 +111,10 @@ export function EmployeeForm({ seq, initial }: { seq?: string; initial?: Partial
         return;
       }
       const target = isEdit ? seq : data?.employee?.seq;
-      router.push(target ? `/employees/${target}` : "/employees");
+      // A fresh create goes straight into the onboarding wizard — the next
+      // thing every new hire needs is the offer letter and portal access, not
+      // a bare record page. Editing an existing record still returns there.
+      router.push(target ? `/employees/${target}${isEdit ? "" : "/onboard"}` : "/employees");
       router.refresh();
     } catch {
       setError("Could not reach the server — check the connection and try again.");
