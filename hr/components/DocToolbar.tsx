@@ -98,6 +98,7 @@ export function DocToolbar({
   canIssue = true,
   withdraw,
   canWithdraw = false,
+  confirmBeforeSave,
 }: {
   backHref: string;
   backLabel: string;
@@ -115,6 +116,11 @@ export function DocToolbar({
    * server-side, so the resulting gap is always traceable to a decision. */
   withdraw?: { seq: string; genId: string; label?: string; ref?: string };
   canWithdraw?: boolean;
+  /** If set, shown as a native confirm() before Save/Issue proceeds — the
+   * caller's chance to stop an accidental duplicate (e.g. a second payslip
+   * for a month already issued) at the point of action, not just in a banner
+   * that's easy to skim past. */
+  confirmBeforeSave?: string;
 }) {
   const sp = useSearchParams();
   const [saved, setSaved] = useState(false);
@@ -179,6 +185,7 @@ export function DocToolbar({
 
   async function doSave(thenPrint: boolean): Promise<void> {
     if (!save) return;
+    if (confirmBeforeSave && !confirm(confirmBeforeSave)) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/employees/${save.seq}/generated`, {

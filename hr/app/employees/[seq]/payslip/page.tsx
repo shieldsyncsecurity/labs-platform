@@ -88,15 +88,25 @@ export default async function GeneratePayslip({
   const payDateIso = /^\d{4}-\d{2}-\d{2}$/.test(sp.payDate ?? "") ? (sp.payDate as string) : defaultPayIso(month);
   const period = buildPeriod(month, lop, payDateIso);
 
-  // Deduction defaults: on a fresh open (no deduction params in the URL),
-  // prefill from this employee's LAST ISSUED slip — the owner shouldn't re-tick
-  // PF / re-type TDS every month, and a forgotten tick silently changes net pay.
+  // Fetched once, used two ways below: (1) prefill deduction defaults from the
+  // last issued slip, and (2) detect whether a slip for THIS month already
+  // exists — nothing in the engine stops a second payslip being saved for the
+  // same employee+month (fixed ref, no dedupe), so without this check it's
+  // silently possible to double-issue a month's pay.
+  type GenSummary = { docId: string; docType: string; ref: string; generatedAt: string };
+  let gens: GenSummary[] = [];
+  try {
+    gens = (await hrFetch<{ generated: GenSummary[] }>(`/hr/employees/${seq}/generated`)).generated ?? [];
+  } catch {
+    /* best-effort */
+  }
+  const existingForMonth = gens.filter((g) => g.docType === "payslip" && g.ref.endsWith(` ${month}`));
+
   const hasParams = ["pf", "esi", "pt", "tds", "lop", "pfCap"].some((k) => sp[k] !== undefined);
   let prev: { pf: number; esi: number; pt: number; tds: number } | null = null;
   let prevCfg: DeductionConfig | null = null;
   if (!hasParams) {
     try {
-      const gens = (await hrFetch<{ generated: Array<{ docId: string; docType: string }> }>(`/hr/employees/${seq}/generated`)).generated ?? [];
       const lastSlip = gens.find((g) => g.docType === "payslip"); // newest-first
       if (lastSlip) {
         const g = await hrFetch<{ gen: { snapshot?: { deductions?: { pf: number; esi: number; pt: number; tds: number }; config?: DeductionConfig } } }>(
@@ -180,6 +190,23 @@ export default async function GeneratePayslip({
     </form>
   );
 
+  // Nothing server-side stops a second payslip for the same employee+month
+  // (fixed ref, no dedupe) — so warn plainly and require an explicit confirm
+  // before Save/Issue can create a duplicate.
+  const dupWarning =
+    existingForMonth.length > 0 ? (
+      <div style={{ marginTop: 8, border: "1px solid #f0dfb8", background: "#fdf4e3", color: "#7a5714", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, lineHeight: 1.6 }}>
+        <b>{existingForMonth.length === 1 ? "A salary slip" : `${existingForMonth.length} salary slips`} for {period.monthLabel} {existingForMonth.length === 1 ? "already exists" : "already exist"}</b> for {e.name}:{" "}
+        {existingForMonth.map((g, i) => (
+          <span key={g.docId}>
+            {i > 0 ? ", " : ""}
+            <a href={`/employees/${seq}/issued/${g.docId}`} style={{ color: "#7a5714", textDecoration: "underline" }}>{g.ref || g.docId}</a>
+          </span>
+        ))}
+        . Saving again creates a duplicate — open the link above first if you meant to correct or withdraw it instead.
+      </div>
+    ) : null;
+
   return (
     <PayslipDoc
       payslip={payslip}
@@ -191,7 +218,13 @@ export default async function GeneratePayslip({
             canIssue={canIssue}
             save={{ seq, docType: "payslip", title: `Salary Slip - ${period.monthLabel}`, ref: `${e.employeeId} ${month}`, snapshot: payslip }}
             email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Salary Slip — ${period.monthLabel}` }}
+            confirmBeforeSave={
+              existingForMonth.length > 0
+                ? `${e.name} already has ${existingForMonth.length === 1 ? "a salary slip" : `${existingForMonth.length} salary slips`} for ${period.monthLabel} (${existingForMonth.map((g) => g.ref || g.docId).join(", ")}).\n\nSave this as another one anyway?`
+                : undefined
+            }
           />
+          {dupWarning}
           {configBar}
         </>
       }
