@@ -37,15 +37,15 @@ export function generateStaticParams() {
   return LABS.map((l) => ({ slug: l.slug }));
 }
 
-// Only the labs listed in generateStaticParams exist; every lab is code-defined and
-// built in, so a slug that isn't in that list is genuinely 404. Without this, an
-// unknown slug is rendered on-demand and the in-page `notFound()` produces a SOFT
-// 404 on OpenNext/Cloudflare (the not-found UI renders but the HTTP status stays 200
-// and the title falls back to "Lab") — so Google indexes junk /labs/<typo> URLs as
-// real pages. `dynamicParams = false` makes Next reject unknown slugs at the routing
-// layer with a proper 404 status + the standard not-found page. (Verified live
-// 2026-08-17: /labs/does-not-exist-xyz returned 200.)
-export const dynamicParams = false;
+// KNOWN LIMITATION (OpenNext/Cloudflare, verified live 2026-08-17): an unknown lab
+// slug renders the in-page `notFound()` body but with an HTTP 200 (soft-404) and a
+// "Lab" title, because the adapter does not propagate notFound()'s 404 status for
+// on-demand ISR routes. `export const dynamicParams = false` is NOT honored here
+// either (generateMetadata still runs for unknown slugs), so it was removed rather
+// than left as a no-op that implies a fix. Practical impact is negligible: the
+// sitemap lists only real labs and nothing links to nonexistent ones, so crawlers do
+// not discover /labs/<typo> URLs. If this ever matters, the real fix is an edge
+// middleware that returns a genuine 404 for slugs not in LABS.
 
 // Revalidate the prerendered HTML every 5 min instead of Next's default 1-year
 // static cache. The page body inlines hash-named JS/CSS chunk URLs, so a 1-year
