@@ -24,6 +24,16 @@ const PAYTM_WSS = "wss://secure.paytmpayments.com wss://securestage.paytmpayment
 // Cognito (sign-in is server-side redirects, but allow its XHR/endpoints defensively).
 const COGNITO = "https://cognito-idp.us-east-1.amazonaws.com https://*.auth.us-east-1.amazoncognito.com";
 
+// Cloudflare Web Analytics (cookieless RUM). Cloudflare auto-injects its beacon
+// (`static.cloudflareinsights.com/beacon.min.js`) into HTML served through this
+// zone; the beacon then POSTs to `cloudflareinsights.com/cdn-cgi/rum`. Without
+// these two hosts allow-listed, the app CSP refuses the beacon on EVERY page load
+// (`script-src-elem` violation) and we collect ZERO analytics — verified live
+// 2026-08-17, right before the paid-marketing funnel goes live. Beacon load host
+// goes in script-src(-elem); the RUM POST host goes in connect-src.
+const CF_ANALYTICS_SCRIPT = "https://static.cloudflareinsights.com";
+const CF_ANALYTICS_BEACON = "https://cloudflareinsights.com";
+
 const csp = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -34,9 +44,9 @@ const csp = [
   "font-src 'self' data:",
   `style-src 'self' 'unsafe-inline' ${PAYTM}`,
   `style-src-elem 'self' 'unsafe-inline' ${PAYTM}`,
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} ${PAYTM}`,
-  `script-src-elem 'self' 'unsafe-inline' ${PAYTM}`,
-  `connect-src 'self' ${PAYTM} ${PAYTM_WSS} ${COGNITO}${isDev ? " ws:" : ""}`,
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} ${PAYTM} ${CF_ANALYTICS_SCRIPT}`,
+  `script-src-elem 'self' 'unsafe-inline' ${PAYTM} ${CF_ANALYTICS_SCRIPT}`,
+  `connect-src 'self' ${PAYTM} ${PAYTM_WSS} ${COGNITO} ${CF_ANALYTICS_BEACON}${isDev ? " ws:" : ""}`,
   `frame-src 'self' ${PAYTM}`,
   "upgrade-insecure-requests",
 ].join("; ");
