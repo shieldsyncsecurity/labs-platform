@@ -50,7 +50,7 @@ function contextFor(returnTo: string): SignInContext {
 export default function SignInPage() {
   const { signIn } = useAuth();
   const router = useRouter();
-  const [busy, setBusy] = useState<"google" | "linkedin" | null>(null);
+  const [busy, setBusy] = useState<"google" | null>(null);
   // Start from the default so the server render and first client render match
   // (no Suspense boundary needed); refine from the URL after mount.
   const [ctx, setCtx] = useState<SignInContext>(DEFAULT_CONTEXT);
@@ -62,7 +62,7 @@ export default function SignInPage() {
     setAuthError(params.has("error"));
   }, []);
 
-  async function go(provider: "google" | "linkedin") {
+  async function go(provider: "google") {
     setBusy(provider);
     // Read at click time (client-only) so we don't need a Suspense boundary for
     // useSearchParams. Cognito does a full-page redirect and returns to this path
@@ -90,6 +90,13 @@ export default function SignInPage() {
               </p>
             )}
 
+            {/* Only Google is a configured Cognito IdP today. The "Continue with
+                LinkedIn" button was removed 2026-08-17: there is NO `LinkedInOIDC`
+                provider in the pool (verified via cognito-idp list-identity-providers
+                → only Google), so in production it redirected real visitors to a
+                Cognito error page — a dead signup path. Re-add it only once a LinkedIn
+                OIDC developer app + a Cognito IdP named `LinkedInOIDC` are actually
+                wired (the PROVIDER_IDP mapping in lib/auth/cognito.ts is already ready). */}
             <div className="mt-7 flex flex-col gap-3">
               <button
                 onClick={() => go("google")}
@@ -99,20 +106,12 @@ export default function SignInPage() {
                 <span className="grid h-5 w-5 place-items-center rounded-full bg-[#ea4335] text-xs font-bold text-white">G</span>
                 {busy === "google" ? "Signing in…" : "Continue with Google"}
               </button>
-              <button
-                onClick={() => go("linkedin")}
-                disabled={busy !== null}
-                className="flex items-center justify-center gap-3 rounded-xl border border-line bg-surface px-5 py-3.5 text-base font-semibold text-ink hover:bg-canvas disabled:opacity-60"
-              >
-                <span className="grid h-5 w-5 place-items-center rounded bg-[#0a66c2] text-xs font-bold text-white">in</span>
-                {busy === "linkedin" ? "Signing in…" : "Continue with LinkedIn"}
-              </button>
             </div>
 
             {!COGNITO_ENABLED && (
               <p className="mt-6 text-sm text-muted">
-                Demo sign-in (offline). In production, sign-in happens securely through Google or
-                LinkedIn — this demo skips that step.
+                Demo sign-in (offline). In production, sign-in happens securely through Google
+                — this demo skips that step.
               </p>
             )}
           </div>
