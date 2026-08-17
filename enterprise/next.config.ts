@@ -9,6 +9,17 @@ const isDev = process.env.NODE_ENV !== "production";
  * connect-src / form-action with the relevant identity-provider domains
  * (mirrors labs-platform/app/next.config.ts's Cognito note).
  */
+// Cloudflare Web Analytics (cookieless RUM). Cloudflare auto-injects its beacon
+// (`static.cloudflareinsights.com/beacon.min.js`) into HTML served through this
+// zone; the beacon then POSTs to `cloudflareinsights.com/cdn-cgi/rum`. Without
+// these two hosts allow-listed, the CSP refuses the beacon on EVERY page load
+// (`script-src-elem` violation) and we collect ZERO analytics — the SAME gap the
+// labs app hit (see labs-platform/app/next.config.ts), fixed here for parity so
+// this public B2B site's traffic is actually measured. Beacon load host goes in
+// script-src(-elem); the RUM POST host goes in connect-src.
+const CF_ANALYTICS_SCRIPT = "https://static.cloudflareinsights.com";
+const CF_ANALYTICS_BEACON = "https://cloudflareinsights.com";
+
 const csp = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -24,11 +35,11 @@ const csp = [
   "font-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
   "style-src-elem 'self' 'unsafe-inline'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-  "script-src-elem 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} ${CF_ANALYTICS_SCRIPT}`,
+  `script-src-elem 'self' 'unsafe-inline' ${CF_ANALYTICS_SCRIPT}`,
   // Azure Portal added so the candidate readiness-check can ping it for
   // reachability (Azure-first assessments). Same-origin otherwise.
-  `connect-src 'self' https://portal.azure.com${isDev ? " ws:" : ""}`,
+  `connect-src 'self' https://portal.azure.com ${CF_ANALYTICS_BEACON}${isDev ? " ws:" : ""}`,
   "frame-src 'self'",
   "upgrade-insecure-requests",
 ].join("; ");
