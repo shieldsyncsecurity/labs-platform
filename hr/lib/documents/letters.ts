@@ -369,3 +369,71 @@ export function buildExperienceLetter(e: Employee, opts: { ref: string; date: st
     signatory: DEFAULT_SIGNATORY,
   };
 }
+
+/**
+ * Full & Final settlement statement — issued for an exiting employee's final
+ * month, in place of a routine salary slip. Distinct in both framing (a
+ * closing statement of account, not a recurring payslip) and legal effect
+ * (states there are no further dues once paid). The underlying earnings/
+ * deductions figures are computed by the SAME engine as every other payslip
+ * (buildPayslip, called by the generate page) — this only wraps that output
+ * in settlement-appropriate text, so the numbers can never drift from what a
+ * regular slip would have shown for the same inputs.
+ */
+export function buildFnfSettlement(
+  e: Employee,
+  opts: {
+    ref: string;
+    date: string;
+    monthLabel: string; // e.g. "August 2026" — the final month being settled
+    earnings: { basic: number; hra: number; conveyance: number; special: number; gross: number };
+    deductions: { pf: number; esi: number; pt: number; tds: number; total: number };
+    netPay: number;
+    netPayWords: string;
+    /** e.g. "paid in cash on 05 September 2026" / "credited to your bank
+     * account on 05 September 2026 via bank transfer" — branches on payment
+     * mode the same way the payslip remark does; computed by the caller since
+     * it already has paymentMode + payDate assembled. */
+    payoutNote: string;
+  },
+): SimpleLetter {
+  const first = firstName(e.name);
+  const money = (v: number) => fmt(v);
+  const lwd = e.lastWorkingDay || "your last working day";
+  const { earnings: earn, deductions: ded } = opts;
+
+  return {
+    runLabel: "Full and Final Settlement Statement",
+    title: "FULL AND FINAL SETTLEMENT STATEMENT",
+    ref: opts.ref,
+    date: opts.date,
+    to: { name: e.name },
+    salutation: `Dear ${first},`,
+    paragraphs: [
+      `This statement records the full and final settlement of your dues with ${COMPANY.legalName} (&ldquo;the Company&rdquo;) on the occasion of your separation, effective ${lwd}. It covers your salary for ${opts.monthLabel}, your final month with the Company.`,
+    ],
+    table: {
+      kind: "grid",
+      headers: ["Component", "Amount (INR)"],
+      rows: [
+        ["Basic Pay", money(earn.basic)],
+        ["House Rent Allowance (HRA)", money(earn.hra)],
+        ["Conveyance Allowance", money(earn.conveyance)],
+        ["Special Allowance", money(earn.special)],
+        ["Gross Earnings", money(earn.gross)],
+        ["Provident Fund (PF)", money(ded.pf)],
+        ["ESI", money(ded.esi)],
+        ["Professional Tax (PT)", money(ded.pt)],
+        ["Tax Deducted at Source (TDS)", money(ded.tds)],
+        ["Total Deductions", money(ded.total)],
+        ["Net Amount Payable (Full & Final)", money(opts.netPay)],
+      ],
+    },
+    paragraphs2: [
+      `The net amount of INR ${fmt(opts.netPay)} (Rupees ${opts.netPayWords} only) will be ${opts.payoutNote}.`,
+      `Upon payment of the amount stated above, and subject to the return of all Company property, documents, and access credentials in your possession (if not already returned), there shall remain no further dues — financial or otherwise — owed by either party arising from your employment, and this statement constitutes full and final settlement of account between you and the Company.`,
+      `We thank you for your contribution during your time with ${COMPANY.shortName} and wish you every success ahead.`,
+    ],
+    signatory: DEFAULT_SIGNATORY,
+  };
+}
