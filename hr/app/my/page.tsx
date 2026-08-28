@@ -21,6 +21,7 @@ const DOCTYPE_LABEL: Record<string, string> = {
   completion: "Certificate of completion",
   "employment-history": "Employment history certificate",
   "resignation-acceptance": "Resignation acceptance letter",
+  fnf: "Full & Final settlement",
 };
 
 // Everything here is scoped to session.seq, taken from the SIGNED ss_self
