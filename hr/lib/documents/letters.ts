@@ -410,7 +410,7 @@ export function buildFnfSettlement(
     to: { name: e.name },
     salutation: `Dear ${first},`,
     paragraphs: [
-      `This statement records the full and final settlement of your dues with ${COMPANY.legalName} (&ldquo;the Company&rdquo;) on the occasion of your separation, effective ${lwd}. It covers your salary for ${opts.monthLabel}, your final month with the Company.`,
+      `This statement records the full and final settlement of your dues with ${COMPANY.legalName} ("the Company") on the occasion of your separation, effective ${lwd}. It covers your salary for ${opts.monthLabel}, your final month with the Company.`,
     ],
     table: {
       kind: "grid",
