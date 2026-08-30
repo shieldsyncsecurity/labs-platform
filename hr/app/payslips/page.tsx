@@ -122,22 +122,30 @@ export default async function PayslipsPage({ searchParams }: { searchParams: Pro
                 <td style={{ padding: "10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{formatINR(e.grossMonthly)}</td>
                 <td style={{ padding: "10px", textAlign: "right", whiteSpace: "nowrap" }}>
                   {issued.get(e.seq) ? (
-                    <>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                      {/* Status pill (not a link) — distinct from the actions beside it. */}
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#1a7a45", background: "#e7f6ee", border: "1px solid #b7e2c9", borderRadius: 999, padding: "3px 10px" }}>
+                        ✓ Issued
+                      </span>
                       {canOpenIssued ? (
-                        <Link href={`/employees/${e.seq}/issued/${issued.get(e.seq)}`} style={{ color: "#1a7a45", fontWeight: 700, fontSize: 12.5, marginRight: canGenerate ? 12 : 0 }}>
-                          ✓ Issued — open →
-                        </Link>
-                      ) : (
-                        <span style={{ color: "#1a7a45", fontWeight: 700, fontSize: 12.5, marginRight: canGenerate ? 12 : 0 }}>✓ Issued</span>
-                      )}
-                      {canGenerate ? (
-                        <Link href={`/employees/${e.seq}/payslip?month=${month}`} style={{ color: "#8a94a3", fontWeight: 600, fontSize: 12 }}>
-                          regenerate
+                        <Link href={`/employees/${e.seq}/issued/${issued.get(e.seq)}`} style={{ color: "#2f4fb0", fontWeight: 700, fontSize: 12.5 }}>
+                          Open &rarr;
                         </Link>
                       ) : null}
-                    </>
+                      {/* Amber, not a plain link — regenerating creates ANOTHER issued
+                          slip for the month (same caution color as the duplicate-payslip
+                          warning on the generate screen), so it reads as deliberate. */}
+                      {canGenerate ? (
+                        <Link
+                          href={`/employees/${e.seq}/payslip?month=${month}`}
+                          style={{ fontSize: 11, fontWeight: 700, color: "#8a5a00", background: "#fdf4e3", border: "1px solid #f0d9a8", borderRadius: 999, padding: "3px 10px" }}
+                        >
+                          Regenerate
+                        </Link>
+                      ) : null}
+                    </span>
                   ) : canGenerate ? (
-                    <Link href={`/employees/${e.seq}/payslip?month=${month}`} style={{ color: "#2f4fb0", fontWeight: 600 }}>Generate →</Link>
+                    <Link href={`/employees/${e.seq}/payslip?month=${month}`} style={{ color: "#2f4fb0", fontWeight: 700 }}>Generate &rarr;</Link>
                   ) : (
                     <span style={{ color: "#c3cee0" }}>—</span>
                   )}
