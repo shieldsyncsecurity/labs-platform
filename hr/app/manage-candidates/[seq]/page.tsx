@@ -4,7 +4,7 @@ import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
 import { getViewer } from "@/lib/server/hr-access";
 import { can } from "@/lib/access";
 import { getQuestionnaire } from "@/lib/questionnaire";
-import { isRetentionDue, retentionDueDate, OUTCOME_OPTIONS, type Candidate } from "@/lib/candidate";
+import { isRetentionDue, retentionDueDate, interviewDateLabel, interviewPanelLabel, OUTCOME_OPTIONS, type Candidate } from "@/lib/candidate";
 import { AnswersView } from "@/components/QuestionnaireForm";
 import { SendQuestionnaire, OutcomeControl, DeleteCandidateButton } from "@/components/CandidateControls";
 import { InterviewScheduler } from "@/components/InterviewScheduler";
@@ -83,8 +83,10 @@ export default async function CandidateDetail({ params }: { params: Promise<{ se
         </div>
         <div style={card}>
           <div style={groupTitle}>Interview</div>
-          {row("Interviewed on", c.interviewedOn)}
-          {row("Interviewed by", c.interviewedBy)}
+          {/* Derived from the scheduler's interviews[] first, falling back to the
+              legacy free-text fields — so a booked round doesn't read as "—". */}
+          {row("Interviewed on", interviewDateLabel(c) ?? undefined)}
+          {row("Interviewed by", interviewPanelLabel(c) ?? undefined)}
           {row("Questionnaire", q.roleTitle)}
           {!c.convertedEmployeeId && dueDate ? row("Delete data by", dueDate) : null}
           <div style={{ display: "flex", gap: 10, padding: "5px 0", fontSize: 12.5 }}>

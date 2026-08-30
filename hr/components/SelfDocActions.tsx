@@ -13,6 +13,7 @@ export function SelfDocActions({ genId, defaultTo, defaultSubject }: { genId: st
   const [downloading, setDownloading] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailState, setEmailState] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
 
   // The browser names a printed/saved PDF after document.title — use the doc's
   // own name (the email subject already carries "Title — Ref") instead of the
@@ -50,6 +51,8 @@ export function SelfDocActions({ genId, defaultTo, defaultSubject }: { genId: st
 
   async function onEmail(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (sending) return; // guard against a double-click sending two real emails
+    setSending(true);
     setEmailState("Sending…");
     try {
       const res = await fetch("/api/self/email", { method: "POST", body: new FormData(e.currentTarget) });
@@ -58,6 +61,7 @@ export function SelfDocActions({ genId, defaultTo, defaultSubject }: { genId: st
     } catch {
       setEmailState("Send failed.");
     }
+    setSending(false);
   }
 
   return (
@@ -89,8 +93,10 @@ export function SelfDocActions({ genId, defaultTo, defaultSubject }: { genId: st
           <label>
             Subject <input name="subject" required defaultValue={defaultSubject} style={{ ...input, minWidth: 260 }} />
           </label>
-          <button type="submit" style={{ ...printBtn, padding: "7px 12px" }}>Send</button>
-          {emailState ? <span style={{ color: "#5b6676" }}>{emailState}</span> : null}
+          <button type="submit" disabled={sending} style={{ ...printBtn, padding: "7px 12px", opacity: sending ? 0.6 : 1, cursor: sending ? "default" : "pointer" }}>
+            {sending ? "Sending…" : "Send"}
+          </button>
+          {emailState ? <span style={{ color: emailState.startsWith("Sent") ? "#146c3c" : emailState === "Sending…" ? "#5b6676" : "#9a2233", fontWeight: 600 }}>{emailState}</span> : null}
         </form>
       ) : null}
     </div>

@@ -220,6 +220,10 @@ export default async function GeneratePayslip({
       payslip={payslip}
       toolbar={
         <>
+          {/* Duplicate warning + config-first, THEN the act buttons — set the
+              month/deductions/pay-date before issuing, not after. */}
+          {dupWarning}
+          {configBar}
           <DocToolbar
             backHref={`/payslips?month=${month}`}
             backLabel="Payslips"
@@ -232,8 +236,6 @@ export default async function GeneratePayslip({
                 : undefined
             }
           />
-          {dupWarning}
-          {configBar}
         </>
       }
     />

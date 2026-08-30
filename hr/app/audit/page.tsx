@@ -115,6 +115,7 @@ export default async function AuditPage() {
       ) : audit.length === 0 ? (
         <p style={{ marginTop: 18, fontSize: 13, color: "#8a94a3" }}>No activity yet.</p>
       ) : (
+        <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 18, fontSize: 12.5 }}>
           <thead>
             <tr style={{ textAlign: "left", color: "#8a94a3", fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>
@@ -137,6 +138,7 @@ export default async function AuditPage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </main>
   );

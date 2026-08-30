@@ -243,7 +243,11 @@ ${txn.date}  ${txn.counterparty ?? txn.particulars.slice(0, 40)}
           onClick={remove}
           disabled={busy}
           title="Remove this transaction from the ledger"
-          style={{ background: "none", border: "none", color: "#c3cee0", fontSize: 15, lineHeight: 1, cursor: busy ? "default" : "pointer", padding: "2px 4px" }}
+          onMouseOver={(e) => { e.currentTarget.style.color = "#9a2233"; }}
+          onMouseOut={(e) => { e.currentTarget.style.color = "#7a8699"; }}
+          // Legible slate at rest (was near-invisible #c3cee0 on white for a
+          // destructive control), strengthening to danger red on hover.
+          style={{ background: "none", border: "none", color: "#7a8699", fontSize: 16, fontWeight: 700, lineHeight: 1, cursor: busy ? "default" : "pointer", padding: "2px 4px" }}
         >
           ×
         </button>

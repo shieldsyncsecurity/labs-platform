@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Questionnaire, Section, Field, FieldType } from "@/lib/questionnaire";
+import { getQuestionnaire, type Questionnaire, type Section, type Field, type FieldType } from "@/lib/questionnaire";
 import type { Candidate } from "@/lib/candidate";
 
 // Full per-candidate questionnaire editor. NO validation of "sensible"
@@ -17,6 +17,22 @@ const ghost: React.CSSProperties = { background: "none", border: "1px dashed #c3
 const danger: React.CSSProperties = { background: "none", border: "none", color: "#c0344c", fontSize: 12, fontWeight: 600, cursor: "pointer" };
 
 const TYPES: FieldType[] = ["text", "textarea", "email", "tel", "number", "select", "multiselect", "rating", "date", "file", "consent"];
+// Plain-English labels for the type dropdown — the raw FieldType codes
+// ("textarea", "tel", "multiselect", "consent") don't say what the candidate
+// will see. Stored value is unchanged; only the option label is friendlier.
+const TYPE_LABEL: Record<FieldType, string> = {
+  text: "Short text",
+  textarea: "Paragraph",
+  email: "Email",
+  tel: "Phone",
+  number: "Number",
+  select: "Choose one",
+  multiselect: "Choose several",
+  rating: "Star rating (1–5)",
+  date: "Date",
+  file: "File upload",
+  consent: "Agreement checkbox",
+};
 
 let uid = 0;
 const newId = (kind: string) => `${kind}_${Date.now()}_${uid++}`;
@@ -159,6 +175,15 @@ export function QuestionnaireEditor({ candidate, initial }: { candidate: Candida
         setBusy(false);
         return;
       }
+      // router.refresh() re-renders the server page but does NOT remount this
+      // client editor, so its local q/savedJson would keep showing the
+      // just-removed custom questions (dirty=false → misleading 'Saved ✓', and
+      // a later edit+Save would silently re-create the custom copy from the
+      // stale content). Re-seed local state to the standard questionnaire so the
+      // screen matches what is now actually stored.
+      const standard = getQuestionnaire(candidate.questionnaireRole);
+      setQ(clone(standard));
+      setSavedJson(JSON.stringify(clone(standard)));
       setMsg({ kind: "ok", text: "Reset — the candidate will see the standard questionnaire." });
       router.refresh();
     } catch {
@@ -413,7 +438,7 @@ function FieldCard({
               style={input}
             >
               {TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
+                <option key={t} value={t}>{TYPE_LABEL[t]}</option>
               ))}
             </select>
           </div>

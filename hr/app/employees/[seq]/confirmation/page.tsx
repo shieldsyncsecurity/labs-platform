@@ -60,13 +60,14 @@ export default async function GenerateConfirmation({
       letter={letter}
       toolbar={
         <>
+          {/* Config-first: set options before the act buttons — see verification. */}
+          {configBar}
           <DocToolbar
             backHref={`/employees/${seq}`}
             backLabel={e.name}
             save={{ seq, docType: "confirmation", title: letter.title, refSeries: "hr", refYear: now.getFullYear(), snapshot: letter }}
             email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Confirmation of Employment — ${e.name}` }}
           />
-          {configBar}
         </>
       }
     />

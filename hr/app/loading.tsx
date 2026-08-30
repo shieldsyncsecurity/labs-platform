@@ -3,7 +3,7 @@
 // seconds and users click again.
 export default function Loading() {
   return (
-    <main style={{ maxWidth: 820, margin: "0 auto", padding: "48px 24px", fontFamily: "Arial, Helvetica, 'Segoe UI', sans-serif" }}>
+    <main style={{ maxWidth: 1180, margin: "0 auto", padding: "48px 24px", fontFamily: "Arial, Helvetica, 'Segoe UI', sans-serif" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#5b6676", fontSize: 13 }}>
         <span
           style={{

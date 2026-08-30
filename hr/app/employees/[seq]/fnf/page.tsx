@@ -201,6 +201,8 @@ export default async function GenerateFnf({
               {warnings.map((w, i) => <div key={i}><b>{i === 0 ? "Warning: " : ""}</b>{w}</div>)}
             </div>
           ) : null}
+          {/* Config-first: set month/deductions before the act buttons. */}
+          {configBar}
           <DocToolbar
             backHref={`/employees/${seq}`}
             backLabel={e.name}
@@ -209,7 +211,6 @@ export default async function GenerateFnf({
             email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Full & Final Settlement — ${e.name}` }}
             confirmBeforeSave={warnings.length > 0 ? `${warnings.join("\n\n")}\n\nSave this Full & Final settlement anyway?` : undefined}
           />
-          {configBar}
         </>
       }
     />

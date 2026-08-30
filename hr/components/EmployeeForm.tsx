@@ -136,7 +136,7 @@ export function EmployeeForm({ seq, initial }: { seq?: string; initial?: Partial
           <Field key={`name-${importKey}`} name="name" label="Full name" required placeholder="e.g. Aarav Sample" defaultValue={imported.name ?? dv.name} />
           <Field name="pan" label="PAN" placeholder="e.g. ABCDE1234F" defaultValue={dv.pan} />
           <Field name="address" label="Address" full placeholder="e.g. 12, Sample Residency, Sector 62, Noida, Uttar Pradesh 201309" defaultValue={dv.address} />
-          <Field key={`email-${importKey}`} name="personalEmail" label="Personal email" placeholder="e.g. aarav.sample@gmail.com" defaultValue={imported.personalEmail ?? dv.personalEmail} />
+          <Field key={`email-${importKey}`} name="personalEmail" type="email" label="Personal email" placeholder="e.g. aarav.sample@gmail.com" defaultValue={imported.personalEmail ?? dv.personalEmail} />
           <Field key={`phone-${importKey}`} name="phone" label="Phone" placeholder="e.g. +91 98765 43210" defaultValue={imported.phone ?? dv.phone} />
         </div>
       </div>

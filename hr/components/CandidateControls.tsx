@@ -86,7 +86,7 @@ export function SendQuestionnaire({ candidate }: { candidate: Candidate }) {
   }
 
   async function go(send: boolean) {
-    if (alreadySent && send && !confirm("Re-sending creates a NEW link and immediately invalidates the old one. Continue?")) return;
+    if (alreadySent && send && !confirm(`Re-sending creates a new link for ${candidate.name} and invalidates the old one. Continue?`)) return;
     setBusy(true);
     setState(null);
     try {
@@ -200,19 +200,28 @@ export function OutcomeControl({ candidate }: { candidate: Candidate }) {
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<CandidateOutcome>(candidate.outcome);
   const [note, setNote] = useState(candidate.outcomeNote ?? "");
+  // Inline feedback matching the sibling controls (SendQuestionnaire /
+  // QuestionnaireEditor both confirm inline) — this control moves the candidate
+  // between the In-progress and Closed lists, so a silent save (the outcome
+  // select already shows the value) leaves the operator unsure it took.
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   async function save() {
     setBusy(true);
+    setMsg(null);
     try {
       const res = await fetch(`/api/candidates/${candidate.seq}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...candidate, outcome, outcomeNote: note }),
       });
-      if (!res.ok) alert((await res.json().catch(() => ({}))).error ?? "Could not save.");
-      else router.refresh();
+      if (!res.ok) setMsg({ kind: "err", text: (await res.json().catch(() => ({}))).error ?? "Could not save the decision." });
+      else {
+        setMsg({ kind: "ok", text: "Decision saved ✓" });
+        router.refresh();
+      }
     } catch {
-      alert("Could not reach the server.");
+      setMsg({ kind: "err", text: "Could not reach the server — try again." });
     }
     setBusy(false);
   }
@@ -223,7 +232,7 @@ export function OutcomeControl({ candidate }: { candidate: Candidate }) {
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
         <div style={{ minWidth: 200 }}>
           <label style={labelStyle} htmlFor="outcome">Outcome</label>
-          <select id="outcome" value={outcome} onChange={(e) => setOutcome(e.target.value as CandidateOutcome)} style={inputStyle}>
+          <select id="outcome" value={outcome} onChange={(e) => { setOutcome(e.target.value as CandidateOutcome); setMsg(null); }} style={inputStyle}>
             {OUTCOME_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
@@ -231,12 +240,17 @@ export function OutcomeControl({ candidate }: { candidate: Candidate }) {
         </div>
         <div style={{ flex: 1, minWidth: 220 }}>
           <label style={labelStyle} htmlFor="outcomeNote">Note (internal)</label>
-          <input id="outcomeNote" value={note} onChange={(e) => setNote(e.target.value)} style={inputStyle} placeholder="Why, in one line" />
+          <input id="outcomeNote" value={note} onChange={(e) => { setNote(e.target.value); setMsg(null); }} style={inputStyle} placeholder="Why, in one line" />
         </div>
         <button type="button" onClick={save} disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }}>
           {busy ? "Saving…" : "Save decision"}
         </button>
       </div>
+      {msg ? (
+        <div style={{ marginTop: 10, fontSize: 12.5, fontWeight: 600, borderRadius: 8, padding: "8px 11px", color: msg.kind === "ok" ? "#146c3c" : "#9a2233", background: msg.kind === "ok" ? "#e7f6ee" : "#fdecef", border: `1px solid ${msg.kind === "ok" ? "#b7e2c9" : "#f6c6ce"}` }}>
+          {msg.text}
+        </div>
+      ) : null}
     </div>
   );
 }

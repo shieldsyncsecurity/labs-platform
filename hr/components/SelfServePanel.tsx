@@ -25,6 +25,17 @@ export function SelfServePanel({ rows }: { rows: SelfServeRow[] }) {
   const [busy, setBusy] = useState<number | null>(null);
   const [pins, setPins] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [copiedSeq, setCopiedSeq] = useState<number | null>(null);
+
+  async function copyPin(seq: number, employeeId: string, pin: string) {
+    try {
+      await navigator.clipboard.writeText(`Employee ID: ${employeeId}\nPIN: ${pin}`);
+      setCopiedSeq(seq);
+      setTimeout(() => setCopiedSeq((s) => (s === seq ? null : s)), 2500);
+    } catch {
+      /* clipboard blocked — the PIN stays visible for manual copy */
+    }
+  }
 
   async function issue(row: SelfServeRow) {
     if (row.hasSelfPin && !confirm(`${row.name} already has a working PIN. Issuing a new one stops the old one immediately — they'll need the new PIN to sign in. Continue?`)) {
@@ -102,10 +113,10 @@ export function SelfServePanel({ rows }: { rows: SelfServeRow[] }) {
                       <b style={{ fontSize: 15, letterSpacing: 3, color: "#1f3a5f", fontFamily: "monospace" }}>{pin}</b>
                       <button
                         type="button"
-                        onClick={() => navigator.clipboard?.writeText(pin)}
-                        style={{ background: "none", border: "1px solid #c3cee0", borderRadius: 6, fontSize: 11, fontWeight: 600, color: "#41506a", padding: "3px 8px", cursor: "pointer" }}
+                        onClick={() => copyPin(r.seq, r.employeeId, pin)}
+                        style={{ background: copiedSeq === r.seq ? "#e7f6ee" : "none", border: `1px solid ${copiedSeq === r.seq ? "#b7e2c9" : "#c3cee0"}`, borderRadius: 6, fontSize: 11, fontWeight: 600, color: copiedSeq === r.seq ? "#146c3c" : "#41506a", padding: "3px 8px", cursor: "pointer" }}
                       >
-                        Copy
+                        {copiedSeq === r.seq ? "Copied ✓" : "Copy"}
                       </button>
                       <span style={{ fontSize: 10.5, color: "#8a5a00" }}>shown once</span>
                     </span>

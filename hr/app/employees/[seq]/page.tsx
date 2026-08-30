@@ -145,7 +145,10 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           {isAdmin ? <VisibilityControl seq={Number(seq)} restricted={restricted} /> : null}
-          {canEditRecord ? <Link href={`/employees/${seq}/edit`} style={linkBtn}>Edit record</Link> : null}
+          {/* Edit is the everyday action, so it gets the button treatment;
+              Delete (a rare irreversible cascade) is deliberately the quieter
+              control in DeleteEmployeeButton. */}
+          {canEditRecord ? <Link href={`/employees/${seq}/edit`} style={{ background: "#1f3a5f", color: "#fff", textDecoration: "none", fontSize: 12.5, fontWeight: 700, borderRadius: 7, padding: "7px 13px" }}>Edit record</Link> : null}
           {canWriteEmp ? <DeleteEmployeeButton seq={seq} name={e.name} employeeId={e.employeeId} /> : null}
         </div>
       </div>
@@ -296,10 +299,10 @@ export default async function EmployeeDetail({ params }: { params: Promise<{ seq
           The checklist is a read-only summary of what has been uploaded — no
           reason to gate it separately from the vault that backs it. */}
       {canKyc ? (
-        <>
+        <div id="kyc" style={{ scrollMarginTop: 72 }}>
           <OnboardingChecklist seq={seq} paymentMode={e.paymentMode} />
           <KycSection seq={seq} canWrite={isAdmin || can(access, "kyc", "write")} />
-        </>
+        </div>
       ) : null}
     </main>
   );

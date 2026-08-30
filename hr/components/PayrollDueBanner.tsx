@@ -21,7 +21,28 @@ export async function PayrollDueBanner() {
     if (hideAll) return null;
     s = await getPayrollDue(new Date(), seqs);
   } catch {
-    return null; // engine unreachable — the page's own error state covers it
+    // Engine unreachable. This banner is the ONLY payroll signal on the admin
+    // dashboard (getViewer doesn't hit the engine for an admin, so the page's
+    // error boundary never fires here) — returning null would make an outage
+    // look identical to "everyone is paid", defeating the reminder. Show an
+    // explicit "couldn't check" strip instead, so absence-of-banner keeps its
+    // one honest meaning: all clear.
+    return (
+      <section
+        aria-label="Payroll status unavailable"
+        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, background: "#f3f5f9", border: "1px solid #d4dbe8", borderRadius: 10, padding: "12px 14px", marginBottom: 20 }}
+      >
+        <span style={{ background: "#8a94a3", color: "#fff", fontSize: 10.5, fontWeight: 800, letterSpacing: 0.6, borderRadius: 5, padding: "3px 7px", textTransform: "uppercase" }}>
+          Unknown
+        </span>
+        <p style={{ flex: 1, minWidth: 260, margin: 0, fontSize: 13, color: "#41506a" }}>
+          Couldn&rsquo;t check payroll status right now — the data service didn&rsquo;t respond. This is <b>not</b> a confirmation that everyone is paid.
+        </p>
+        <Link href="/payslips" style={{ background: "#1f3a5f", color: "#fff", borderRadius: 7, padding: "8px 14px", fontSize: 12.5, fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap" }}>
+          Open payroll →
+        </Link>
+      </section>
+    );
   }
   if (s.due.length === 0) return null;
 

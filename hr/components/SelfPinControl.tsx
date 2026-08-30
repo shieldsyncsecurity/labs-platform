@@ -10,6 +10,18 @@ export function SelfPinControl({ seq, employeeId, hasPin }: { seq: string; emplo
   const [busy, setBusy] = useState(false);
   const [pin, setPin] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function copyCreds() {
+    if (!pin) return;
+    try {
+      await navigator.clipboard.writeText(`Employee ID: ${employeeId}\nPIN: ${pin}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      /* clipboard blocked — the values stay visible for manual copy */
+    }
+  }
 
   async function issue() {
     if ((hasPin || pin) && !confirm("This replaces the current PIN — the old one stops working immediately. Continue?")) return;
@@ -35,9 +47,18 @@ export function SelfPinControl({ seq, employeeId, hasPin }: { seq: string; emplo
         {busy ? "Working…" : hasPin || pin ? "Reissue self-serve PIN" : "Set up self-serve login"}
       </button>
       {pin ? (
-        <span style={{ fontSize: 12.5 }}>
-          ID <b>{employeeId}</b> · PIN <b style={{ letterSpacing: 2 }}>{pin}</b>
-          <span style={{ color: "#8a94a3" }}> — shown once, copy it now</span>
+        <span style={{ fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span>
+            ID <b>{employeeId}</b> · PIN <b style={{ letterSpacing: 2 }}>{pin}</b>
+            <span style={{ color: "#8a94a3" }}> — shown once</span>
+          </span>
+          <button
+            type="button"
+            onClick={copyCreds}
+            style={{ background: copied ? "#e7f6ee" : "#fff", color: copied ? "#146c3c" : "#1f3a5f", border: `1px solid ${copied ? "#b7e2c9" : "#c3cee0"}`, borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+          >
+            {copied ? "Copied ✓" : "Copy ID + PIN"}
+          </button>
         </span>
       ) : hasPin ? (
         <span style={{ fontSize: 12.5, color: "#5b6676" }}>Self-serve login is set up.</span>

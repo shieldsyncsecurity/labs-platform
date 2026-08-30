@@ -225,3 +225,39 @@ export type PublicCandidateView = {
 
 // (No toPublicView() helper here on purpose — it would look authoritative while
 // the engines actually do the projection, which is exactly how the two drift.)
+
+/**
+ * One source of truth for "has this candidate been interviewed?" — the
+ * scheduler writes structured interviews[], while the older interviewedOn/By
+ * are free-text manual fields, so the list column and detail card must read
+ * BOTH or a booked round shows as "—". Prefers the real schedule: the most
+ * recent PAST round's date, else "Next: <date>" for an upcoming one, else the
+ * legacy manual date, else null.
+ */
+export function interviewDateLabel(c: Candidate): string | null {
+  const fmt = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  };
+  const rounds = (c.interviews ?? []).slice().sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1));
+  if (rounds.length > 0) {
+    const now = Date.now();
+    const past = rounds.filter((r) => new Date(r.startsAt).getTime() <= now);
+    if (past.length > 0) return fmt(past[past.length - 1].startsAt);
+    return `Next: ${fmt(rounds[0].startsAt)}`;
+  }
+  return c.interviewedOn || null;
+}
+
+/** The panel/interviewer for the same round interviewDateLabel() surfaces,
+ * falling back to the legacy free-text interviewedBy. */
+export function interviewPanelLabel(c: Candidate): string | null {
+  const rounds = (c.interviews ?? []).slice().sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1));
+  if (rounds.length > 0) {
+    const now = Date.now();
+    const past = rounds.filter((r) => new Date(r.startsAt).getTime() <= now);
+    const chosen = past.length > 0 ? past[past.length - 1] : rounds[0];
+    if (chosen.panel) return chosen.panel;
+  }
+  return c.interviewedBy || null;
+}

@@ -35,9 +35,12 @@ export function DeleteEmployeeButton({ seq, name, employeeId }: { seq: string; n
       type="button"
       onClick={onDelete}
       disabled={busy}
-      style={{ background: "none", border: "1px solid #e3b3bd", color: "#c0344c", borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
+      // Deliberately understated (quiet danger-text, not a framed button) — a
+      // rare irreversible action shouldn't out-shout the everyday Edit control
+      // beside it. The confirm dialog is the real guard.
+      style={{ background: "none", border: "none", color: "#9a2233", padding: "7px 6px", fontSize: 12.5, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 3, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
     >
-      {busy ? "Deleting…" : "Delete employee"}
+      {busy ? "Deleting…" : "Delete"}
     </button>
   );
 }

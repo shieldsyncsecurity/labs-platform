@@ -100,13 +100,14 @@ export default async function GenerateLeave({
       letter={letter}
       toolbar={
         <>
+          {/* Config-first: set options before the act buttons — see verification. */}
+          {configBar}
           <DocToolbar
             backHref={`/employees/${seq}`}
             backLabel={e.name}
             save={{ seq, docType: "leave", title: "APPROVED LEAVE OF ABSENCE", refSeries: "hr", refYear: now.getFullYear(), snapshot: snapshotWithMeta }}
             email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Leave Approval Letter — ${e.name}` }}
           />
-          {configBar}
         </>
       }
     />

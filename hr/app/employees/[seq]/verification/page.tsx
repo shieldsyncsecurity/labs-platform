@@ -55,13 +55,16 @@ export default async function GenerateVerification({
       letter={letter}
       toolbar={
         <>
+          {/* Config-first: set the letter's options, then act on them. With the
+              toolbar above, a value typed but not "Update"d isn't in the issued
+              snapshot the Issue/Print buttons act on. */}
+          {configBar}
           <DocToolbar
             backHref={`/employees/${seq}`}
             backLabel={e.name}
             save={{ seq, docType: "verification", title: letter.title, refSeries: "hr", refYear: now.getFullYear(), snapshot: letter }}
             email={{ seq, defaultTo: e.personalEmail, defaultSubject: `Employment Verification Letter — ${e.name}` }}
           />
-          {configBar}
         </>
       }
     />

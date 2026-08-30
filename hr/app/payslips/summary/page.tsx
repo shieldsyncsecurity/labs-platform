@@ -43,7 +43,8 @@ export default async function FySummary({ searchParams }: { searchParams: Promis
   } catch {
     return (
       <main style={{ maxWidth: 640, margin: "0 auto", padding: "48px 24px", fontFamily: "Arial, sans-serif" }}>
-        <p style={{ color: "#9a2233", fontSize: 13 }}>The HR data service is unreachable right now.</p>
+        <Link href="/payslips" style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; Payslips</Link>
+        <p style={{ color: "#9a2233", fontSize: 13, marginTop: 10 }}>The HR data service is unreachable right now — try again in a moment.</p>
       </main>
     );
   }

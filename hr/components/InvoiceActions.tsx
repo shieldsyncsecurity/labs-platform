@@ -4,12 +4,20 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Invoice, InvoiceStatus } from "@/lib/invoice";
 
-async function copyClientLink(invId: string): Promise<string | null> {
+async function copyClientLink(invId: string): Promise<{ url: string; copied: boolean } | null> {
   const res = await fetch(`/api/invoices/${encodeURIComponent(invId)}/link`, { method: "POST" });
   if (!res.ok) return null;
   const { url } = await res.json();
-  try { await navigator.clipboard.writeText(url); } catch { /* ignore */ }
-  return url;
+  // Report whether the clipboard write actually succeeded — a blocked write
+  // (permissions / non-secure context) must not be shown as "✓ copied".
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(url);
+    copied = true;
+  } catch {
+    copied = false;
+  }
+  return { url, copied };
 }
 
 const TRANSITIONS: Record<InvoiceStatus, { label: string; next: InvoiceStatus }[]> = {
@@ -29,19 +37,32 @@ export function InvoiceActions({ invoice, liveStatus }: { invoice: Invoice; live
   const [showPaidModal, setShowPaidModal] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null); // shown when clipboard copy failed
+  const [error, setError] = useState<string | null>(null);
 
   async function transition(next: InvoiceStatus, extraFields?: Record<string, unknown>) {
     setBusy(true);
+    setError(null);
     try {
       // Moving off "paid" (e.g. Revert to sent) must clear the payment stamp,
       // else the invoice still infers as paid because paidDate is set.
       const clearPaid = next !== "paid" ? { paidDate: null, paidAmount: null } : {};
-      await fetch(`/api/invoices/${encodeURIComponent(invoice.invId)}`, {
+      const res = await fetch(`/api/invoices/${encodeURIComponent(invoice.invId)}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ status: next, ...clearPaid, ...extraFields }),
       });
+      // This is the source-of-truth screen for who has paid — a failed status
+      // change must NOT look like it succeeded. Surface the error and don't
+      // refresh (which would just re-show the unchanged state as if nothing
+      // happened).
+      if (!res.ok) {
+        setError((await res.json().catch(() => ({}))).error ?? "Couldn't update the invoice — try again.");
+        return;
+      }
       router.refresh();
+    } catch {
+      setError("Couldn't reach the server — check the connection and try again.");
     } finally {
       setBusy(false);
     }
@@ -49,9 +70,18 @@ export function InvoiceActions({ invoice, liveStatus }: { invoice: Invoice; live
 
   async function deleteInvoice() {
     setBusy(true);
+    setError(null);
     try {
-      await fetch(`/api/invoices/${encodeURIComponent(invoice.invId)}`, { method: "DELETE" });
+      const res = await fetch(`/api/invoices/${encodeURIComponent(invoice.invId)}`, { method: "DELETE" });
+      if (!res.ok) {
+        setError((await res.json().catch(() => ({}))).error ?? "Couldn't delete the invoice — try again.");
+        setShowDelete(false);
+        return;
+      }
       router.push("/invoices");
+    } catch {
+      setError("Couldn't reach the server — check the connection and try again.");
+      setShowDelete(false);
     } finally {
       setBusy(false);
     }
@@ -83,9 +113,13 @@ export function InvoiceActions({ invoice, liveStatus }: { invoice: Invoice; live
         {/* Share client link */}
         <button disabled={busy} onClick={async () => {
           setBusy(true);
-          const url = await copyClientLink(invoice.invId);
+          setError(null);
+          setShareUrl(null);
+          const r = await copyClientLink(invoice.invId);
           setBusy(false);
-          if (url) { setLinkCopied(true); setTimeout(() => setLinkCopied(false), 3000); }
+          if (!r) { setError("Couldn't generate the client link — try again."); return; }
+          if (r.copied) { setLinkCopied(true); setTimeout(() => setLinkCopied(false), 3000); }
+          else setShareUrl(r.url); // copy blocked — show the link so it can be copied by hand
         }} style={{ ...btnStyle, background: linkCopied ? "#dcfce7" : "#fff", color: linkCopied ? "#15803d" : "#1b2331" }}>
           {linkCopied ? "✓ Link copied" : "Share with client"}
         </button>
@@ -100,6 +134,16 @@ export function InvoiceActions({ invoice, liveStatus }: { invoice: Invoice; live
           Delete
         </button>
       </div>
+
+      {error ? (
+        <div style={{ marginTop: 10, background: "#fdecef", border: "1px solid #f6c6ce", color: "#9a2233", fontSize: 12.5, borderRadius: 8, padding: "9px 12px" }}>{error}</div>
+      ) : null}
+      {shareUrl ? (
+        <div style={{ marginTop: 10, background: "#fdf4e3", border: "1px solid #f0dfb8", color: "#7a5714", fontSize: 12.5, borderRadius: 8, padding: "9px 12px" }}>
+          Couldn&rsquo;t copy automatically — here&rsquo;s the client link to copy:
+          <input readOnly value={shareUrl} onFocus={(e) => e.currentTarget.select()} style={{ display: "block", width: "100%", marginTop: 6, padding: "6px 8px", fontSize: 12, border: "1px solid #e0cf9e", borderRadius: 6, background: "#fff", color: "#1b2331" }} />
+        </div>
+      ) : null}
 
       {/* Mark paid modal */}
       {showPaidModal && (

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { hrFetch } from "@/lib/server/hr-engine";
 import { getViewer } from "@/lib/server/hr-access";
 import { can } from "@/lib/access";
-import { isRetentionDue, OUTCOME_OPTIONS, type Candidate } from "@/lib/candidate";
+import { isRetentionDue, interviewDateLabel, OUTCOME_OPTIONS, type Candidate } from "@/lib/candidate";
 import { CandidateRowActions } from "@/components/CandidateRowActions";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +56,7 @@ export default async function CandidatesPage() {
               <div style={{ fontSize: 11.5, color: "#8a94a3", fontFamily: "monospace" }}>{c.candidateId}</div>
             </td>
             <td style={{ padding: "10px", color: "#5b6676" }}>{c.roleAppliedFor}</td>
-            <td style={{ padding: "10px", color: "#5b6676", whiteSpace: "nowrap" }}>{c.interviewedOn || "—"}</td>
+            <td style={{ padding: "10px", color: "#5b6676", whiteSpace: "nowrap" }}>{interviewDateLabel(c) || "—"}</td>
             <td style={{ padding: "10px", whiteSpace: "nowrap" }}>
               {c.submittedAt ? (
                 <span style={{ color: "#1a7a45", fontWeight: 700, fontSize: 12 }}>✓ Submitted {fmtWhen(c.submittedAt)}</span>
@@ -79,6 +79,7 @@ export default async function CandidatesPage() {
       });
 
   const table = (list: Candidate[]) => (
+    <div style={{ overflowX: "auto" }}>
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
       <thead>
         <tr style={{ textAlign: "left", color: "#8a94a3", fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>
@@ -92,6 +93,7 @@ export default async function CandidatesPage() {
       </thead>
       <tbody>{rows(list)}</tbody>
     </table>
+    </div>
   );
 
   return (

@@ -100,6 +100,7 @@ export default async function PayslipsPage({ searchParams }: { searchParams: Pro
       ) : rows.length === 0 ? (
         <p style={{ marginTop: 12, fontSize: 13, color: "#8a94a3" }}>{includeExited ? "No employees on record." : "No active employees."} <Link href="/employees/new" style={{ color: "#2f4fb0" }}>Add one</Link>.</p>
       ) : (
+        <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10, fontSize: 13 }}>
           <thead>
             <tr style={{ textAlign: "left", color: "#8a94a3", fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>
@@ -154,6 +155,7 @@ export default async function PayslipsPage({ searchParams }: { searchParams: Pro
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </main>
   );

@@ -165,19 +165,38 @@ export default async function Home() {
       ) : null}
 
       {/* 4. GOVERNANCE — occasional oversight, not a routine task; deliberately smaller and quieter than the sections above */}
-      {allow("audit") ? (
+      {allow("audit") || isAdmin ? (
         <section style={{ marginTop: 28 }}>
           <div style={sectionLabel}><span style={dot("#8a94a3")} />Governance</div>
-          <Link
-            href="/audit"
-            style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "13px 18px" }}
-          >
-            <div>
-              <div style={{ ...h, fontSize: 13.5 }}>Review the audit trail</div>
-              <div style={p}>Who did what, when — exportable as CSV for compliance evidence.</div>
-            </div>
-            <span style={{ color: "#8a94a3", fontSize: 18, flex: "none" }}>&rarr;</span>
-          </Link>
+          <div style={{ display: "grid", gap: 10 }}>
+            {allow("audit") ? (
+              <Link
+                href="/audit"
+                style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "13px 18px" }}
+              >
+                <div>
+                  <div style={{ ...h, fontSize: 13.5 }}>Review the audit trail</div>
+                  <div style={p}>Who did what, when — exportable as CSV for compliance evidence.</div>
+                </div>
+                <span style={{ color: "#8a94a3", fontSize: 18, flex: "none" }}>&rarr;</span>
+              </Link>
+            ) : null}
+            {/* Access management lived only in the top nav — surface it on the
+                task launcher too, so granting/revoking permissions is where the
+                owner looks for tasks. Admin-only, matching the /access gate. */}
+            {isAdmin ? (
+              <Link
+                href="/access"
+                style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "13px 18px" }}
+              >
+                <div>
+                  <div style={{ ...h, fontSize: 13.5 }}>Manage who can see what</div>
+                  <div style={p}>Grant or revoke each person&rsquo;s access to records, payroll, banking and more.</div>
+                </div>
+                <span style={{ color: "#8a94a3", fontSize: 18, flex: "none" }}>&rarr;</span>
+              </Link>
+            ) : null}
+          </div>
         </section>
       ) : null}
 

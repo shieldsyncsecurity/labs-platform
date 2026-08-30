@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSelfSession } from "@/lib/server/self-session";
-import { hrFetch } from "@/lib/server/hr-engine";
+import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
 import type { Employee } from "@/lib/employee";
 
 export const dynamic = "force-dynamic";
@@ -33,12 +33,34 @@ export default async function MyDocs() {
 
   let employee: Employee | null = null;
   let docs: Gen[] = [];
+  let unavailable = false;
   try {
     employee = (await hrFetch<{ employee: Employee }>(`/hr/employees/${session.seq}`)).employee;
     docs = (await hrFetch<{ generated: Gen[] }>(`/hr/employees/${session.seq}/generated`)).generated;
-  } catch {
-    // Session still valid but the record is gone (deleted) — sign out cleanly.
-    redirect("/my/login");
+  } catch (err) {
+    // A real 404 means the record is genuinely gone (deleted) — sign out. But a
+    // transient 5xx/timeout must NOT destroy a valid session (it looks to the
+    // ex-employee like their access was revoked, and their correct PIN then
+    // "fails" at the login wall too). Show a retry state instead. Mirrors the
+    // 404-vs-rethrow discrimination the /my/doc page already uses.
+    if (err instanceof HrEngineError && err.status === 404) {
+      redirect("/my/login");
+    }
+    unavailable = true;
+  }
+
+  if (unavailable) {
+    return (
+      <main style={{ maxWidth: 640, margin: "0 auto", padding: "56px 24px", fontFamily: "Arial, Helvetica, 'Segoe UI', sans-serif" }}>
+        <h1 style={{ fontSize: 18, fontWeight: 800, color: "#1f3a5f" }}>Your documents are temporarily unavailable</h1>
+        <p style={{ fontSize: 13, color: "#5b6676", marginTop: 8 }}>
+          We couldn&rsquo;t load your records just now — this is usually brief. Please refresh in a moment. You are still signed in.
+        </p>
+        <Link href="/my" style={{ display: "inline-block", marginTop: 14, color: "#2f4fb0", fontSize: 13, fontWeight: 600 }}>
+          Try again
+        </Link>
+      </main>
+    );
   }
 
   return (

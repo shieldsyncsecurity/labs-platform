@@ -127,6 +127,11 @@ export function DocToolbar({
   const [busy, setBusy] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailState, setEmailState] = useState<string | null>(null);
+  // Outcome severity for the status row (green ok / amber archive-failure / red
+  // error) and an in-flight guard so a slow send can't be double-clicked into
+  // two real emails (the send route is not idempotent).
+  const [emailKind, setEmailKind] = useState<"ok" | "warn" | "err" | "pending">("pending");
+  const [emailSending, setEmailSending] = useState(false);
   // After a payslip (fixed-ref) save, the engine returns the archived docId.
   // Capturing it lets Email auto-render the PDF server-side IN PLACE — no more
   // "attach a file" on a slip that's already in history.
@@ -223,17 +228,28 @@ export function DocToolbar({
 
   async function onEmail(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!email) return;
+    if (!email || emailSending) return;
+    setEmailSending(true);
+    setEmailKind("pending");
     setEmailState("Sending…");
     try {
       const res = await fetch(`/api/employees/${email.seq}/email`, { method: "POST", body: new FormData(e.currentTarget) });
       const data = await res.json();
-      if (!res.ok) setEmailState(data.error ?? "Send failed.");
-      else if (data.archived === false) setEmailState("Sent ✓ — but archiving failed; do NOT resend. Save the PDF to the employee's documents manually.");
-      else setEmailState(data.simulated ? "Recorded (email simulated — no RESEND_API_KEY in dev)." : "Sent ✓ — archived to the employee's documents.");
+      if (!res.ok) {
+        setEmailKind("err");
+        setEmailState(data.error ?? "Send failed.");
+      } else if (data.archived === false) {
+        setEmailKind("warn");
+        setEmailState("Sent ✓ — but archiving failed. Do NOT resend (a resend sends a second email); save the PDF to the employee's documents manually.");
+      } else {
+        setEmailKind("ok");
+        setEmailState(data.simulated ? "Recorded (email simulated — no RESEND_API_KEY in dev)." : "Sent ✓ — archived to the employee's documents.");
+      }
     } catch {
+      setEmailKind("err");
       setEmailState("Send failed.");
     }
+    setEmailSending(false);
   }
 
   // Withdraw a document issued in error (e.g. a payslip for the wrong month).
@@ -307,7 +323,11 @@ export function DocToolbar({
                 style={printBtn}
                 title={save && !saved ? "Issues (saves to history), then prints the archived copy" : undefined}
               >
-                {save?.refSeries && !saved ? "Issue + Print" : "Print / Save as PDF"}
+                {/* Any un-saved `save` (payslip included) archives to history on
+                    this click — so the label must say "Issue + Print", not the
+                    export-only "Print / Save as PDF" that hid the side effect on
+                    payslips (whose issue marks the month paid + lists it). */}
+                {save && !saved ? "Issue + Print" : "Print / Save as PDF"}
               </button>
             </>
           ) : (
@@ -317,6 +337,12 @@ export function DocToolbar({
           )}
         </div>
       </div>
+
+      {/* Why "Email…" is greyed out, surfaced inline — a hover title over a
+          disabled button is unreliable and invisible on touch. */}
+      {email && canIssue && emailBlocked && emailBlockedReason ? (
+        <div style={{ marginTop: 6, fontSize: 11.5, color: "#8a5a00" }}>{emailBlockedReason}.</div>
+      ) : null}
 
       {email && emailOpen && canIssue && !emailBlocked ? (
         <form
@@ -330,13 +356,33 @@ export function DocToolbar({
             PDF{effectiveGenId ? " (optional — server generates when omitted)" : ""}{" "}
             <input name="file" type="file" required={!effectiveGenId} accept="application/pdf" style={{ fontSize: 12 }} />
           </label>
-          <button type="submit" style={{ ...printBtn, padding: "7px 12px" }}>Send</button>
+          <button type="submit" disabled={emailSending} style={{ ...printBtn, padding: "7px 12px", opacity: emailSending ? 0.6 : 1, cursor: emailSending ? "default" : "pointer" }}>
+            {emailSending ? "Sending…" : "Send"}
+          </button>
           <span style={{ flexBasis: "100%", color: "#8a94a3", fontSize: 11 }}>
             {effectiveGenId
               ? "The server renders this issued document to PDF and attaches it (attach a file only to override). Sent copies are archived + audited."
               : "Save to history first (or attach the printed PDF) — then Send. The exact sent file is archived + audited."}
-            {emailState ? <b style={{ color: "#1f3a5f" }}> {emailState}</b> : null}
           </span>
+          {/* Outcome gets its own body-size, colour-coded row — the critical
+              "archived failed, do NOT resend" warning must not read like a
+              routine success buried in the grey caption above. */}
+          {emailState ? (
+            <div
+              style={{
+                flexBasis: "100%",
+                fontSize: 12.5,
+                fontWeight: emailKind === "warn" || emailKind === "err" ? 700 : 600,
+                borderRadius: 7,
+                padding: "7px 10px",
+                color: emailKind === "ok" ? "#146c3c" : emailKind === "warn" ? "#8a5a00" : emailKind === "err" ? "#9a2233" : "#41506a",
+                background: emailKind === "ok" ? "#e7f6ee" : emailKind === "warn" ? "#fdf4e3" : emailKind === "err" ? "#fdecef" : "#f3f5f9",
+                border: `1px solid ${emailKind === "ok" ? "#b7e2c9" : emailKind === "warn" ? "#f0dfb8" : emailKind === "err" ? "#f6c6ce" : "#d4dbe8"}`,
+              }}
+            >
+              {emailState}
+            </div>
+          ) : null}
         </form>
       ) : null}
     </div>

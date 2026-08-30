@@ -81,9 +81,15 @@ export default async function FinancialsPage() {
   const fyMonthKeys = fyMonths(fy.start); // 12 months April → March
 
   let all: BankTxn[] = [];
+  let loadFailed = false;
   try {
     all = (await hrFetch<{ transactions: BankTxn[] }>("/hr/banking")).transactions ?? [];
-  } catch { /* show zeros */ }
+  } catch {
+    // Don't let a failed load masquerade as real ₹0 figures / an "import a
+    // statement" empty state — flag it so the page can say the numbers are
+    // unreliable (matches the banner pattern in access/audit).
+    loadFailed = true;
+  }
 
   // Current FY transactions only (for the FY table)
   const fyTxns = all.filter((t) => fyMonthKeys.includes(t.month));
@@ -135,6 +141,12 @@ export default async function FinancialsPage() {
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", padding: "36px 24px 56px", fontFamily: "Arial, Helvetica, 'Segoe UI', sans-serif" }}>
       <Link href="/" style={{ fontSize: 12, color: "#2f4fb0" }}>&larr; Home</Link>
+
+      {loadFailed ? (
+        <div style={{ marginTop: 12, background: "#fdecef", border: "1px solid #f6c6ce", color: "#9a2233", fontSize: 12.5, fontWeight: 600, borderRadius: 8, padding: "10px 12px" }}>
+          Couldn&rsquo;t load bank data just now — the figures below are <b>not reliable</b> (they may read ₹0 where data actually exists). Refresh in a moment.
+        </div>
+      ) : null}
 
       <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10 }}>
         <div>

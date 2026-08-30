@@ -3,6 +3,7 @@ import { hrFetch, HrEngineError } from "@/lib/server/hr-engine";
 import { getViewer } from "@/lib/server/hr-access";
 import { can } from "@/lib/access";
 import type { Employee } from "@/lib/employee";
+import type { KycDoc, KycKind } from "@/lib/kyc";
 import { LifecycleWizard, type WizardStep } from "@/components/LifecycleWizard";
 import { SelfPinControl } from "@/components/SelfPinControl";
 
@@ -30,10 +31,25 @@ export default async function OnboardEmployee({ params }: { params: Promise<{ se
   } catch {
     /* best-effort */
   }
+  let kycDocs: KycDoc[] = [];
+  try {
+    kycDocs = (await hrFetch<{ docs?: KycDoc[] }>(`/hr/employees/${seq}/docs`)).docs ?? [];
+  } catch {
+    /* best-effort */
+  }
 
   const { isAdmin, access } = await getViewer();
   const canWriteDocs = isAdmin || can(access, "documents", "write");
+  const canKyc = isAdmin || can(access, "kyc", "read");
   const isIntern = /internship/i.test(e.employmentType);
+
+  // Required KYC set mirrors OnboardingChecklist (bank proof isn't required for
+  // a cash-paid employee, who has no bank account).
+  const requiredKyc: KycKind[] = (e.paymentMode || "").trim().toLowerCase() === "cash"
+    ? ["aadhaar", "pan", "photo", "signed_offer"]
+    : ["aadhaar", "pan", "bank_proof", "photo", "signed_offer"];
+  const haveKyc = new Set(kycDocs.filter((d) => d.category !== "sent").map((d) => d.kind));
+  const kycDone = requiredKyc.filter((k) => haveKyc.has(k)).length;
 
   const letterDocType = isIntern ? "internship-offer" : "offer";
   const letterIssued = generated.find((g) => g.docType === letterDocType);
@@ -68,6 +84,19 @@ export default async function OnboardEmployee({ params }: { params: Promise<{ se
       lockedHint: isAdmin ? undefined : "Ask an administrator to set this up.",
       doneNote: e.hasSelfPin ? "Set up" : undefined,
       inline: isAdmin ? <SelfPinControl seq={seq} employeeId={e.employeeId} hasPin={Boolean(e.hasSelfPin)} /> : undefined,
+    },
+    // KYC belongs in the wizard so "✓ Complete" can't show with documents
+    // outstanding (the record page frames these as "Onboarding documents").
+    {
+      key: "kyc",
+      title: "Collect onboarding documents",
+      description: canKyc
+        ? `Aadhaar, PAN, ${requiredKyc.includes("bank_proof") ? "bank proof, " : ""}photo, and the signed offer — upload them in the ID vault on the record.`
+        : "You don't have KYC access.",
+      status: kycDone >= requiredKyc.length ? "done" : canKyc ? "current" : "locked",
+      lockedHint: canKyc ? undefined : "Ask someone with KYC access to collect these.",
+      doneNote: `${kycDone} of ${requiredKyc.length} collected`,
+      action: { href: `/employees/${seq}#kyc`, label: "Open the ID vault" },
     },
   ];
 

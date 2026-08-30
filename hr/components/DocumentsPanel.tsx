@@ -109,6 +109,7 @@ export function DocumentsPanel({
         ) : null}
       </div>
 
+      <div style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, marginTop: 10 }}>
         <tbody>
           {rows.map((r) => {
@@ -143,6 +144,7 @@ export function DocumentsPanel({
           })}
         </tbody>
       </table>
+      </div>
 
       {footerLinks.length > 0 ? (
         <div style={{ marginTop: 10, borderTop: "1px solid #eef2f7", paddingTop: 10, display: "flex", gap: 14, flexWrap: "wrap" }}>

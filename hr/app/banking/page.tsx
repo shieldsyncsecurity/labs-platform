@@ -317,7 +317,11 @@ export default async function BankingPage({ searchParams }: { searchParams: Prom
           {/* Full ledger */}
           <section style={{ marginTop: 26 }}>
             <div style={groupTitle}>All transactions — {monthLabel(month!)}</div>
-            <div style={{ ...card, padding: 0, overflow: "hidden" }}>
+            {/* overflowX:auto (was overflow:hidden) — the 9-column ledger's
+                Remark input and × remove were clipped with NO scrollbar on a
+                narrow/tablet viewport, making them unreachable. Now the wide
+                table scrolls inside its own box. */}
+            <div style={{ ...card, padding: 0, overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                 <thead>
                   <tr style={{ textAlign: "left", color: "#8a94a3", fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", background: "#fafcff" }}>

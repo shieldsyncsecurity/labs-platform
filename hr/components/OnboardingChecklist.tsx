@@ -18,15 +18,37 @@ function fmt(iso: string) {
 
 export function OnboardingChecklist({ seq, paymentMode }: { seq: string; paymentMode?: string }) {
   const [docs, setDocs] = useState<KycDoc[] | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    let live = true;
     fetch(`/api/employees/${seq}/docs`)
-      .then((r) => r.json())
-      .then((d) => setDocs(d.docs ?? []))
-      .catch(() => setDocs([]));
+      .then((r) => {
+        if (!r.ok) throw new Error("load failed");
+        return r.json();
+      })
+      .then((d) => { if (live) setDocs(d.docs ?? []); })
+      // Don't default to [] on failure — that renders "0/N pending" as if
+      // nothing was uploaded, contradicting the KycSection below (which shows
+      // a real error) when the engine merely hiccups.
+      .catch(() => { if (live) setFailed(true); });
+    return () => { live = false; };
   }, [seq]);
 
-  if (docs === null) return null;
+  if (failed) {
+    return (
+      <div style={{ border: "1px solid #e2e8f2", borderRadius: 10, padding: 16, marginTop: 16, fontSize: 12.5, color: "#8a94a3" }}>
+        Couldn&rsquo;t load onboarding documents right now — refresh in a moment.
+      </div>
+    );
+  }
+  if (docs === null) {
+    return (
+      <div style={{ border: "1px solid #e2e8f2", borderRadius: 10, padding: 16, marginTop: 16, fontSize: 12.5, color: "#8a94a3" }}>
+        Loading onboarding documents…
+      </div>
+    );
+  }
 
   // A cash-paid employee has no bank account for HR to hold proof of — asking
   // for one would leave the checklist permanently stuck at "pending" for a

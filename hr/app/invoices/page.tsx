@@ -51,7 +51,7 @@ export default async function InvoicesPage() {
         {[
           { label: "Total billed", value: formatAmount(totalBilled), sub: `${rows.length} invoice${rows.length === 1 ? "" : "s"}`, color: "#1f3a5f" },
           { label: "Collected", value: formatAmount(totalPaid), sub: `${rows.filter(r => r.liveStatus === "paid").length} paid`, color: "#1a7a45" },
-          { label: "Outstanding", value: formatAmount(outstanding), sub: `${rows.filter(r => r.liveStatus === "sent").length} sent`, color: "#b0782f" },
+          { label: "Outstanding", value: formatAmount(outstanding), sub: `${rows.filter(r => r.liveStatus === "sent").length} sent · ${rows.filter(r => r.liveStatus === "overdue").length} overdue`, color: "#b0782f" },
           { label: "Overdue", value: String(overdueCount), sub: overdueCount ? "action required" : "None overdue", color: overdueCount ? "#9a2233" : "#1a7a45" },
         ].map((tile) => (
           <div key={tile.label} style={{ border: "1px solid #e2e8f2", borderRadius: 10, padding: "14px 16px", background: "#fff" }}>

@@ -23,7 +23,14 @@ export function HireCandidateForm({ seq, prefill }: { seq: string; prefill: Hire
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [gross, setGross] = useState(() => String(Number(String(prefill.expectedCtc ?? "").replace(/[^\d]/g, "")) || ""));
+  // Prefill gross ONLY when the free-text expectedCtc parses to a plausible
+  // salary. "40k" / "35-40k" / "around 45k" strip to 40 / 3540 / 45 — a
+  // corrupted default that would then drive the Annexure preview and the offer.
+  // Below a floor, leave it blank (the raw answer still shows as a hint).
+  const [gross, setGross] = useState(() => {
+    const parsed = Number(String(prefill.expectedCtc ?? "").replace(/[^\d]/g, ""));
+    return parsed >= 3000 ? String(parsed) : "";
+  });
 
   const grossNum = Number(gross.replace(/[^\d]/g, "")) || 0;
   const split = grossNum > 0 ? suggestStructure(grossNum) : null;

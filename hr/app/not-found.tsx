@@ -7,8 +7,12 @@ export default function NotFound() {
       <p style={{ fontSize: 13, color: "#5b6676", marginTop: 8 }}>
         This record or document doesn&rsquo;t exist (it may have been deleted).
       </p>
-      <Link href="/employees" style={{ display: "inline-block", marginTop: 14, color: "#2f4fb0", fontSize: 13, fontWeight: 600 }}>
-        &larr; Back to employees
+      {/* Route home, not to admin-only /employees — this global boundary also
+          catches 404s from the self-serve /my area, whose users have no
+          employees access and would dead-end at a login wall. "/" sends each
+          role to its correct home. */}
+      <Link href="/" style={{ display: "inline-block", marginTop: 14, color: "#2f4fb0", fontSize: 13, fontWeight: 600 }}>
+        &larr; Go to home
       </Link>
     </main>
   );

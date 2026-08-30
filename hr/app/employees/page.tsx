@@ -60,6 +60,7 @@ export default async function EmployeesPage() {
       ) : employees.length === 0 ? (
         <div style={{ marginTop: 20, color: "#5b6676", fontSize: 13 }}>No employees yet. Add your first one to generate their letter and payslips.</div>
       ) : (
+        <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 20, fontSize: 13 }}>
           <thead>
             <tr style={{ textAlign: "left", color: "#8a94a3", fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>
@@ -92,6 +93,7 @@ export default async function EmployeesPage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </main>
   );

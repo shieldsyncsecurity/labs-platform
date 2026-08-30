@@ -313,7 +313,9 @@ export function TopNav({ actor, isAdmin, access }: { actor?: string | null; isAd
           >
             {initial}
           </div>
-          <a href="/api/auth/logout" style={{ fontSize: 12, color: "#5b6676", fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>
+          {/* Ghost-button affordance so it reads as a control, not caption text
+              (owner's "no washed-out controls" rule). */}
+          <a href="/api/auth/logout" style={{ fontSize: 12, color: "#41506a", fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap", border: "1px solid #c3cee0", borderRadius: 7, padding: "5px 11px" }}>
             Sign out
           </a>
         </div>

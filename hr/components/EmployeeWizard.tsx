@@ -192,7 +192,7 @@ export function EmployeeWizard() {
   const reviewRows: Array<[string, string]> = [
     ["Name", data.name ?? ""],
     ["Designation", data.designation ?? ""],
-    ["Department", data.department ?? ""],
+    ["Department", data.department || "—"], // optional — a neutral dash, not red "missing"
     ["Employment type", data.employmentType || DEFAULT_EMPLOYMENT_TYPE],
     ["Date of joining", data.dateOfJoining ?? ""],
     isIntern ? ["Internship duration", data.internshipMonths ? `${data.internshipMonths} months` : "2 months (default)"] : ["Probation", `${data.probationMonths || 3} months`],
