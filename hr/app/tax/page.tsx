@@ -7,6 +7,8 @@ import {
 } from "@/lib/tax";
 import { formatINR } from "@/lib/banking";
 import type { BankTxn } from "@/lib/banking";
+import { getGstSettings } from "@/lib/server/settings";
+import { GstSettingsControl } from "@/components/GstSettingsControl";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Tax obligations — ShieldSync HR", robots: { index: false, follow: false } };
@@ -75,8 +77,11 @@ export default async function TaxPage() {
   // Advance tax schedule
   const advTax = advanceTaxSchedule(fy.start);
 
-  // GST — marked "pending" until registered. Hardcode registered=false for now.
-  const gstRegistered = false; // flip to true once GSTIN is received
+  // GST configuration is now an in-app setting (owner-editable below), not a
+  // hardcoded flag — so registration can be switched on the day the GSTIN
+  // arrives, with no code change.
+  const gst = await getGstSettings();
+  const gstRegistered = gst.registered;
 
   const totalTds = tdsRows.reduce((s, r) => s + r.tds, 0);
   const totalTdsPaid = taxPayments.reduce((s, t) => s + t.debit, 0);
@@ -205,8 +210,14 @@ export default async function TaxPage() {
 
       {/* GST */}
       <div style={card}>
-        <div style={sectionTitle}>GST obligations</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+          <div style={sectionTitle}>GST obligations</div>
+          {gstRegistered && gst.gstin ? (
+            <span style={{ fontSize: 12, color: "#5b6676" }}>GSTIN <b style={{ fontFamily: "monospace", color: "#1f3a5f" }}>{gst.gstin}</b></span>
+          ) : null}
+        </div>
         {gstRegistered ? (
+          <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr>
@@ -228,13 +239,16 @@ export default async function TaxPage() {
               })}
             </tbody>
           </table>
+          </div>
         ) : (
           <div style={{ background: "#fdf4e3", border: "1px solid #f0dfb8", borderRadius: 8, padding: "14px 16px", color: "#7a5714", fontSize: 13 }}>
-            <b>GST registration pending.</b> Once you receive your GSTIN, update{" "}
-            <code>gstRegistered</code> in <code>hr/app/tax/page.tsx</code> to show the monthly filing calendar.
+            <b>GST registration pending.</b> Turn it on below the moment your GSTIN arrives — invoices will then be able to charge GST and this filing calendar will appear.
             GSTR-3B is due on the 20th of the month following each billing month; GSTR-1 is due on the 11th.
           </div>
         )}
+        {/* Self-service: no code change needed to go live with GST. Admin-only
+            page (requireAdminPage above), so the control can always render. */}
+        <GstSettingsControl registered={gst.registered} gstin={gst.gstin} defaultRate={gst.defaultRate} />
       </div>
 
       {/* Tax payments from bank */}

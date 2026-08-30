@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { hrFetch } from "@/lib/server/hr-engine";
 import { requireAdminPage } from "@/lib/server/hr-access";
+import { getGstSettings } from "@/lib/server/settings";
 import { InvoiceDoc } from "@/components/InvoiceDoc";
 import type { Invoice } from "@/lib/invoice";
 
@@ -18,5 +19,6 @@ export default async function InvoiceViewPage({ params }: { params: Promise<{ in
   }
   if (!invoice) notFound();
 
-  return <InvoiceDoc invoice={invoice} />;
+  const gst = await getGstSettings();
+  return <InvoiceDoc invoice={invoice} sellerGstin={gst.gstin} />;
 }

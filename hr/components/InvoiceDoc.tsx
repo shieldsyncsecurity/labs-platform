@@ -16,8 +16,12 @@ function Row({ label, value, bold, large }: { label: string; value: string; bold
   );
 }
 
-export function InvoiceDoc({ invoice, logoDataUri }: { invoice: Invoice; logoDataUri?: string }) {
-  const seller = invoiceSellerBlock();
+export function InvoiceDoc({ invoice, logoDataUri, sellerGstin }: { invoice: Invoice; logoDataUri?: string; sellerGstin?: string | null }) {
+  // sellerGstin (from the in-app GST setting) overrides the env-derived block,
+  // so the printed invoice reflects the GSTIN entered in the portal without an
+  // env change. Falls back to the block's own value when not supplied.
+  const sellerBase = invoiceSellerBlock();
+  const seller = { ...sellerBase, gstin: sellerGstin ?? sellerBase.gstin };
   const items: LineItem[] = invoice.lineItems?.length
     ? invoice.lineItems
     : [{ description: invoice.description, qty: 1, rate: invoice.amount, amount: invoice.amount }];

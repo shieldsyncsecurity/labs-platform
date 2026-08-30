@@ -1609,11 +1609,31 @@ export async function handler(event) {
         else grants[email] = body.access;
         // restrictedSeqs lives on this same item — a grants write must carry it
         // forward, not silently reset every record to visible.
-        await ddb.send(new PutCommand({ TableName: T_EMP, Item: { ...KEY, grants, restrictedSeqs: cur?.restrictedSeqs ?? [], updatedAt: new Date().toISOString() } }));
+        // settings lives on this same singleton too — carry it forward.
+        await ddb.send(new PutCommand({ TableName: T_EMP, Item: { ...KEY, grants, restrictedSeqs: cur?.restrictedSeqs ?? [], settings: cur?.settings ?? {}, updatedAt: new Date().toISOString() } }));
         // Audited with the full resulting permission set: "who could see what,
         // when" has to be reconstructable from the log alone.
         await writeAudit(body.actor, "access.update", email, { access: body.access ?? null });
         return resp(200, { grants });
+      }
+    }
+
+    // ---- /hr/settings (in-app config: GST registration, GSTIN, default rate) ----
+    // Stored on the SAME seq:-1 config singleton as grants/restrictedSeqs, so
+    // every writer of that item (here, /hr/access, /hr/restricted) must carry
+    // the others' fields forward or a write to one silently wipes the rest.
+    if (parts[0] === "hr" && parts[1] === "settings" && parts.length === 2) {
+      const KEY = { seq: -1 };
+      if (method === "GET") {
+        const cur = (await ddb.send(new GetCommand({ TableName: T_EMP, Key: KEY }))).Item;
+        return resp(200, { settings: cur?.settings ?? {} });
+      }
+      if (method === "PUT") {
+        const cur = (await ddb.send(new GetCommand({ TableName: T_EMP, Key: KEY }))).Item;
+        const settings = { ...(cur?.settings ?? {}), ...(body.settings ?? {}) };
+        await ddb.send(new PutCommand({ TableName: T_EMP, Item: { ...KEY, grants: cur?.grants ?? {}, restrictedSeqs: cur?.restrictedSeqs ?? [], settings, updatedAt: new Date().toISOString() } }));
+        await writeAudit(body.actor, "settings.update", "gst", { settings: body.settings ?? {} });
+        return resp(200, { settings });
       }
     }
 
@@ -1630,7 +1650,7 @@ export async function handler(event) {
       if (body.restricted) set.add(seqN);
       else set.delete(seqN);
       await ddb.send(
-        new PutCommand({ TableName: T_EMP, Item: { ...KEY, grants: cur?.grants ?? {}, restrictedSeqs: [...set], updatedAt: new Date().toISOString() } }),
+        new PutCommand({ TableName: T_EMP, Item: { ...KEY, grants: cur?.grants ?? {}, restrictedSeqs: [...set], settings: cur?.settings ?? {}, updatedAt: new Date().toISOString() } }),
       );
       await writeAudit(body.actor, "employee.visibility", String(seqN), { restricted: !!body.restricted });
       return resp(200, { restrictedSeqs: [...set] });

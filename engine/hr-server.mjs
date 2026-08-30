@@ -1016,6 +1016,18 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { restrictedSeqs: db.restrictedSeqs });
     }
 
+    // ---- /hr/settings (in-app config: GST) — mirrors the Lambda ----
+    if (parts[0] === "hr" && parts[1] === "settings" && parts.length === 2) {
+      if (req.method === "GET") return send(res, 200, { settings: db.settings ?? {} });
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        db.settings = { ...(db.settings ?? {}), ...(body.settings ?? {}) };
+        audit(db, body.actor, "settings.update", "gst", { settings: body.settings ?? {} });
+        save(db);
+        return send(res, 200, { settings: db.settings });
+      }
+    }
+
     if (parts[0] === "hr" && parts[1] === "audit" && parts.length === 2) {
       if (req.method === "GET") {
         const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 500); // parity with the Lambda
