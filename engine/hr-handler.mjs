@@ -219,6 +219,7 @@ async function notifySubmission(cand, answers) {
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      signal: AbortSignal.timeout(10000), // don't let a hung Resend call block the Lambda indefinitely
       body: JSON.stringify({
         from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
         to: to.split(",").map((s) => s.trim()).filter(Boolean),
@@ -281,6 +282,7 @@ async function notifyAccept(emp, gen, acceptedName) {
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      signal: AbortSignal.timeout(10000), // don't let a hung Resend call block the Lambda indefinitely
       body: JSON.stringify({
         from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
         to: to.split(",").map((s) => s.trim()).filter(Boolean),
@@ -318,7 +320,18 @@ async function runPayrollReminder(now = new Date()) {
   const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   const label = d.toLocaleString("en-GB", { month: "long", year: "numeric" });
 
-  const emps = await ddb.send(new ScanCommand({ TableName: T_EMP }));
+  // Paginated -- an unpaginated Scan would silently stop considering employees
+  // past DynamoDB's ~1MB/call cap, under-reporting who's unpaid with no error.
+  const empItems = [];
+  {
+    let startKey;
+    do {
+      const out = await ddb.send(new ScanCommand({ TableName: T_EMP, ExclusiveStartKey: startKey }));
+      empItems.push(...(out.Items ?? []));
+      startKey = out.LastEvaluatedKey;
+    } while (startKey);
+  }
+  const emps = { Items: empItems };
   // Anyone who joined AFTER the pay month can't owe a payslip for it — hire
   // someone on 1 August and this would otherwise demand a July slip for them.
   // Mirrors joinedMonth() in hr/lib/server/payroll-due.ts; the two must agree.
@@ -348,16 +361,21 @@ async function runPayrollReminder(now = new Date()) {
     return j === null || j <= month;
   });
 
-  const due = [];
-  for (const e of active) {
-    const docs = await ddb.send(
-      new QueryCommand({ TableName: T_DOC, KeyConditionExpression: "employeeSeq = :s", ExpressionAttributeValues: { ":s": e.seq } }),
-    );
-    const paid = (docs.Items ?? []).some(
-      (x) => x.category === "generated" && x.docType === "payslip" && typeof x.ref === "string" && x.ref.endsWith(` ${month}`),
-    );
-    if (!paid) due.push({ seq: e.seq, name: e.name, employeeId: e.employeeId });
-  }
+  // Parallelized -- DynamoDB has no batch-query-by-partition, so awaiting these
+  // concurrently (rather than one at a time in a for-loop) is the fix: N
+  // independent round-trips in parallel instead of N sequential ones.
+  const dueChecks = await Promise.all(
+    active.map(async (e) => {
+      const docs = await ddb.send(
+        new QueryCommand({ TableName: T_DOC, KeyConditionExpression: "employeeSeq = :s", ExpressionAttributeValues: { ":s": e.seq } }),
+      );
+      const paid = (docs.Items ?? []).some(
+        (x) => x.category === "generated" && x.docType === "payslip" && typeof x.ref === "string" && x.ref.endsWith(` ${month}`),
+      );
+      return paid ? null : { seq: e.seq, name: e.name, employeeId: e.employeeId };
+    }),
+  );
+  const due = dueChecks.filter(Boolean);
 
   if (due.length === 0) return resp(200, { month, due: 0, sent: false, reason: "PAYROLL_CLEAR" });
 
@@ -380,6 +398,7 @@ async function runPayrollReminder(now = new Date()) {
   const r = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+    signal: AbortSignal.timeout(10000), // don't let a hung Resend call block the Lambda indefinitely
     body: JSON.stringify({
       from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
       to: to.split(",").map((s) => s.trim()).filter(Boolean),
@@ -443,9 +462,18 @@ export async function handler(event) {
     // ---- /hr/employees ----
     if (parts[0] === "hr" && parts[1] === "employees" && parts.length === 2) {
       if (method === "GET") {
-        const out = await ddb.send(new ScanCommand({ TableName: T_EMP }));
+        // Paginated (matches /hr/candidates, /hr/audit, /hr/banking) -- a plain
+        // single Scan silently truncates past DynamoDB's ~1MB/call cap, which
+        // would drop employees off the list with no error as the table grows.
+        const items = [];
+        let startKey;
+        do {
+          const out = await ddb.send(new ScanCommand({ TableName: T_EMP, ExclusiveStartKey: startKey }));
+          items.push(...(out.Items ?? []));
+          startKey = out.LastEvaluatedKey;
+        } while (startKey);
         // seq <= 0 rows are counters (0 = employee ids; negatives = letter-ref series).
-        const employees = (out.Items ?? []).filter((i) => i.seq > 0).sort((a, b) => a.seq - b.seq);
+        const employees = items.filter((i) => i.seq > 0).sort((a, b) => a.seq - b.seq);
         return resp(200, { employees: employees.map(publicEmployee) });
       }
       if (method === "POST") {
@@ -945,6 +973,7 @@ export async function handler(event) {
       const r = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      signal: AbortSignal.timeout(10000), // don't let a hung Resend call block the Lambda indefinitely
         body: JSON.stringify({
           from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
           to: [to],
@@ -1347,6 +1376,7 @@ export async function handler(event) {
       const r = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      signal: AbortSignal.timeout(10000), // don't let a hung Resend call block the Lambda indefinitely
         body: JSON.stringify({
           from: process.env.HR_MAIL_FROM || "ShieldSync HR <hr@shieldsyncsecurity.com>",
           to: [to],
@@ -1427,7 +1457,9 @@ export async function handler(event) {
 
       // POST /hr/invoices — create
       if (method === "POST" && parts.length === 2) {
-        const body = await req.json().catch(() => ({}));
+        // `body` is already the parsed request body (line 433) -- `req` doesn't
+        // exist in this scope. This shadowing threw a ReferenceError on every
+        // call, so invoice creation was completely broken (a 500 on every POST).
         if (!body.clientName || !body.description || !body.amount) return resp(400, { error: "MISSING_FIELDS" });
         // Auto-number: count existing invoices for this month
         const ym = (body.issueDate ?? new Date().toISOString().slice(0, 7)).slice(0, 7);
@@ -1474,7 +1506,7 @@ export async function handler(event) {
         const invId = parts[2];
         const existing = await ddb.send(new GetCommand({ TableName: T_DOC, Key: { employeeSeq: INV_SEQ, docId: invId } }));
         if (!existing.Item) return resp(404, { error: "NOT_FOUND" });
-        const body = await req.json().catch(() => ({}));
+        // Same fix as POST above -- `body` is already parsed, `req` doesn't exist.
         const updated = { ...existing.Item, ...body, employeeSeq: INV_SEQ, docId: invId, docType: "invoice", updatedAt: new Date().toISOString() };
         // Reverting away from "paid" must clear the payment stamp — inferStatus()
         // treats any invoice with a paidDate as paid, so a stale paidDate makes the
@@ -1607,10 +1639,18 @@ export async function handler(event) {
         const grants = { ...(cur?.grants ?? {}) };
         if (body.access === null) delete grants[email];
         else grants[email] = body.access;
-        // restrictedSeqs lives on this same item — a grants write must carry it
-        // forward, not silently reset every record to visible.
-        // settings lives on this same singleton too — carry it forward.
-        await ddb.send(new PutCommand({ TableName: T_EMP, Item: { ...KEY, grants, restrictedSeqs: cur?.restrictedSeqs ?? [], settings: cur?.settings ?? {}, updatedAt: new Date().toISOString() } }));
+        // UpdateCommand on ONLY the grants attribute — a whole-item PutCommand
+        // (the old approach) would silently clobber a concurrent /hr/settings
+        // or /hr/restricted write to this same seq:-1 config item, since all
+        // three read-modify-write the same row. Updating a single top-level
+        // attribute is what DynamoDB actually guarantees atomically; two
+        // concurrent writes to DIFFERENT attributes on the same item never
+        // race each other this way.
+        await ddb.send(new UpdateCommand({
+          TableName: T_EMP, Key: KEY,
+          UpdateExpression: "SET grants = :g, updatedAt = :u",
+          ExpressionAttributeValues: { ":g": grants, ":u": new Date().toISOString() },
+        }));
         // Audited with the full resulting permission set: "who could see what,
         // when" has to be reconstructable from the log alone.
         await writeAudit(body.actor, "access.update", email, { access: body.access ?? null });
@@ -1619,9 +1659,10 @@ export async function handler(event) {
     }
 
     // ---- /hr/settings (in-app config: GST registration, GSTIN, default rate) ----
-    // Stored on the SAME seq:-1 config singleton as grants/restrictedSeqs, so
-    // every writer of that item (here, /hr/access, /hr/restricted) must carry
-    // the others' fields forward or a write to one silently wipes the rest.
+    // Stored on the SAME seq:-1 config singleton as grants/restrictedSeqs.
+    // Written via UpdateCommand on ONLY the settings attribute — see the
+    // /hr/access comment above for why (concurrent writes to different
+    // attributes on the same item must never clobber each other).
     if (parts[0] === "hr" && parts[1] === "settings" && parts.length === 2) {
       const KEY = { seq: -1 };
       if (method === "GET") {
@@ -1631,7 +1672,11 @@ export async function handler(event) {
       if (method === "PUT") {
         const cur = (await ddb.send(new GetCommand({ TableName: T_EMP, Key: KEY }))).Item;
         const settings = { ...(cur?.settings ?? {}), ...(body.settings ?? {}) };
-        await ddb.send(new PutCommand({ TableName: T_EMP, Item: { ...KEY, grants: cur?.grants ?? {}, restrictedSeqs: cur?.restrictedSeqs ?? [], settings, updatedAt: new Date().toISOString() } }));
+        await ddb.send(new UpdateCommand({
+          TableName: T_EMP, Key: KEY,
+          UpdateExpression: "SET settings = :s, updatedAt = :u",
+          ExpressionAttributeValues: { ":s": settings, ":u": new Date().toISOString() },
+        }));
         await writeAudit(body.actor, "settings.update", "gst", { settings: body.settings ?? {} });
         return resp(200, { settings });
       }
@@ -1649,9 +1694,12 @@ export async function handler(event) {
       const set = new Set(cur?.restrictedSeqs ?? []);
       if (body.restricted) set.add(seqN);
       else set.delete(seqN);
-      await ddb.send(
-        new PutCommand({ TableName: T_EMP, Item: { ...KEY, grants: cur?.grants ?? {}, restrictedSeqs: [...set], settings: cur?.settings ?? {}, updatedAt: new Date().toISOString() } }),
-      );
+      // Single-attribute UpdateCommand — see the /hr/access comment above.
+      await ddb.send(new UpdateCommand({
+        TableName: T_EMP, Key: KEY,
+        UpdateExpression: "SET restrictedSeqs = :r, updatedAt = :u",
+        ExpressionAttributeValues: { ":r": [...set], ":u": new Date().toISOString() },
+      }));
       await writeAudit(body.actor, "employee.visibility", String(seqN), { restricted: !!body.restricted });
       return resp(200, { restrictedSeqs: [...set] });
     }

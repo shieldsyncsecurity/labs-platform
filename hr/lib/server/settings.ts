@@ -24,13 +24,20 @@ const DEFAULT_RATE = 18;
 export async function getGstSettings(): Promise<GstSettings> {
   try {
     const { settings } = await hrFetch<{ settings?: { gstRegistered?: boolean; gstin?: string; gstRate?: number } }>("/hr/settings");
-    const gstin = (settings?.gstin ?? "").trim() || envGstin();
+    const registered = Boolean(settings?.gstRegistered);
+    // gstin is gated on `registered`, not just on being non-empty: InvoiceDoc
+    // decides "TAX INVOICE" vs "INVOICE" (and whether to print the GSTIN line)
+    // purely from this value being non-null. A leftover env SHIELDSYNC_GSTIN,
+    // or a stored GSTIN from before registration was turned back off, must
+    // never surface on an invoice while the owner's own Tax page says
+    // registration is pending -- that would be a legally misleading document.
+    const gstin = registered ? ((settings?.gstin ?? "").trim() || envGstin()) : null;
     return {
-      registered: Boolean(settings?.gstRegistered),
-      gstin: gstin || null,
+      registered,
+      gstin,
       defaultRate: typeof settings?.gstRate === "number" && settings.gstRate > 0 ? settings.gstRate : DEFAULT_RATE,
     };
   } catch {
-    return { registered: false, gstin: envGstin(), defaultRate: DEFAULT_RATE };
+    return { registered: false, gstin: null, defaultRate: DEFAULT_RATE };
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 /**
@@ -15,6 +15,18 @@ export function GstSettingsControl({ registered, gstin, defaultRate }: { registe
   const [rate, setRate] = useState(defaultRate);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  // Re-sync local state when the server props change underneath us — this
+  // component isn't remounted by router.refresh() (same key, same position),
+  // so without this a second admin's concurrent save (or this component's
+  // own post-save refresh landing new server data) would leave the toggle/
+  // GSTIN/rate showing stale values until a hard reload.
+  useEffect(() => {
+    setOn(registered);
+    setGstinVal(gstin ?? "");
+    setRate(defaultRate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registered, gstin, defaultRate]);
 
   const dirty = on !== registered || gstinVal.trim().toUpperCase() !== (gstin ?? "") || rate !== defaultRate;
 

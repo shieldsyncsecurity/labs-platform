@@ -55,10 +55,14 @@ export function InterviewScheduler({ candidate, teamsConnected }: { candidate: C
     setTurns((t) => [...t, { role: "user", content: message }]);
     setDraft("");
     try {
+      // A stalled model response with no timeout would leave `busy` stuck
+      // true forever — the whole scheduling chat becomes unusable until a
+      // page reload. 30s is generous for a chat reply but bounds the wait.
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message, history }),
+        signal: AbortSignal.timeout(30000),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -67,8 +71,8 @@ export function InterviewScheduler({ candidate, teamsConnected }: { candidate: C
         setTurns((t) => [...t, { role: "assistant", content: data.reply }]);
         setProposal(data.proposal ?? null);
       }
-    } catch {
-      setErr("Could not reach the server.");
+    } catch (err) {
+      setErr(err instanceof DOMException && err.name === "TimeoutError" ? "The assistant took too long to respond — try again." : "Could not reach the server.");
     }
     setBusy(false);
   }
