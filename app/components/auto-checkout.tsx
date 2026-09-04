@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CheckoutSheet } from "@/components/checkout-sheet";
 import { useAuth } from "@/lib/auth/context";
 
@@ -9,7 +9,8 @@ import { useAuth } from "@/lib/auth/context";
 // and immediately shows the checkout sheet so the user lands straight into payment.
 export function AutoCheckout() {
   const params = useSearchParams();
-  const { user } = useAuth();
+  const router = useRouter();
+  const { user, refreshEntitlements } = useAuth();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -30,7 +31,11 @@ export function AutoCheckout() {
       labTitle="Monthly — all AWS labs"
       plan="monthly"
       onClose={() => setOpen(false)}
-      onPaid={async () => { setOpen(false); }}
+      onPaid={async () => {
+        await refreshEntitlements();
+        setOpen(false);
+        router.push("/dashboard?paid=1");
+      }}
     />
   );
 }

@@ -35,6 +35,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ paid: false, status: st.status ?? "UNKNOWN" });
   }
   // Engine re-validates amount/currency vs the persisted order and grants idempotently.
-  const { granted } = await markOrderPaid(orderId, st.paymentId ?? "", st.amountMinor, st.currency);
+  const entitlementType = order.plan === "per-lab" ? "PAY_PER_LAB" : "SUBSCRIPTION";
+  const maxLaunches = order.plan === "per-lab" ? 3 : undefined;
+  const { granted } = await markOrderPaid(orderId, st.paymentId ?? "", st.amountMinor, st.currency, entitlementType, maxLaunches);
   return NextResponse.json({ paid: granted, status: "TXN_SUCCESS" });
 }

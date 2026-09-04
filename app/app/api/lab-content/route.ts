@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerUser } from "@/lib/auth/session";
 import { getLab } from "@/lib/labs";
 import { labInstructions } from "@/lib/lab-content";
-import { listEntitlements } from "@/lib/server/store";
+import { listEntitlements, entitlementTypeOf } from "@/lib/server/store";
 
 // Serves the GATED walkthrough (the part after the "<!-- ss:walkthrough -->" sentinel)
 // for PAID labs. The page only ever ships the public overview; the walkthrough — which
@@ -32,10 +32,25 @@ export async function GET(req: Request) {
     if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     const now = Date.now();
     const grants = await listEntitlements(user.id);
-    const entitled = grants.some(
+    const matched = grants.find(
       (e) => (e.labSlug === slug || e.labSlug === "*") && (!e.accessUntil || new Date(e.accessUntil).getTime() > now)
     );
-    if (!entitled) return NextResponse.json({ error: "not entitled" }, { status: 403 });
+    if (!matched) return NextResponse.json({ error: "not entitled" }, { status: 403 });
+
+    // PAY_PER_LAB: enforce the 7-day window and 3-launch cap (mirrors launch/route.ts).
+    // Without this check, a user whose per-lab grant has expired or exhausted its
+    // launch cap can still retrieve the paid walkthrough via this route.
+    const etype = entitlementTypeOf(matched);
+    if (etype === "PAY_PER_LAB") {
+      if (matched.windowExpiresAt && new Date(matched.windowExpiresAt).getTime() <= now) {
+        return NextResponse.json({ error: "WINDOW_EXPIRED" }, { status: 403 });
+      }
+      const used = matched.launchCount ?? 0;
+      const cap = matched.maxLaunches ?? 0;
+      if (cap > 0 && used >= cap) {
+        return NextResponse.json({ error: "LAUNCH_CAP_REACHED" }, { status: 403 });
+      }
+    }
   }
 
   return NextResponse.json({ walkthrough: walkthroughOf(labInstructions[slug] ?? "") });

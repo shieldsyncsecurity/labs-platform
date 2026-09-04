@@ -21,7 +21,9 @@ export async function POST(req: Request) {
     if (order) {
       const st = await transactionStatus(orderId);
       if (st.status === "TXN_SUCCESS") {
-        const { granted } = await markOrderPaid(orderId, st.paymentId ?? "", st.amountMinor, st.currency);
+        const entitlementType = order.plan === "per-lab" ? "PAY_PER_LAB" : "SUBSCRIPTION";
+        const maxLaunches = order.plan === "per-lab" ? 3 : undefined;
+        const { granted } = await markOrderPaid(orderId, st.paymentId ?? "", st.amountMinor, st.currency, entitlementType, maxLaunches);
         ok = granted;
       }
     }

@@ -12,11 +12,17 @@ import { engineFetch } from "./engine";
 // returns null and payment confirmation fails CLOSED — the safe direction.
 
 export async function createOrder(order: Order): Promise<void> {
+  let r: Response;
   try {
-    const r = await engineFetch("/orders", { method: "POST", userId: order.userId, body: order });
-    if (!r.ok) console.error(`createOrder: engine returned ${r.status}`);
-  } catch {
-    console.error("createOrder: engine unreachable");
+    r = await engineFetch("/orders", { method: "POST", userId: order.userId, body: order });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("createOrder: engine unreachable:", msg);
+    throw new Error("order_engine_unreachable");
+  }
+  if (!r.ok) {
+    console.error(`createOrder: engine returned ${r.status}`);
+    throw new Error(`order_engine_error_${r.status}`);
   }
 }
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { engineFetchAsUser } from "@/lib/server/engine";
+import { getServerUser } from "@/lib/auth/session";
 
 // Server-authoritative session status — the page polls this for the truth
 // (provisioning / ready / ending / done / error) instead of trusting local state.
@@ -7,6 +8,10 @@ import { engineFetchAsUser } from "@/lib/server/engine";
 // random sessionId guess can't be used to enumerate someone else's progress.
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const user = await getServerUser();
+  if (process.env.ENGINE_SHARED_SECRET && !user) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   if (!/^sess_[a-z0-9]{6,32}$/.test(id)) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
