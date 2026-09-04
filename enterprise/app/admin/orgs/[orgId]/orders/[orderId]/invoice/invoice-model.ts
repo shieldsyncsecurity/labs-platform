@@ -215,9 +215,14 @@ export function sellerMetaFromEnv(): SellerMeta {
   const state = (process.env.SHIELDSYNC_STATE ?? "").trim();
   return {
     legalName: SELLER_LEGAL_NAME,
-    gstin: gstin || "<GSTIN pending>",
+    // Placeholder stays visible on the invoice so the admin can't accidentally
+    // print a legally invalid tax invoice without noticing — checked at render.
+    gstin: gstin || "[SELLER GSTIN NOT SET — invoice invalid]",
     address: address || SELLER_ADDRESS_PLACEHOLDER,
-    state: state || "Uttar Pradesh",
+    // No silent default: if the state is unset the CGST/IGST split is wrong.
+    // An empty state triggers the IGST path (inter-state) which is at least
+    // visibly wrong on the invoice rather than silently filing the wrong tax.
+    state: state || "[STATE NOT CONFIGURED]",
   };
 }
 

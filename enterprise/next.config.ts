@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const isDev = process.env.NODE_ENV !== "production";
 
+const CF_ANALYTICS_SCRIPT = "https://static.cloudflareinsights.com";
+const CF_ANALYTICS_BEACON = "https://cloudflareinsights.com";
+
 /**
  * Baseline security headers for the enterprise platform.
  *
@@ -24,11 +27,11 @@ const csp = [
   "font-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
   "style-src-elem 'self' 'unsafe-inline'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-  "script-src-elem 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} ${CF_ANALYTICS_SCRIPT}`,
+  `script-src-elem 'self' 'unsafe-inline' ${CF_ANALYTICS_SCRIPT}`,
   // Azure Portal added so the candidate readiness-check can ping it for
   // reachability (Azure-first assessments). Same-origin otherwise.
-  `connect-src 'self' https://portal.azure.com${isDev ? " ws:" : ""}`,
+  `connect-src 'self' https://portal.azure.com ${CF_ANALYTICS_BEACON}${isDev ? " ws:" : ""}`,
   "frame-src 'self'",
   "upgrade-insecure-requests",
 ].join("; ");

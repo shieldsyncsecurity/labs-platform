@@ -91,6 +91,18 @@ export default async function InvoicePage({
   const comp = computeInvoice(order, org, seller.state);
   const invNo = invoiceNumber(order);
   const money = (m: number) => formatMoneyMinor(m, comp.currency);
+
+  if (comp.totalMinor === 0) {
+    return (
+      <div className="mx-auto max-w-3xl px-6 py-16 text-center">
+        <p className="text-sm font-semibold text-amber-700">Invoice total is ₹0</p>
+        <p className="mt-1 text-xs text-muted">
+          Set <code className="font-mono">amountMinor</code> on order{" "}
+          <code className="font-mono">{orderId}</code> before printing a tax invoice.
+        </p>
+      </div>
+    );
+  }
   const pdfHref = `/api/admin/invoice/pdf?orgId=${encodeURIComponent(orgId)}&orderId=${encodeURIComponent(orderId)}`;
 
   return (
